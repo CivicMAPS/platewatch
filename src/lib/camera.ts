@@ -51,7 +51,9 @@ export class CameraController {
           width: { ideal: 2560 },
           height: { ideal: 1440 },
           frameRate: { ideal: 30 },
-        },
+          // Chromium reports the zoom capability only when zoom is requested here.
+          zoom: true,
+        } as MediaTrackConstraints,
       });
     } catch (e) {
       const name = (e as DOMException).name;
@@ -75,6 +77,12 @@ export class CameraController {
         ?.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] })
         .catch(() => undefined);
     }
+    // Focus and expose on the plate guide (screen centre) so the lens does not hunt onto
+    // passing objects. Applied separately: a camera without points of interest keeps the
+    // continuous focus set above.
+    await this.track
+      ?.applyConstraints({ advanced: [{ pointsOfInterest: [{ x: 0.5, y: 0.5 }] } as MediaTrackConstraintSet] })
+      .catch(() => undefined);
     return {
       torch: !!caps.torch,
       zoom: caps.zoom && caps.zoom.max > caps.zoom.min ? caps.zoom : null,

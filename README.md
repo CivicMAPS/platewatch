@@ -22,6 +22,7 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Allow list | Plates (+ label, permit no., optional validity dates), bulk paste import. Exact matches are ignored on linked timed lists — no alert, no record. |
 | Timed list | Street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
+| Camera zoom and focus | Scan, walking-patrol and vehicle-patrol cameras: tap 1×, 1.75×, 3.5× or 5× (presets beyond the lens range are hidden); long-press any preset for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
 ## Scan workflow (as implemented)

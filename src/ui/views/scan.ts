@@ -25,6 +25,7 @@ import { onOcrStatus, recognisePlate, warmUpOcr, type OcrStatus, type PlateOcrRe
 import { comparePlates, isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
 import { restrictionInForce } from '../../lib/restriction';
 import { formatClock, formatDateTime, formatDuration, formatMinutes } from '../../lib/time';
+import { clampZoom, formatZoom, LONG_PRESS_MS, presetsFor, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -72,6 +73,9 @@ export function scanView(params: Record<string, string>, app: App): View {
   let phase: Phase = 'starting';
   let cameraMessage = '';
   let caps: CameraCapabilities = { torch: false, zoom: null };
+  let zoomSliderOpen = false;
+  let pressTimer: number | undefined;
+  let longPressed = false;
   let geoState: GeoState = { status: 'idle' };
   let pending: PendingCapture | null = null;
   let cropUrl = '';
@@ -102,6 +106,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         await camera.stop();
         return;
       }
+      if (caps.zoom) await camera.setZoom(clampZoom(settings().cameraZoom, caps.zoom));
       phase = 'live';
     } catch (e) {
       phase = 'no_camera';
@@ -154,13 +159,14 @@ export function scanView(params: Record<string, string>, app: App): View {
           payment:selected.type === 'timed' ? structuredClone(selected.payment) : undefined}});
         if (keys.has(s.plate) && settings().sound) void patrol.alert();
       }));
+      listeners.push(await patrol.addListener('zoom', ({ratio}) => void app.updateSettings({cameraZoom: ratio})));
       listeners.push(await patrol.addListener('finished',async () => {
         nativeActive=false;
         await Promise.all(listeners.splice(0).map(h => h.remove()));
         if (!disposed) await reviewNext();
       }));
       await camera.stop();
-      await patrol.start({mode});
+      await patrol.start({mode, zoom: settings().cameraZoom, presets: [...ZOOM_PRESETS]});
     } catch(e) {
       nativeActive=false;
       await Promise.all(listeners.splice(0).map(h => h.remove()));
@@ -488,15 +494,57 @@ export function scanView(params: Record<string, string>, app: App): View {
     ${geoBadge()}
   </div>`;
 
+  /* Zoom: tap a preset to jump to it; long-press any preset to open the slider. */
+  const chooseZoom = async (z: number, persist: boolean) => {
+    if (!caps.zoom) return;
+    await camera.setZoom(clampZoom(z, caps.zoom));
+    if (persist) await app.updateSettings({ cameraZoom: camera.zoom });
+    else app.update();
+  };
+
+  const zoomControls = (): TemplateResult | typeof nothing => {
+    if (!caps.zoom) return nothing;
+    const range = sliderRange(caps.zoom);
+    const startPress = () => {
+      longPressed = false;
+      clearTimeout(pressTimer);
+      pressTimer = window.setTimeout(() => {
+        longPressed = true;
+        zoomSliderOpen = !zoomSliderOpen;
+        app.update();
+      }, LONG_PRESS_MS);
+    };
+    const endPress = () => clearTimeout(pressTimer);
+    return html`<div class="mb-4" data-testid="zoom-controls">
+      ${zoomSliderOpen
+        ? html`<label class="mb-3 flex items-center gap-3 text-sm text-white">
+            <span class="w-12 font-plate tabular-nums">${formatZoom(camera.zoom)}</span>
+            <input type="range" class="flex-1 accent-brand-500" aria-label="Zoom" data-testid="zoom-slider"
+              min=${range.min} max=${range.max} step=${range.step} .value=${String(camera.zoom)}
+              @input=${(e: Event) => void chooseZoom(Number((e.target as HTMLInputElement).value), false)}
+              @change=${(e: Event) => void chooseZoom(Number((e.target as HTMLInputElement).value), true)} />
+          </label>`
+        : nothing}
+      <div class="flex justify-center gap-2" role="group" aria-label="Zoom presets. Long-press for a custom zoom.">
+        ${presetsFor(caps.zoom).map(
+          (z) => html`<button type="button" data-testid="zoom-preset"
+            class="min-h-11 min-w-14 rounded-full border px-3 text-sm font-semibold tabular-nums ${Math.abs(camera.zoom - z) < 0.01 ? 'border-brand-300 bg-brand-500 text-white' : 'border-white/40 bg-black/40 text-white'}"
+            aria-pressed=${Math.abs(camera.zoom - z) < 0.01 ? 'true' : 'false'}
+            @pointerdown=${startPress} @pointerup=${endPress} @pointerleave=${endPress} @pointercancel=${endPress}
+            @contextmenu=${(e: Event) => e.preventDefault()}
+            @click=${() => {
+              if (longPressed) { longPressed = false; return; }
+              zoomSliderOpen = false;
+              void chooseZoom(z, true);
+            }}>${formatZoom(z)}</button>`,
+        )}
+      </div>
+    </div>`;
+  };
+
   const liveControls = (): TemplateResult => html`<div class="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 to-transparent px-4 pt-10 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
     ${hasPatrol() ? html`<div class="mb-3 flex gap-2"><button class="btn-secondary" @click=${() => beginPatrol('walking')}>Walking patrol</button><button class="btn-secondary" @click=${() => beginPatrol('vehicle')}>Vehicle patrol</button></div>` : nothing}
-    ${caps.zoom
-      ? html`<label class="mb-4 flex items-center gap-3 text-sm text-white">
-          Zoom
-          <input type="range" class="flex-1 accent-brand-500" min=${caps.zoom.min} max=${Math.min(caps.zoom.max, 10)} step=${caps.zoom.step || 0.1} .value=${String(camera.zoom)}
-            @input=${(e: Event) => void camera.setZoom(Number((e.target as HTMLInputElement).value))} />
-        </label>`
-      : nothing}
+    ${zoomControls()}
     <div class="flex items-center justify-between">
       <button type="button" class="btn-ghost min-h-14 w-16 flex-col gap-0 px-0 text-xs text-white" @click=${() => void capture(true)} ?disabled=${phase !== 'live'}>
         ${icon('keyboard', 'h-6 w-6')} Manual
@@ -774,6 +822,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       if (nativeActive) await patrol.stop();
       await Promise.all(queue.splice(0).map(({s}) => patrol.release({path:s.path})));
       clearInterval(clock);
+      clearTimeout(pressTimer);
       unsubGeo?.();
       unsubOcr?.();
       geo.stop();

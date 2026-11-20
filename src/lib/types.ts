@@ -241,6 +241,8 @@ export interface Settings {
   accuracyWarnMetres: number;
   vibrate: boolean;
   sound: boolean;
+  /** Last camera zoom the officer chose; reused by the scan and patrol cameras. */
+  cameraZoom: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -249,4 +251,5 @@ export const DEFAULT_SETTINGS: Settings = {
   accuracyWarnMetres: 25,
   vibrate: true,
   sound: true,
+  cameraZoom: 1,
 };

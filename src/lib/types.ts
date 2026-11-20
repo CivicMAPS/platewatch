@@ -175,7 +175,8 @@ export type ScanOutcome =
   | 'recorded' // first sighting in segment — allowance clock started
   | 'within_allowance' // re-sighting, still inside allowance
   | 'overstay' // re-sighting, allowance (+grace) exceeded
-  | 'hot_sighting'; // hot list match evidence
+  | 'hot_sighting' // hot list match evidence
+  | 'permit_valid'; // on a linked allow list, valid at capture — sighting recorded, no allowance clock
 
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];

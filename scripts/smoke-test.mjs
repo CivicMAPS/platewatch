@@ -167,9 +167,12 @@ async function main() {
   await type('#allow-plate', 'RES001');
   await type('#allow-label', '12 Smith St');
   await click('Add to list');
+  // A permit typed but not yet added must still be saved with the list.
+  await type('#allow-plate', 'RES002');
+  await type('#allow-label', '14 Smith St');
   await click('Save list');
-  await waitText('Allowed plates (1)');
-  log('allow list saved');
+  await waitText('Allowed plates (2)');
+  log('allow list saved, including a permit typed but not yet added');
 
   // Hot list
   await page.goto(`${ORIGIN}/#/new/hot`);
@@ -309,15 +312,24 @@ async function main() {
   log('hot-list match raises officer-safety alert (risk, make, type, colour)');
   await shot('hot-alert');
 
-  // Permit holder on linked allow list is ignored.
-  await page.click('[data-testid=next-scan]');
-  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
-  await page.click('[data-testid=shutter]');
-  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
-  await type('[data-testid=plate-input]', 'RES001');
-  await page.click('[data-testid=check]');
-  await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
-  log('linked allow-list plate ignored (no alert, no record)');
+  // Permit holder on a linked allow list: recorded, green "Permit valid", and still valid when
+  // scanned again (no allowance clock, so never an overstay). RES002 was saved without "Add".
+  for (const plate of ['RES001', 'RES001', 'RES002']) {
+    await page.click('[data-testid=next-scan]');
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+    await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
+    const permitText = await page.$eval('[data-testid=result-exempt]', (el) => el.textContent);
+    const permitClass = await page.$eval('[data-testid=result-exempt]', (el) => el.className);
+    if (!/Permit valid/.test(permitText) || !/Sighting recorded/.test(permitText)) throw new Error(`permit result for ${plate} was "${permitText}"`);
+    if (!/border-emerald-500/.test(permitClass)) throw new Error('permit result is not green');
+    await waitText('Saved · SHA-256');
+  }
+  await shot('permit-valid');
+  log('linked permit plate: green "Permit valid", sighting recorded, still valid on re-scan (no overstay)');
 
   // Evidence record: EXIF + integrity.
   await page.goto(timedUrl);

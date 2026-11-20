@@ -3,7 +3,9 @@
  * current state, decide what happens. No I/O — fully unit tested.
  *
  * Timed list workflow (per the specification):
- *   1. Plate on a linked allow list (valid today)         → exempt, no alert, no record
+ *   1. Plate on a linked allow list (valid that day)      → permit valid: no alert and no
+ *      allowance clock, but the sighting is recorded as evidence. Checked before any
+ *      running clock, so a vehicle with a valid permit is never an overstay.
  *   2. No restriction in force right now                  → not in force, no record
  *   3. Active observation (same restriction period) found → re-sighting: show scan 1 vs
  *      scan 2 with time elapsed; OVERSTAY when elapsed ≥ allowance + grace

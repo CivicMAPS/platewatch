@@ -14,9 +14,24 @@ function observe(plate: string, startedAt: number, patch: Partial<Observation> =
 const base = { list, hotLists: [], allowLists: [allow(['RES001'])], observations: [] as Observation[] };
 
 describe('timed list workflow', () => {
-  it('exempts plates on a linked allow list (no alert, no record)', () => {
+  it('a plate on a linked allow list has a valid permit (no allowance clock)', () => {
     const r = evaluate({ ...base, at: MON_0900, plate: 'res 001' });
     expect(r.decision.kind).toBe('timed_exempt');
+  });
+
+  it('a valid permit wins over an allowance clock already running for the plate (never an overstay)', () => {
+    // E.g. the vehicle was recorded before its permit was added to the linked allow list.
+    const running = observe('RES001', MON_0900);
+    const r = evaluate({ ...base, observations: [running], at: at(2026, 11, 16, 12, 0), plate: 'RES001' });
+    expect(r.decision.kind).toBe('timed_exempt');
+  });
+
+  it('a permit valid only from today, or only until today, is valid all day', () => {
+    const a = allow(['RES001']);
+    a.entries[0]!.validFrom = '2026-11-16';
+    a.entries[0]!.validTo = '2026-11-16';
+    for (const t of [at(2026, 11, 16, 0, 1), MON_0900, at(2026, 11, 16, 23, 59)])
+      expect(evaluate({ ...base, allowLists: [a], at: t, plate: 'RES001' }).decision.kind).toBe('timed_exempt');
   });
 
   it('ignores allow lists that are not linked', () => {

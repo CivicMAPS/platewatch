@@ -469,7 +469,11 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       const d = res.decision;
       if (l.type === 'timed') {
-        if (d.kind === 'timed_new') saved = await recordNew(plate, l, at, d.instance);
+        if (d.kind === 'timed_exempt') {
+          // Evidence that the permit vehicle was seen here; no allowance clock is started.
+          saved = await makeRecord(plate, l.id, 'permit_valid', null);
+          await saveScan(saved);
+        } else if (d.kind === 'timed_new') saved = await recordNew(plate, l, at, d.instance);
         else if (d.kind === 'timed_resighting') ({ saved, comparison } = await recordResighting(plate, d));
         else if (d.kind === 'timed_possible') {
           for (const o of d.candidates) {
@@ -784,8 +788,11 @@ export function scanView(params: Record<string, string>, app: App): View {
   const decisionPanel = (r: ResultState): TemplateResult => {
     const d = r.decision;
     switch (d.kind) {
-      case 'timed_exempt':
-        return statusCard('ok', 'Exempt — ignored', html`On <strong>${d.hit.list.name}</strong>${d.hit.entry.label ? ` (${d.hit.entry.label})` : ''}${d.hit.entry.permitNo ? ` · permit #${d.hit.entry.permitNo}` : ''}. No record created.`, 'result-exempt');
+      case 'timed_exempt': {
+        const e = d.hit.entry;
+        const validity = e.validFrom || e.validTo ? ` · valid ${e.validFrom || '…'} → ${e.validTo || '…'}` : '';
+        return statusCard('ok', 'Permit valid', html`On <strong>${d.hit.list.name}</strong>${e.label ? ` (${e.label})` : ''}${e.permitNo ? ` · permit #${e.permitNo}` : ''}${validity}. Sighting recorded; no time limit applies.`, 'result-exempt');
+      }
       case 'timed_not_in_force':
         return statusCard('muted', 'Restriction not in force', d.next ? `Next restriction ${d.next.restriction.code} from ${formatDateTime(d.next.start)}. No record created.` : 'No upcoming restriction found. No record created.', 'result-not-in-force');
       case 'timed_new': {

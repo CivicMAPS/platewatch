@@ -147,6 +147,16 @@ export function listFormView(params: Record<string, string>, app: App): View {
 
   const save = async () => {
     if (!list || saving) return;
+    // A permit typed but not yet added would otherwise be discarded silently, and the vehicle
+    // would then be enforced as if it had no permit.
+    if (list.type === 'allow' && allowDraft.plate.trim()) {
+      addAllowEntry();
+      if (errors.allowPlate) {
+        app.toast('Fix the permit being added, or clear its plate, before saving.', 'error');
+        document.getElementById('allow-plate')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+    }
     const cleaned: PlateList = { ...list, name: list.name.trim(), notes: list.notes.trim() } as PlateList;
     if (cleaned.type === 'timed') {
       cleaned.segment = {

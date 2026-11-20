@@ -30,6 +30,7 @@ const OUTCOME_LABEL: Record<ScanRecord['outcome'], { text: string; cls: string }
   within_allowance: { text: 'Within allowance', cls: 'border-amber-500/50 bg-amber-500/10 text-amber-200' },
   overstay: { text: 'Overstay', cls: 'border-red-500/60 bg-red-500/15 text-red-200' },
   hot_sighting: { text: 'Hot-list sighting', cls: 'border-red-500/60 bg-red-500/15 text-red-200' },
+  permit_valid: { text: 'Permit valid', cls: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' },
 };
 
 export function outcomeChip(o: ScanRecord['outcome']): TemplateResult {

@@ -30,6 +30,16 @@ export function presetsFor(range: ZoomRange): number[] {
   return ZOOM_PRESETS.filter((z) => z >= min - 1e-6 && z <= max + 1e-6);
 }
 
+/**
+ * Single zoom button: each tap moves to the next preset above the current zoom, wrapping to
+ * the lowest reachable preset. Mirrored in PatrolCamera.java `nextPreset`.
+ */
+export function nextPreset(current: number, range: ZoomRange): number {
+  const reachable = presetsFor(range);
+  if (!reachable.length) return sliderRange(range).min;
+  return reachable.find((z) => z > current + 0.01) ?? reachable[0]!;
+}
+
 export function clampZoom(zoom: number, range: ZoomRange): number {
   const { min, max } = sliderRange(range);
   if (!Number.isFinite(zoom)) return min;

@@ -1,6 +1,19 @@
 # WS2 — Field qualification, battery and camera hardening
 
-Status: planned. Prepared 20 November 2026 by Claude Code (agent). Base: `main` @ `b68d73f` (PR #2 merged).
+Status: in progress. Prepared 20 November 2026 by Claude Code (agent). Base: `main` @ `b68d73f` (PR #2 merged).
+
+## First field test of the PR #2 build (Galaxy S26 Ultra), and what changed
+
+| Finding | Root cause | Change |
+|---|---|---|
+| No way to exit walking or vehicle patrol; no zoom there | Capacitor 8 draws edge to edge and only pads the web page (`viewport-fit=cover`). The native patrol overlay had no inset handling, so its bottom controls sat under the navigation bar. | Patrol screen pads for system bars and cutouts; Exit button at the top; Android Back exits. |
+| Zoom took four buttons | Design | One zoom button: tap steps 1× → 1.75× → 3.5× → 5× → 1×; long-press opens the slider. All cameras. |
+| No manual capture in patrol; Multi capture "not present" | Patrol was continuous-only, with no feedback until Finish (which was hidden) | Single/Multi switch and a shutter on the patrol screen; every capture flashes the screen, vibrates and counts. |
+| Plate text read as 0–2 characters | Default camera used Tesseract, a document engine, on the whole guide crop (bumper, frame, slogan) | Android app reads with ML Kit and ranks the lines for the plate; Tesseract is the browser fallback. |
+| Diagnostics needed during development | — | G1 implemented, on by default. |
+
+Still to confirm on the device: the patrol screen's controls are now visible and reachable, the camera
+reports a usable zoom range (logged as `patrol_camera`), and ML Kit's readings (`capture` vs `record` events).
 
 PR #2 fixed the location stamped at capture and added quick zoom with plate-area focus.
 This workstream turns the Galaxy S26 Ultra field test into measured evidence, then makes the battery
@@ -14,7 +27,7 @@ justifies them.
 
 | Goal | What | Why | Gate |
 |---|---|---|---|
-| G1 | **Field diagnostics (opt-in).** Settings toggle that records per-session battery level, thermal status, GPS fix accuracy and age at each capture, "location unavailable" count, zoom used, OCR reads/sightings per minute and patrol mode. Exported as a JSON/CSV file from Settings. On-device only, nothing uploaded. | The assessment's pass thresholds need numbers. Today a field test can only report impressions. | None |
+| G1 ✅ | **Field diagnostics (on by default in development).** Settings toggle that records per-session battery level, thermal status, GPS fix accuracy and age at each capture, "location unavailable" count, zoom used, OCR reads/sightings per minute and patrol mode. Exported as a JSON file from Settings. On-device only, nothing uploaded. | The assessment's pass thresholds need numbers. Today a field test can only report impressions. | None |
 | G2 | **Patrol OCR off the main thread.** Move ML Kit analysis and frame encoding to a background executor; make sighting state thread-safe. | Main-thread analysis causes UI jank under load (zoom buttons and slider included). No behaviour change. | None |
 | G3 | **Release camera and GPS when backgrounded.** Stop the web camera stream and GNSS watch on `visibilitychange` (hidden) and restart them on return; confirm the patrol camera does the same. | Battery: the app must not keep the camera or GNSS running with the screen off. | None |
 | G4 | **Thermal- and mode-aware OCR rate.** Cap patrol analysis rate (vehicle ~10 fps, walking ~6 fps) and step it down at thermal status MODERATE and above. | Largest continuous power draw; throttling otherwise slows recognition late in a shift. | **Gated:** G1 data shows detection at 0/10/20 km/h unchanged with the cap |

@@ -243,6 +243,8 @@ export interface Settings {
   sound: boolean;
   /** Last camera zoom the officer chose; reused by the scan and patrol cameras. */
   cameraZoom: number;
+  /** Record field diagnostics on this device (see src/lib/diagnostics.ts). */
+  diagnostics: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -252,4 +254,6 @@ export const DEFAULT_SETTINGS: Settings = {
   vibrate: true,
   sound: true,
   cameraZoom: 1,
+  // On during the development field-test stage; turn the default off before production.
+  diagnostics: true,
 };

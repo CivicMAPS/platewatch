@@ -212,20 +212,30 @@ async function main() {
   await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 }).catch(async (e) => { await shot('debug-camera'); console.log(await page.evaluate(() => document.body.innerText)); console.log(problems.join('\n')); throw e; });
   await page.waitForFunction(() => document.body.innerText.includes('±'), { timeout: 15000 });
   await sleep(800);
-  const presets = await page.$$eval('[data-testid=zoom-preset]', (b) => b.map((x) => x.textContent.trim()));
-  if (presets.join(' ') !== '1× 1.75× 3.5× 5×') throw new Error(`zoom presets were "${presets.join(' ')}"`);
-  const zoomButtons = await page.$$('[data-testid=zoom-preset]');
-  await zoomButtons[2].click();
-  await page.waitForFunction(() => window.__zoom === 3.5, { timeout: 5000 });
-  // Long-press opens the slider and must not also choose the pressed preset.
-  const box = await zoomButtons[0].boundingBox();
+  if (!(await page.$('[data-testid=diag-indicator]'))) throw new Error('diagnostics indicator missing on the camera');
+  // One zoom button: each tap steps 1× → 1.75× → 3.5× → 5× → 1×.
+  const zoomLabel = () => page.$eval('[data-testid=zoom-button]', (b) => b.textContent.trim());
+  const steps = [await zoomLabel()];
+  for (const expected of [1.75, 3.5, 5, 1, 1.75, 3.5]) {
+    await page.click('[data-testid=zoom-button]');
+    // The label updates once the camera has applied the zoom.
+    await page.waitForFunction(
+      (z) => window.__zoom === z && document.querySelector('[data-testid=zoom-button]')?.textContent.trim() === `${z}×`,
+      { timeout: 5000 },
+      expected,
+    );
+    steps.push(await zoomLabel());
+  }
+  if (steps.join(' ') !== '1× 1.75× 3.5× 5× 1× 1.75× 3.5×') throw new Error(`zoom steps were "${steps.join(' ')}"`);
+  // Long-press opens the slider and must not also step the zoom.
+  const box = await (await page.$('[data-testid=zoom-button]')).boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await sleep(700);
   await page.mouse.up();
   await page.waitForSelector('[data-testid=zoom-slider]', { visible: true, timeout: 5000 });
   if ((await page.evaluate(() => window.__zoom)) !== 3.5) throw new Error('long-press changed the zoom');
-  log('zoom presets 1×/1.75×/3.5×/5× apply, long-press opens the zoom slider');
+  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; ● DIAG shown');
   await shot('camera');
   await page.click('[data-testid=shutter]');
   await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 90000 });
@@ -325,6 +335,28 @@ async function main() {
   await page.goto(`${ORIGIN}/#/text`);
   await waitText('Convert image text into editable text');
   log('text reader available');
+
+  // Field diagnostics recorded the camera, captures and confirmed records, and can be exported.
+  await page.goto(`${ORIGIN}/#/settings`);
+  await waitText('Field diagnostics');
+  const diag = await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('platewatch-diagnostics');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const all = open.result.transaction('events').objectStore('events').getAll();
+          all.onsuccess = () => resolve(all.result.map((e) => e.kind));
+          all.onerror = () => reject(all.error);
+        };
+      }),
+  );
+  for (const kind of ['camera_start', 'capture', 'record', 'sample'])
+    if (!diag.includes(kind)) throw new Error(`diagnostics missing "${kind}" (have ${[...new Set(diag)].join(', ')})`);
+  const exportButton = await page.$$eval('[data-testid=diagnostics] button', (bs) => bs.map((b) => [b.textContent.trim(), b.disabled]));
+  if (!exportButton.some(([t, disabled]) => t.includes('Export diagnostics') && !disabled)) throw new Error('diagnostics export unavailable');
+  log(`field diagnostics recorded (${diag.length} events: ${[...new Set(diag)].join(', ')}) and exportable`);
+  await shot('settings-diagnostics');
 
   const cspIssues = problems.filter((p) => /Content Security Policy|CSP violation|Refused to/i.test(p));
   const otherErrors = problems.filter((p) => !cspIssues.includes(p));

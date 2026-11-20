@@ -25,7 +25,10 @@ import { onOcrStatus, recognisePlate, warmUpOcr, type OcrStatus, type PlateOcrRe
 import { comparePlates, isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
 import { restrictionInForce } from '../../lib/restriction';
 import { formatClock, formatDateTime, formatDuration, formatMinutes } from '../../lib/time';
-import { clampZoom, formatZoom, LONG_PRESS_MS, presetsFor, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
+import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
+import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
+import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
+import type { GeoFix } from '../../lib/types';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -93,6 +96,36 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   const settings = () => app.settings;
 
+  /* ─────────────────────────── Diagnostics ─────────────────────────── */
+
+  const fixInfo = (fix: GeoFix | null, at: number) =>
+    fix ? { accuracy: Math.round(fix.accuracy * 10) / 10, ageMs: at - fix.timestamp, speed: fix.speed } : null;
+
+  const deviceStatus = async (): Promise<Record<string, unknown>> => {
+    try {
+      if (hasPatrol()) return { ...(await patrol.deviceStatus()) };
+      const nav = navigator as Navigator & { getBattery?: () => Promise<{ level: number; charging: boolean }> };
+      const b = await nav.getBattery?.();
+      return b ? { battery: Math.round(b.level * 100), charging: b.charging } : {};
+    } catch {
+      return {};
+    }
+  };
+
+  /** Every minute while scanning: battery, heat and the current GPS fix. */
+  let sampler: number | undefined;
+  const sample = async () => {
+    if (!diagnosticsEnabled()) return;
+    const fix = geoState.status === 'fix' ? geoState.fix : null;
+    await logDiag('sample', {
+      surface: nativeActive ? 'patrol' : 'default',
+      phase,
+      geo: geoState.status,
+      fix: fixInfo(fix, Date.now()),
+      ...(await deviceStatus()),
+    });
+  };
+
   /* ───────────────────────────── Camera ───────────────────────────── */
 
   const startCamera = async () => {
@@ -108,6 +141,14 @@ export function scanView(params: Record<string, string>, app: App): View {
       }
       if (caps.zoom) await camera.setZoom(clampZoom(settings().cameraZoom, caps.zoom));
       phase = 'live';
+      void logDiag('camera_start', {
+        surface: 'default',
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        zoomRange: caps.zoom,
+        zoom: camera.zoom,
+        torch: caps.torch,
+      });
     } catch (e) {
       phase = 'no_camera';
       cameraMessage =
@@ -136,7 +177,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       pending = {frame,crop,meta:item.meta};
       cropUrl = crop.toDataURL('image/jpeg');
       plateInput = item.s.plate;
-      ocr = {plate:plateInput,candidates:[plateInput],confidence:0,rawText:plateInput,durationMs:0};
+      ocr = {plate:plateInput,candidates:plateInput ? [plateInput] : [],confidence:0,rawText:plateInput,durationMs:0,engine:'patrol'};
       phase = 'confirm';
       queue.shift();
       await patrol.release({path:item.s.path});
@@ -154,19 +195,24 @@ export function scanView(params: Record<string, string>, app: App): View {
       listeners.push(await patrol.addListener('sighting', s => {
         // Best fix produced at or before the frame; a later fix must not displace older valid ones.
         const location = geo.bestRecent(s.at, s.at);
+        void logDiag('sighting', { mode, manual: !!s.manual, captureMode: s.captureMode, plate: s.plate, zoom: s.zoom, fix: fixInfo(location, s.at) });
         queue.push({s,meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
           locationAgeMs:location ? s.at-location.timestamp:null,userAgent:navigator.userAgent,
           payment:selected.type === 'timed' ? structuredClone(selected.payment) : undefined}});
         if (keys.has(s.plate) && settings().sound) void patrol.alert();
       }));
       listeners.push(await patrol.addListener('zoom', ({ratio}) => void app.updateSettings({cameraZoom: ratio})));
+      listeners.push(await patrol.addListener('stats', stats => void logDiag('patrol_stats', {...stats})));
+      listeners.push(await patrol.addListener('camera', info => void logDiag('patrol_camera', {mode, ...info})));
       listeners.push(await patrol.addListener('finished',async () => {
         nativeActive=false;
+        void logDiag('patrol_end', { mode, queued: queue.length });
         await Promise.all(listeners.splice(0).map(h => h.remove()));
         if (!disposed) await reviewNext();
       }));
       await camera.stop();
-      await patrol.start({mode, zoom: settings().cameraZoom, presets: [...ZOOM_PRESETS]});
+      void logDiag('patrol_start', { mode, captureMode: 'multi', zoom: settings().cameraZoom });
+      await patrol.start({mode, captureMode: 'multi', zoom: settings().cameraZoom, presets: [...ZOOM_PRESETS], diagnostics: settings().diagnostics});
     } catch(e) {
       nativeActive=false;
       await Promise.all(listeners.splice(0).map(h => h.remove()));
@@ -195,9 +241,22 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /* ───────────────────────────── Capture ───────────────────────────── */
 
-  const runOcr = async (crop: HTMLCanvasElement, mode: 'line' | 'sparse') => {
+  /**
+   * Android app: ML Kit reads `wide` (the guide plus a margin, so a plate not quite inside the box
+   * is still read). Browser, or if ML Kit fails: Tesseract on the guide crop.
+   */
+  const runOcr = async (crop: HTMLCanvasElement, mode: 'line' | 'sparse', wide?: HTMLCanvasElement) => {
     try {
-      ocr = await recognisePlate(crop, mode);
+      if (hasNativeOcr()) {
+        try {
+          ocr = await recognisePlateNative(wide ?? crop);
+        } catch (e) {
+          void logDiag('ocr_fallback', { error: (e as Error).message });
+          ocr = await recognisePlate(crop, mode);
+        }
+      } else {
+        ocr = await recognisePlate(crop, mode);
+      }
       plateInput = ocr.plate;
     } catch (e) {
       console.error(e);
@@ -220,21 +279,33 @@ export function scanView(params: Record<string, string>, app: App): View {
       const metaPromise = captureMeta();
       const vr = video.getBoundingClientRect();
       const gr = guide.getBoundingClientRect();
-      const roi = padRect(
-        mapCoverRect(
-          { x: gr.left - vr.left, y: gr.top - vr.top, width: gr.width, height: gr.height },
-          { width: vr.width, height: vr.height },
-          { width: frame.width, height: frame.height },
-        ),
-        0.06,
-        frame,
+      const guideRect = mapCoverRect(
+        { x: gr.left - vr.left, y: gr.top - vr.top, width: gr.width, height: gr.height },
+        { width: vr.width, height: vr.height },
+        { width: frame.width, height: frame.height },
       );
-      const crop = cropCanvas(frame, roi);
+      const crop = cropCanvas(frame, padRect(guideRect, 0.06, frame));
+      const wide = hasNativeOcr() ? cropCanvas(frame, padRect(guideRect, 0.35, frame)) : undefined;
       cropUrl = crop.toDataURL('image/jpeg', 0.85);
       const meta = await metaPromise;
       if (list?.type === 'timed' && list.payment) meta.payment = structuredClone(list.payment);
       pending = { frame, crop, meta };
-      if (!manual) await runOcr(crop, 'line');
+      if (!manual) await runOcr(crop, 'line', wide);
+      void logDiag('capture', {
+        surface: 'default',
+        manual,
+        engine: manual ? null : (ocr?.engine ?? null),
+        ocrMs: ocr?.durationMs ?? null,
+        plate: ocr?.plate ?? '',
+        candidates: ocr?.candidates ?? [],
+        rawText: ocr?.rawText ?? '',
+        zoom: camera.zoom,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        cropWidth: crop.width,
+        cropHeight: crop.height,
+        fix: fixInfo(meta.location, meta.capturedAt),
+      });
       phase = 'confirm';
     } catch (e) {
       app.toast((e as Error).message || 'Capture failed.', 'error');
@@ -257,6 +328,16 @@ export function scanView(params: Record<string, string>, app: App): View {
       frameUrl = urls.get(file);
       cropUrl = '';
       await runOcr(frame, 'sparse');
+      void logDiag('capture', {
+        surface: 'photo',
+        engine: ocr?.engine ?? null,
+        ocrMs: ocr?.durationMs ?? null,
+        plate: ocr?.plate ?? '',
+        rawText: ocr?.rawText ?? '',
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        fix: fixInfo(meta.location, meta.capturedAt),
+      });
       phase = 'confirm';
     } catch (e) {
       app.toast(`Could not read image: ${(e as Error).message}`, 'error');
@@ -282,6 +363,9 @@ export function scanView(params: Record<string, string>, app: App): View {
   ): Promise<ScanRecord> => {
     const ev = await ensureEvidence(plate);
     const p = pending!;
+    const corrected = !!ocr && normalisePlate(ocr.plate) !== plate;
+    // OCR accuracy in the field: what was read against what the officer confirmed.
+    void logDiag('record', { engine: ocr?.engine ?? null, ocrPlate: ocr?.plate ?? '', plate, corrected, outcome });
     return {
       id: uid(),
       listId: targetListId,
@@ -289,8 +373,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       plate,
       key: plateKey(plate),
       ocrText: ocr?.rawText ?? '',
-      ocrConfidence: ocr?.durationMs ? ocr.confidence : null,
-      corrected: !!ocr && normalisePlate(ocr.plate) !== plate,
+      ocrConfidence: ocr?.durationMs && ocr.engine === 'tesseract' ? ocr.confidence : null,
+      corrected,
       outcome,
       meta: p.meta,
       image: ev.image,
@@ -490,6 +574,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       <p class="truncate font-bold text-white">${list?.name ?? ''}</p>
       <p class="truncate text-xs text-slate-300">${list?.type === 'timed' ? segmentLabel(list) : list?.type === 'hot' ? 'Hot list scan' : 'Allow list check'}</p>
     </div>
+    ${settings().diagnostics ? html`<span class="text-xs font-bold text-red-300" data-testid="diag-indicator" title="Field diagnostics recording">● DIAG</span>` : nothing}
     <span class="font-plate text-sm text-white tabular-nums">${formatClock(Date.now())}</span>
     ${geoBadge()}
   </div>`;
@@ -525,19 +610,17 @@ export function scanView(params: Record<string, string>, app: App): View {
               @change=${(e: Event) => void chooseZoom(Number((e.target as HTMLInputElement).value), true)} />
           </label>`
         : nothing}
-      <div class="flex justify-center gap-2" role="group" aria-label="Zoom presets. Long-press for a custom zoom.">
-        ${presetsFor(caps.zoom).map(
-          (z) => html`<button type="button" data-testid="zoom-preset"
-            class="min-h-11 min-w-14 rounded-full border px-3 text-sm font-semibold tabular-nums ${Math.abs(camera.zoom - z) < 0.01 ? 'border-brand-300 bg-brand-500 text-white' : 'border-white/40 bg-black/40 text-white'}"
-            aria-pressed=${Math.abs(camera.zoom - z) < 0.01 ? 'true' : 'false'}
-            @pointerdown=${startPress} @pointerup=${endPress} @pointerleave=${endPress} @pointercancel=${endPress}
-            @contextmenu=${(e: Event) => e.preventDefault()}
-            @click=${() => {
-              if (longPressed) { longPressed = false; return; }
-              zoomSliderOpen = false;
-              void chooseZoom(z, true);
-            }}>${formatZoom(z)}</button>`,
-        )}
+      <div class="flex justify-center">
+        <button type="button" data-testid="zoom-button"
+          class="min-h-12 min-w-20 rounded-full border border-white/50 bg-black/50 px-4 text-base font-semibold tabular-nums text-white"
+          aria-label=${`Zoom ${formatZoom(camera.zoom)}. Tap for the next zoom step, long-press for a custom zoom.`}
+          @pointerdown=${startPress} @pointerup=${endPress} @pointerleave=${endPress} @pointercancel=${endPress}
+          @contextmenu=${(e: Event) => e.preventDefault()}
+          @click=${() => {
+            if (longPressed) { longPressed = false; return; }
+            zoomSliderOpen = false;
+            void chooseZoom(nextPreset(camera.zoom, range), true);
+          }}>${formatZoom(camera.zoom)}</button>
       </div>
     </div>`;
   };
@@ -815,6 +898,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       clock = window.setInterval(() => {
         if (phase === 'live') app.update();
       }, 1000);
+      sampler = window.setInterval(() => void sample(), 60_000);
+      void sample();
     },
     async unmount() {
       disposed = true;
@@ -822,6 +907,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       if (nativeActive) await patrol.stop();
       await Promise.all(queue.splice(0).map(({s}) => patrol.release({path:s.path})));
       clearInterval(clock);
+      clearInterval(sampler);
       clearTimeout(pressTimer);
       unsubGeo?.();
       unsubOcr?.();

@@ -11,7 +11,7 @@
  *
  *   npm run build && npm run smoke        (CHROME_PATH overrides browser)
  */
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -47,11 +47,27 @@ async function makeFakeCamera(browser, dir) {
     <div style="width:440px;height:150px;background:#fff;border:6px solid #111;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'DejaVu Sans Mono',monospace">
       <div style="font-size:88px;font-weight:700;letter-spacing:4px;color:#111;line-height:1;white-space:nowrap">ABC 123</div>
     </div></body></html>`);
-  const png = join(dir, 'plate.png');
-  await page.screenshot({ path: png });
+  const png = await page.screenshot({ encoding: 'base64' });
+  const luminance = await page.evaluate(async (encoded) => {
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + encoded;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0);
+    const {data} = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const y = new Uint8Array(canvas.width * canvas.height);
+    for (let i = 0; i < y.length; i++) {
+      y[i] = Math.round(16 + 0.257 * data[4*i] + 0.504 * data[4*i+1] + 0.098 * data[4*i+2]);
+    }
+    return Array.from(y);
+  }, png);
   await page.close();
   const y4m = join(dir, 'plate.y4m');
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-loop', '1', '-i', png, '-t', '2', '-r', '10', '-pix_fmt', 'yuv420p', y4m]);
+  const frame = Buffer.concat([Buffer.from('FRAME\n'), Buffer.from(luminance), Buffer.alloc(720*1280/2, 128)]);
+  await writeFile(y4m, Buffer.concat([Buffer.from('YUV4MPEG2 W720 H1280 F10:1 Ip A1:1 C420jpeg\n'), ...Array(20).fill(frame)]));
   return y4m;
 }
 

@@ -175,7 +175,8 @@ export type ScanOutcome =
   | 'recorded' // first sighting in segment — allowance clock started
   | 'within_allowance' // re-sighting, still inside allowance
   | 'overstay' // re-sighting, allowance (+grace) exceeded
-  | 'hot_sighting'; // hot list match evidence
+  | 'hot_sighting' // hot list match evidence
+  | 'permit_valid'; // on a linked allow list, valid at capture — sighting recorded, no allowance clock
 
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
@@ -243,6 +244,8 @@ export interface Settings {
   sound: boolean;
   /** Last camera zoom the officer chose; reused by the scan and patrol cameras. */
   cameraZoom: number;
+  /** Record field diagnostics on this device (see src/lib/diagnostics.ts). */
+  diagnostics: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -252,4 +255,6 @@ export const DEFAULT_SETTINGS: Settings = {
   vibrate: true,
   sound: true,
   cameraZoom: 1,
+  // On during the development field-test stage; turn the default off before production.
+  diagnostics: true,
 };

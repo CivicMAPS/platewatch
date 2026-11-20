@@ -1,5 +1,6 @@
 import { html, nothing, render, type TemplateResult } from 'lit-html';
 import { getSettings, saveSettings } from '../lib/db';
+import { configureDiagnostics } from '../lib/diagnostics';
 import type { Settings } from '../lib/types';
 import { DEFAULT_SETTINGS } from '../lib/types';
 
@@ -68,12 +69,14 @@ export class App {
 
   async start(): Promise<void> {
     this.settings = await getSettings();
+    configureDiagnostics(this.settings.diagnostics);
     window.addEventListener('hashchange', () => void this.resolve());
     await this.resolve();
   }
 
   async updateSettings(patch: Partial<Settings>): Promise<void> {
     this.settings = { ...this.settings, ...patch };
+    configureDiagnostics(this.settings.diagnostics);
     await saveSettings(this.settings);
     this.update();
   }

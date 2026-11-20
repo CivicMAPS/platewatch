@@ -2,6 +2,7 @@ import { html, nothing } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { createBackup, restoreBackup } from '../../lib/backup';
 import { purgeScansOlderThan } from '../../lib/db';
+import { clearDiagnostics, countDiagnostics, diagnosticsExport } from '../../lib/diagnostics';
 import { saveFile } from '../../lib/files';
 import { formatLatLng, geo, type GeoState } from '../../lib/geo';
 import { warmUpOcr } from '../../lib/ocr';
@@ -31,9 +32,11 @@ export function settingsView(_p: Record<string, string>, app: App): View {
   let geoTesting = false;
   let busy = false;
   let unsubGeo: (() => void) | null = null;
+  let diagCount = 0;
 
   const refresh = async () => {
     [cameraPerm, geoPerm] = await Promise.all([permission('camera'), permission('geolocation')]);
+    diagCount = await countDiagnostics().catch(() => 0);
     if (navigator.storage?.estimate) {
       const e = await navigator.storage.estimate();
       storage = { usage: e.usage ?? 0, quota: e.quota ?? 0, persisted: (await navigator.storage.persisted?.()) ?? false };
@@ -60,6 +63,32 @@ export function settingsView(_p: Record<string, string>, app: App): View {
       busy = false;
       app.update();
     }
+  };
+
+  const exportDiagnostics = async () => {
+    busy = true;
+    app.update();
+    try {
+      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}_platewatch-diagnostics.json`;
+      await saveFile(await diagnosticsExport(__APP_VERSION__), name, 'PlateWatch diagnostics');
+    } catch (e) {
+      app.toast(`Export failed: ${(e as Error).message}`, 'error');
+    } finally {
+      busy = false;
+      app.update();
+    }
+  };
+
+  const clearDiag = async () => {
+    const ok = await app.confirm({
+      title: 'Clear diagnostics',
+      body: `Delete ${diagCount} diagnostic event(s) from this device? Export them first if you need them.`,
+      confirmLabel: 'Clear',
+      danger: true,
+    });
+    if (!ok) return;
+    await clearDiagnostics();
+    await refresh();
   };
 
   const importBackup = async (file: File) => {
@@ -197,6 +226,18 @@ export function settingsView(_p: Record<string, string>, app: App): View {
               <span class="font-medium">Sound alerts</span>
               <input type="checkbox" class="h-6 w-6 accent-brand-500" .checked=${s.sound} @change=${(e: Event) => void app.updateSettings({ sound: (e.target as HTMLInputElement).checked })} />
             </label>
+          </section>
+
+          <section class="card mt-4 grid gap-3" data-testid="diagnostics">
+            <h2 class="section-title">Field diagnostics</h2>
+            <label class="flex items-center justify-between gap-3">
+              <span><span class="block font-medium">Record diagnostics</span><span class="text-sm text-slate-400">Camera, plate reading, GPS, battery and heat measurements for field tests. Shown as ● DIAG on the camera.</span></span>
+              <input type="checkbox" class="h-6 w-6 accent-brand-500" .checked=${s.diagnostics} @change=${(e: Event) => void app.updateSettings({ diagnostics: (e.target as HTMLInputElement).checked })} />
+            </label>
+            <p class="text-sm text-slate-400">${diagCount} event(s) recorded on this device.</p>
+            <button type="button" class="btn-secondary" ?disabled=${busy || !diagCount} @click=${() => void exportDiagnostics()}>${icon('share')} Export diagnostics</button>
+            <button type="button" class="btn-ghost text-sm" ?disabled=${!diagCount} @click=${() => void clearDiag()}>${icon('trash')} Clear diagnostics</button>
+            <p class="text-xs text-slate-500">Diagnostics include number plates, OCR text and locations. They stay on this device unless you export them.</p>
           </section>
 
           <section class="card mt-4 grid gap-3">

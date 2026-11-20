@@ -19,10 +19,13 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Precise location metadata | High-accuracy GNSS watch kept warm while the camera is open; the fix closest to the true position *at the shutter* is attached: produced at or before the shutter, within 15 s, ranked by accuracy plus distance moved since the fix (a later fix is never used; none qualifying = `LOCATION UNAVAILABLE`) (lat/lng, ±accuracy, altitude, heading, speed, fix age). Embedded as **EXIF GPS** (≈3 mm rational precision, `GPSHPositioningError`) and burned into a data bar on the image. |
 | Device date/time | Clock read *at the shutter* (before location is awaited): epoch ms, ISO 8601 local with offset, IANA zone. Embedded as **EXIF DateTimeOriginal + OffsetTimeOriginal + SubSecTime**, plus GPS UTC stamp. |
 | Image text → editable text | On-device Tesseract LSTM (no network). Plate mode: guide-box crop, contrast stretch + Otsu binarisation, 3-pass consensus; result is an editable field with alternative candidates. **Text reader** screen converts any photo (signs, permits) to editable text. |
-| Allow list | Plates (+ label, permit no., optional validity dates), bulk paste import. Exact matches are ignored on linked timed lists — no alert, no record. |
+| Allow list | Plates (+ label, permit no., optional validity dates), bulk paste import. Exact matches on a linked timed list show a green "Permit valid": the sighting is recorded as evidence, no allowance clock starts, so the vehicle is never an overstay while the permit is valid. A permit typed but not yet added is saved with the list. |
 | Timed list | Street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
-| Camera zoom and focus | Scan, walking-patrol and vehicle-patrol cameras: tap 1×, 1.75×, 3.5× or 5× (presets beyond the lens range are hidden); long-press any preset for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
+| Camera zoom and focus | One zoom button on every camera: each tap steps 1× → 1.75× → 3.5× → 5× → 1× (steps beyond the lens range are skipped); long-press for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
+| Plate reading | Android app: Google ML Kit (on-device) reads the plate guide plus a margin and picks the plate from the recognised lines. Browser build, or if ML Kit fails: Tesseract on the guide crop. |
+| Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together; Single reads only on the shutter. The shutter works in both. Every capture flashes the screen and vibrates. |
+| Field diagnostics | On by default during the development stage (Settings → Field diagnostics). Records camera resolution and zoom range, each capture's OCR engine, reading and time, the plate the officer confirmed, GPS accuracy and fix age, and every minute battery, battery temperature and Android thermal status; patrol adds frame and read rates every 30 s. On-device only; export as JSON from Settings. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
 ## Scan workflow (as implemented)
@@ -34,7 +37,7 @@ List present → Select list → camera opens → align plate → capture
   → plate read (editable) → Check
      ├─ Hot lists are ALWAYS checked (officer safety) → full-screen alert
      └─ Timed list:
-          plate on a linked allow list ............ EXEMPT (ignored, nothing saved)
+          valid permit on a linked allow list ..... PERMIT VALID (sighting recorded, no time limit)
           match with an active observation ........ show SCAN 1 vs SCAN N + time elapsed
                elapsed ≥ allowance + grace ........ OVERSTAY
                otherwise .......................... WITHIN ALLOWANCE (time remaining)
@@ -117,7 +120,7 @@ src/
     patrol.ts       bridge to the native PatrolCamera plugin (APK only)
     corrections.ts  amend a saved record's plate and repair observations
     payment.ts      EasyPark / PayStay display lines
-    engine.ts       pure decision engine (exempt / not in force / new / re-sighting / overstay / hot)
+    engine.ts       pure decision engine (permit valid / not in force / new / re-sighting / overstay / hot)
     restriction.ts  restriction periods (days, hours, overnight, all-times), sign-code parsing
     plate.ts        normalisation, strict + loose matching keys, OCR candidate extraction
     db.ts           IndexedDB (lists, scans, observations, settings), cascades, retention

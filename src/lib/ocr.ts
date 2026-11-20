@@ -66,6 +66,8 @@ export interface PlateOcrResult {
   confidence: number;
   rawText: string;
   durationMs: number;
+  /** Which engine read it. Only Tesseract reports a confidence. */
+  engine?: 'tesseract' | 'mlkit' | 'patrol';
 }
 
 /**
@@ -129,6 +131,7 @@ export function recognisePlate(crop: HTMLCanvasElement, mode: 'line' | 'sparse' 
       confidence: Math.round(best?.[1].confidence ?? 0),
       rawText: [...new Set(readings.map((r) => r.text.trim()).filter(Boolean))].join(' | '),
       durationMs: Math.round(performance.now() - t0),
+      engine: 'tesseract',
     };
   });
 }

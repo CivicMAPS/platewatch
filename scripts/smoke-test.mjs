@@ -57,7 +57,7 @@ async function makeFakeCamera(browser, dir) {
 
 async function main() {
   const dir = await mkdtemp(join(tmpdir(), 'platewatch-smoke-'));
-  const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe' });
+  const server = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe' });
   const cleanup = () => server.kill('SIGTERM');
   process.on('exit', cleanup);
 

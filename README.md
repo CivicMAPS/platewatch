@@ -16,12 +16,13 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 
 | Requirement | Implementation |
 |---|---|
-| Precise location metadata | High-accuracy GNSS watch kept warm while the camera is open; best fix within 15 s is attached at the shutter (lat/lng, ±accuracy, altitude, heading, speed, fix age). Embedded as **EXIF GPS** (≈3 mm rational precision, `GPSHPositioningError`) and burned into a data bar on the image. |
+| Precise location metadata | High-accuracy GNSS watch kept warm while the camera is open; the fix closest to the true position *at the shutter* is attached: produced at or before the shutter, within 15 s, ranked by accuracy plus distance moved since the fix (a later fix is never used; none qualifying = `LOCATION UNAVAILABLE`) (lat/lng, ±accuracy, altitude, heading, speed, fix age). Embedded as **EXIF GPS** (≈3 mm rational precision, `GPSHPositioningError`) and burned into a data bar on the image. |
 | Device date/time | Clock read *at the shutter* (before location is awaited): epoch ms, ISO 8601 local with offset, IANA zone. Embedded as **EXIF DateTimeOriginal + OffsetTimeOriginal + SubSecTime**, plus GPS UTC stamp. |
 | Image text → editable text | On-device Tesseract LSTM (no network). Plate mode: guide-box crop, contrast stretch + Otsu binarisation, 3-pass consensus; result is an editable field with alternative candidates. **Text reader** screen converts any photo (signs, permits) to editable text. |
 | Allow list | Plates (+ label, permit no., optional validity dates), bulk paste import. Exact matches are ignored on linked timed lists — no alert, no record. |
 | Timed list | Street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
+| Camera zoom and focus | Scan, walking-patrol and vehicle-patrol cameras: tap 1×, 1.75×, 3.5× or 5× (presets beyond the lens range are hidden); long-press any preset for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
 ## Scan workflow (as implemented)
@@ -131,6 +132,7 @@ tests/            vitest suites
 scripts/          OCR asset copy, icon generation, E2E smoke test
 android/          Capacitor project (permissions, signing, backup exclusions, PatrolCamera plugin)
 docs/SECURITY.md  CSP, data handling, permissions
+docs/EMAPS-INTEGRATION-ASSESSMENT.md  EnforcementMAPS integration gaps, battery/GPS plan
 ```
 
 ## Data & privacy

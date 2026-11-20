@@ -22,6 +22,9 @@ const toFix = (p: GeolocationPosition): GeoFix => ({
 /** How long a fix stays usable for evidence. */
 const FRESH_MS = 15_000;
 
+/** Assumed motion (m/s) when the receiver reports no speed: brisk walking. */
+const WALKING_MPS = 1.5;
+
 /**
  * Keeps the GNSS receiver warm while the camera is open (high-accuracy watch)
  * and hands out the best recent fix at the moment of capture.
@@ -83,28 +86,48 @@ export class GeoTracker {
     }
   }
 
-  /** Most accurate fix produced within the freshness window, or null. */
+  /**
+   * Fix closest to the true position at `now`, from fixes within the freshness
+   * window, or null.
+   *
+   * Ranks by reported accuracy plus the distance the officer could have moved
+   * since the fix. Accuracy alone is wrong once moving: at 20 km/h a ±3 m fix
+   * from 12 s earlier is ~67 m behind the vehicle. The newest fix's speed stands
+   * for current motion; when the receiver reports none, walking pace is assumed
+   * so an old fix is never treated as free.
+   */
   bestRecent(now = Date.now(), notAfter = Number.POSITIVE_INFINITY): GeoFix | null {
     const fresh = this.recent.filter((f) => now - f.timestamp <= FRESH_MS && f.timestamp <= notAfter);
     if (!fresh.length) return null;
-    return fresh.reduce((best, f) => (f.accuracy < best.accuracy ? f : best));
+    const newest = fresh.reduce((a, f) => (f.timestamp > a.timestamp ? f : a));
+    const speed = newest.speed !== null && newest.speed >= 0 ? newest.speed : WALKING_MPS;
+    const error = (f: GeoFix) => f.accuracy + (speed * Math.max(0, now - f.timestamp)) / 1000;
+    return fresh.reduce((best, f) => (error(f) < error(best) ? f : best));
   }
 
   /**
-   * Fix for a capture taken at `capturedAt`. Uses the best recent fix, otherwise
-   * waits (bounded) for a fresh high-accuracy fix.
+   * Fix for a capture taken at `capturedAt`: the best fix produced at or before
+   * the shutter and no older than the freshness window, otherwise null.
+   *
+   * Never waits for a new fix. A fix obtained after the shutter describes where
+   * the officer moved to, not where the vehicle was photographed, so it is not
+   * evidence of the capture location. Falls back only to the platform's cached
+   * position (`timeout: 0` answers from cache or fails at once).
    */
-  async fixForCapture(capturedAt: number, timeoutMs = 8_000): Promise<GeoFix | null> {
-    const best = this.bestRecent(capturedAt);
+  async fixForCapture(capturedAt: number): Promise<GeoFix | null> {
+    const best = this.bestRecent(capturedAt, capturedAt);
     if (best) return best;
     if (!this.supported || this.state.status === 'denied') return null;
-    return new Promise((resolve) => {
+    const cached = await new Promise<GeoFix | null>((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (p) => resolve(toFix(p)),
         () => resolve(null),
-        { enableHighAccuracy: true, maximumAge: FRESH_MS, timeout: timeoutMs },
+        { enableHighAccuracy: true, maximumAge: FRESH_MS, timeout: 0 },
       );
     });
+    if (!cached) return null;
+    const age = capturedAt - cached.timestamp;
+    return age >= 0 && age <= FRESH_MS ? cached : null;
   }
 }
 

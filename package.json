@@ -1,0 +1,50 @@
+{
+  "name": "platewatch",
+  "version": "1.0.0",
+  "description": "PlateWatch — offline-first number plate scanning for timed parking, allow lists and hot lists (PWA + Android APK).",
+  "scripts": {
+    "ocr:assets": "node scripts/copy-ocr-assets.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "predev": "npm run ocr:assets",
+    "dev": "vite --host",
+    "prebuild": "npm run ocr:assets",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke-test.mjs",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug",
+    "android:release": "npm run android:sync && cd android && ./gradlew assembleRelease"
+  },
+  "author": "TechCorp",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
+    "idb": "^8.0.4",
+    "lit-html": "^3.3.3",
+    "piexifjs": "^1.0.6",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
+    "@tailwindcss/vite": "^4.3.5",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@types/piexifjs": "^1.0.0",
+    "fake-indexeddb": "^6.2.8",
+    "puppeteer-core": "^25.18.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.1"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,295 @@
+#!/usr/bin/env node
+/**
+ * End-to-end smoke test against the production build in real headless Chrome:
+ *   - fake rear camera streaming a synthetic number plate (ABC 123)
+ *   - mocked high-accuracy GPS fix (Melbourne CBD)
+ *   - production CSP active (any violation fails the run)
+ *
+ * Flow: create allow/hot/timed lists → scan (OCR) → first sighting →
+ *       re-scan (within allowance) → time-shift → overstay with scan 1 vs 2 →
+ *       hot-list alert → permit exemption → EXIF/integrity verification.
+ *
+ *   npm run build && npm run smoke        (CHROME_PATH overrides browser)
+ */
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdtemp, writeFile, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import puppeteer from 'puppeteer-core';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = 4179;
+const ORIGIN = `http://localhost:${PORT}`;
+const GPS = { latitude: -37.8136276, longitude: 144.9630576, accuracy: 4 };
+const shots = process.env.SMOKE_SCREENSHOTS ?? join(root, 'smoke-screenshots');
+
+async function findChrome() {
+  for (const c of [process.env.CHROME_PATH, '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].filter(Boolean)) {
+    try {
+      await access(c);
+      return c;
+    } catch {
+      /* next */
+    }
+  }
+  throw new Error('Chrome not found (set CHROME_PATH)');
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let step = 0;
+const log = (msg) => console.log(`  ✓ ${String(++step).padStart(2, '0')} ${msg}`);
+
+async function makeFakeCamera(browser, dir) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 720, height: 1280 });
+  await page.setContent(`<html><body style="margin:0;width:720px;height:1280px;background:linear-gradient(#3b4252,#20242c);display:flex;align-items:center;justify-content:center">
+    <div style="width:440px;height:150px;background:#fff;border:6px solid #111;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'DejaVu Sans Mono',monospace">
+      <div style="font-size:88px;font-weight:700;letter-spacing:4px;color:#111;line-height:1;white-space:nowrap">ABC 123</div>
+    </div></body></html>`);
+  const png = join(dir, 'plate.png');
+  await page.screenshot({ path: png });
+  await page.close();
+  const y4m = join(dir, 'plate.y4m');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-loop', '1', '-i', png, '-t', '2', '-r', '10', '-pix_fmt', 'yuv420p', y4m]);
+  return y4m;
+}
+
+async function main() {
+  const dir = await mkdtemp(join(tmpdir(), 'platewatch-smoke-'));
+  const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe' });
+  const cleanup = () => server.kill('SIGTERM');
+  process.on('exit', cleanup);
+
+  for (let i = 0; i < 60; i++) {
+    try {
+      if ((await fetch(ORIGIN)).ok) break;
+    } catch {
+      /* not up yet */
+    }
+    await sleep(250);
+  }
+
+  const executablePath = await findChrome();
+  const pre = await puppeteer.launch({ executablePath, args: ['--no-sandbox'] });
+  const y4m = await makeFakeCamera(pre, dir);
+  await pre.close();
+
+  const browser = await puppeteer.launch({
+    executablePath,
+    args: [
+      '--no-sandbox',
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      `--use-file-for-fake-video-capture=${y4m}`,
+      '--autoplay-policy=no-user-gesture-required',
+    ],
+  });
+  const ctx = browser.defaultBrowserContext();
+  await ctx.overridePermissions(ORIGIN, ['geolocation', 'camera']);
+  const page = await browser.newPage();
+  await page.setViewport({ width: 412, height: 915, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await page.setGeolocation(GPS);
+  await page.emulateTimezone('Australia/Melbourne');
+
+  const problems = [];
+  page.on('console', (m) => {
+    const t = m.text();
+    if (m.type() === 'error' || /Content Security Policy|Refused to/i.test(t)) problems.push(`[console.${m.type()}] ${t}`);
+  });
+  page.on('pageerror', (e) => problems.push(`[pageerror] ${e.message}`));
+  await page.evaluateOnNewDocument(() => {
+    document.addEventListener('securitypolicyviolation', (e) =>
+      console.error(`CSP violation: ${e.violatedDirective} ${e.blockedURI}`),
+    );
+  });
+
+  const shot = async (name) => {
+    await import('node:fs').then((fs) => fs.mkdirSync(shots, { recursive: true }));
+    await page.screenshot({ path: join(shots, `${String(step).padStart(2, '0')}-${name}.png`) });
+  };
+  const click = async (text) => {
+    const el = await page.waitForSelector(`::-p-text(${text})`, { visible: true, timeout: 15000 });
+    await el.click();
+    await sleep(150);
+  };
+  const type = async (selector, value) => {
+    await page.waitForSelector(selector, { visible: true });
+    await page.click(selector, { count: 3 });
+    await page.type(selector, value);
+  };
+  const waitText = (text, timeout = 30000) => page.waitForSelector(`::-p-text(${text})`, { visible: true, timeout });
+
+  console.log('PlateWatch smoke test');
+  await page.goto(ORIGIN, { waitUntil: 'networkidle0' });
+  await waitText('No lists yet');
+  log('empty state shown when no list exists');
+  await shot('empty');
+
+  // Allow list
+  await click('Create list');
+  await click('Allow list');
+  await type('#name', 'Zone 12 residents');
+  await type('#allow-plate', 'RES001');
+  await type('#allow-label', '12 Smith St');
+  await click('Add to list');
+  await click('Save list');
+  await waitText('Allowed plates (1)');
+  log('allow list saved');
+
+  // Hot list
+  await page.goto(`${ORIGIN}/#/new/hot`);
+  await type('#name', 'Officer safety');
+  await click('Add high-risk vehicle');
+  await type('#hot-plate', 'BAD999');
+  await click('Aggressive');
+  await click('Spitting');
+  await click('Extreme risk');
+  await type('#hot-make', 'Toyota');
+  await page.select('#hot-body', 'Wagon');
+  await page.select('#hot-colour', 'Blue');
+  await click('Add vehicle');
+  await click('Save list');
+  await waitText('High-risk vehicles (1)');
+  log('hot list saved (risks, make, type, colour)');
+
+  // Timed list: in force at all times so the test is time-of-day independent.
+  await page.goto(`${ORIGIN}/#/new/timed`);
+  await type('#name', 'Smith St 2P');
+  await type('#street', 'Smith Street');
+  await type('#from', 'Johnston Street');
+  await type('#to', 'Gertrude Street');
+  for (const d of ['Sat', 'Sun']) await click(d);
+  await click('Applies at all times on these days');
+  await click('Zone 12 residents');
+  await page.click('#payStay');
+  await type('#payStayzone-0', '00042');
+  await click('Save list');
+  await page.waitForFunction(() => document.body.innerText.includes('Meter ID is required when a PayStay ParkingZone is set.'));
+  await type('#payStaymeter-0', '007');
+  await shot('timed-form');
+  await click('Save list');
+  await waitText('Tracked vehicles (0)');
+  log('timed list saved (segment, between streets, restriction, linked allow list)');
+  const timedUrl = page.url();
+
+  // Scan 1
+  await click('Scan number plate');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 }).catch(async (e) => { await shot('debug-camera'); console.log(await page.evaluate(() => document.body.innerText)); console.log(problems.join('\n')); throw e; });
+  await page.waitForFunction(() => document.body.innerText.includes('±'), { timeout: 15000 });
+  await sleep(800);
+  await shot('camera');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 90000 });
+  const ocrValue = await page.$eval('[data-testid=plate-input]', (el) => el.value);
+  if (ocrValue !== 'ABC123') throw new Error(`OCR read "${ocrValue}", expected ABC123`);
+  log(`camera capture + on-device OCR read plate "${ocrValue}"`);
+  const metaText = await page.evaluate(() => document.body.innerText);
+  if (!metaText.includes('-37.813628') || !metaText.includes('Australia/Melbourne')) throw new Error('capture metadata missing');
+  log('precise location (±4 m) and device date/time captured');
+  await shot('confirm');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
+  log('first sighting → scan record created with time allowance');
+  await shot('recorded');
+
+  // Scan 2 (within allowance)
+  await page.click('[data-testid=next-scan]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=comparison]', { timeout: 20000 });
+  const within = await page.$eval('[data-testid=comparison]', (el) => el.innerText);
+  if (!/within allowance/i.test(within)) throw new Error('expected within-allowance comparison');
+  log('re-scan → scan 1 vs scan 2 with elapsed time (within allowance)');
+  await shot('within');
+
+  // Time-shift: move the observation start back 2h05m to simulate an overstay.
+  await page.evaluate(
+    () =>
+      new Promise((res, rej) => {
+        const req = indexedDB.open('platewatch');
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('observations', 'readwrite');
+          const store = tx.objectStore('observations');
+          store.getAll().onsuccess = (e) => {
+            for (const o of e.target.result) {
+              const shift = 125 * 60_000;
+              store.put({ ...o, startedAt: o.startedAt - shift, allowanceEndsAt: o.allowanceEndsAt - shift });
+            }
+          };
+          tx.oncomplete = () => res(undefined);
+          tx.onerror = () => rej(tx.error);
+        };
+      }),
+  );
+
+  await page.click('[data-testid=next-scan]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=comparison]', { timeout: 20000 });
+  const over = await page.$eval('[data-testid=comparison]', (el) => el.innerText);
+  if (!/overstay/i.test(over)) throw new Error('expected overstay');
+  const elapsed = await page.$eval('[data-testid=elapsed]', (el) => el.textContent);
+  log(`overstay alert with both evidence images, elapsed ${elapsed}`);
+  await shot('overstay');
+
+  // Hot list alert while working the timed list (manual correction of OCR text).
+  await page.click('[data-testid=next-scan]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'BAD999');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=hot-alert]', { timeout: 20000 });
+  const hotText = await page.$eval('[data-testid=hot-alert]', (el) => el.innerText);
+  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
+  log('hot-list match raises officer-safety alert (risk, make, type, colour)');
+  await shot('hot-alert');
+
+  // Permit holder on linked allow list is ignored.
+  await page.click('[data-testid=next-scan]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'RES001');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
+  log('linked allow-list plate ignored (no alert, no record)');
+
+  // Evidence record: EXIF + integrity.
+  await page.goto(timedUrl);
+  await waitText('Recent scan records');
+  await page.click('main ul li button');
+  await click('Verify image integrity');
+  await waitText('Image hash matches');
+  const recText = await page.evaluate(() => document.body.innerText);
+  if (!/GPS -37\.81362\d, 144\.96305\d/.test(recText)) throw new Error('EXIF GPS not embedded/readable');
+  if (!/DateTimeOriginal \d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2} \+1[01]:00/.test(recText)) throw new Error('EXIF DateTimeOriginal/offset missing');
+  log('evidence JPEG: SHA-256 verified, EXIF GPS + DateTimeOriginal (+offset) embedded');
+  await shot('record');
+
+  // Text reader route renders.
+  await page.goto(`${ORIGIN}/#/text`);
+  await waitText('Convert image text into editable text');
+  log('text reader available');
+
+  const cspIssues = problems.filter((p) => /Content Security Policy|CSP violation|Refused to/i.test(p));
+  const otherErrors = problems.filter((p) => !cspIssues.includes(p));
+  if (cspIssues.length) throw new Error(`CSP violations:\n${cspIssues.join('\n')}`);
+  if (otherErrors.length) throw new Error(`Console errors:\n${otherErrors.join('\n')}`);
+  log('no CSP violations or console errors');
+
+  await browser.close();
+  cleanup();
+  console.log(`\nAll ${step} checks passed. Screenshots: ${shots}`);
+}
+
+main().catch((e) => {
+  console.error('\n✗ Smoke test failed:', e.message);
+  process.exit(1);
+});

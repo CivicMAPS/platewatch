@@ -50,10 +50,29 @@ Interpretation notes:
   time; it is flagged **Overstay** once allowance + grace is exceeded.
 - **Vehicle moved — restart timing** closes the observation and starts a new allowance from
   the current scan (valve-stem / position changed).
-- Matching tolerates OCR ambiguity: `O/Q↔0` and `I↔1` are treated as identical; other
-  look-alikes (`B/8`, `S/5`, `Z/2`, `G/6`, `D/0`…) produce a **possible match** the officer
-  must confirm. A possible match never exempts a vehicle automatically.
+- Exact matching compares the plate characters as read (`O` and `0` are different). OCR
+  look-alikes (`O/Q/D↔0`, `I/L↔1`, `B↔8`, `S↔5`, `Z↔2`, `G↔6`, `T↔7`, `U↔V`) produce a
+  **possible match**: a *Near match* dialog shows the capture beside the candidate(s) and the
+  officer edits or dismisses it. A possible match never exempts a vehicle automatically.
 - Checks are evaluated against the shutter time, not the time "Check" was pressed.
+- **Paid parking:** a timed list can carry EasyPark area numbers and PayStay zone / meter IDs.
+  They are snapshotted into each capture, burned into the evidence data bar and shown as
+  *Check payment before enforcing* on first sightings and re-sightings.
+- **Correcting a saved record:** *Record → Edit plate* re-runs the check for the corrected
+  plate at the original shutter time, moves the record to the right observation (or none),
+  repairs both observations' scan 1 / overstay outcomes, and keeps a revision history. The
+  evidence image and its SHA-256 are never altered.
+
+### Patrol mode (Android APK only)
+
+On the APK the scan screen also offers **Walking patrol** / **Vehicle patrol**. A native
+CameraX + ML Kit text-recognition overlay (`PatrolCamera.java`, bridged by
+`src/lib/patrol.ts`) reads plates continuously; a plate must be seen in two frames within
+1.5 s (walking) / 0.9 s (vehicle) to count. Each sighting saves a frame to the app cache and
+beeps if the plate is on a hot list, a linked allow list or already being timed. *Finish patrol
+and review* then walks the officer through every sighting in the normal Confirm → Check flow,
+using the frame time and the best GPS fix at or before it; cached frames are deleted once
+reviewed. Patrol mode is not available in the PWA.
 
 ## Install
 
@@ -69,7 +88,7 @@ headers for Cloudflare Pages / Netlify; replicate them on other hosts.
 ```bash
 npm ci
 npm run dev          # http://localhost:5173 (copies OCR assets first)
-npm test             # 40 unit tests: engine, restrictions, plates, storage
+npm test             # unit tests: engine, restrictions, plates, storage, backup, corrections
 npm run build        # typecheck + production build (CSP applied)
 npm run smoke        # E2E in headless Chrome: fake camera + GPS, production CSP
 ```
@@ -94,6 +113,9 @@ uploads them as artifacts.
 ```
 src/
   lib/            framework-free domain + device code
+    patrol.ts       bridge to the native PatrolCamera plugin (APK only)
+    corrections.ts  amend a saved record's plate and repair observations
+    payment.ts      EasyPark / PayStay display lines
     engine.ts       pure decision engine (exempt / not in force / new / re-sighting / overstay / hot)
     restriction.ts  restriction periods (days, hours, overnight, all-times), sign-code parsing
     plate.ts        normalisation, strict + loose matching keys, OCR candidate extraction
@@ -107,14 +129,17 @@ src/
   ui/             lit-html views (home, list form, list detail, scan, record, text reader, settings)
 tests/            vitest suites
 scripts/          OCR asset copy, icon generation, E2E smoke test
-android/          Capacitor project (permissions, signing, backup exclusions)
+android/          Capacitor project (permissions, signing, backup exclusions, PatrolCamera plugin)
 docs/SECURITY.md  CSP, data handling, permissions
 ```
 
 ## Data & privacy
 
 All data (lists, plates, evidence images, locations) stays in IndexedDB on the device; there
-is no server and no network use other than loading the app itself. Android cloud backup and
+is no server and the app makes no network requests of its own other than loading itself. In
+the APK, Google ML Kit (patrol mode) runs on-device with a bundled model, but per Google's
+ML Kit terms it may contact Google to send API usage/performance metrics; no images or plate
+text are sent. Android cloud backup and
 device-transfer are disabled for app data. Configure auto-deletion under *Settings → Data
 retention*; exports containing scan records are personal information.
 

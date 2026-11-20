@@ -84,8 +84,8 @@ export class GeoTracker {
   }
 
   /** Most accurate fix produced within the freshness window, or null. */
-  bestRecent(now = Date.now()): GeoFix | null {
-    const fresh = this.recent.filter((f) => now - f.timestamp <= FRESH_MS);
+  bestRecent(now = Date.now(), notAfter = Number.POSITIVE_INFINITY): GeoFix | null {
+    const fresh = this.recent.filter((f) => now - f.timestamp <= FRESH_MS && f.timestamp <= notAfter);
     if (!fresh.length) return null;
     return fresh.reduce((best, f) => (f.accuracy < best.accuracy ? f : best));
   }

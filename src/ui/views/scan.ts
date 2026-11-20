@@ -147,8 +147,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       const selected = list;
       const keys = new Set([...hot.flatMap(l => l.entries),...allow.filter(l => selected.type === 'allow' ? l.id === selected.id : selected.type === 'timed' && selected.allowListIds.includes(l.id)).flatMap(l => l.entries),...observed].map(e => plateKey(e.plate)));
       listeners.push(await patrol.addListener('sighting', s => {
-        const recent = geo.bestRecent(s.at);
-        const location = recent && recent.timestamp <= s.at ? recent : null;
+        // Best fix produced at or before the frame; a later fix must not displace older valid ones.
+        const location = geo.bestRecent(s.at, s.at);
         queue.push({s,meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
           locationAgeMs:location ? s.at-location.timestamp:null,userAgent:navigator.userAgent,
           payment:selected.type === 'timed' ? structuredClone(selected.payment) : undefined}});

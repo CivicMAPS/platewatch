@@ -2,7 +2,7 @@
 import { getAllObservations, getAllScans, getLists, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
-import type { Observation, PlateList, ScanRecord } from './types';
+import type { Observation, PaymentAreas, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
 export const BACKUP_VERSION = 1;
@@ -57,6 +57,18 @@ function isObj(v: unknown): v is Record<string, unknown> {
 
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
 
+/** Keep only well-formed paid-parking entries; anything else would crash rendering. */
+export function sanitisePayment(v: unknown): PaymentAreas | undefined {
+  if (!isObj(v)) return undefined;
+  const easyPark = (Array.isArray(v.easyPark) ? v.easyPark : []).filter(
+    (a): a is string => typeof a === 'string' && a.trim() !== '',
+  );
+  const payStay = (Array.isArray(v.payStay) ? v.payStay : [])
+    .filter((p): p is Record<string, unknown> => isObj(p) && typeof p.zone === 'string' && p.zone.trim() !== '')
+    .map((p) => ({ zone: str(p.zone), meter: str(p.meter) }));
+  return { easyPark, payStay };
+}
+
 /** Validate and sanitise lists from an untrusted file. Throws with a readable message. */
 export function parseBackup(text: string): { lists: PlateList[]; observations: Observation[]; scans: ScanRecord[] } {
   let raw: unknown;
@@ -81,6 +93,11 @@ export function parseBackup(text: string): { lists: PlateList[]; observations: O
         .map((e) => ({ ...e, key: plateKey(str(e.plate)) }));
     }
     if (l.type === 'timed' && (!isObj(l.segment) || !Array.isArray(l.restrictions))) continue;
+    if (l.type === 'timed') {
+      if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
+      l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
+      l.payment = sanitisePayment(l.payment);
+    }
     lists.push(l as unknown as PlateList);
   }
 
@@ -92,7 +109,9 @@ export function parseBackup(text: string): { lists: PlateList[]; observations: O
   for (const s of Array.isArray(raw.scans) ? raw.scans : []) {
     if (!isObj(s) || typeof s.id !== 'string' || typeof s.image !== 'string' || typeof s.thumb !== 'string') continue;
     if (!s.image.startsWith('data:image/') || !s.thumb.startsWith('data:image/')) continue;
-    scans.push({ ...(s as unknown as ScanRecord), image: dataUrlToBlob(s.image), thumb: dataUrlToBlob(s.thumb) });
+    if (!isObj(s.meta) || typeof s.meta.capturedAt !== 'number') continue;
+    const meta = { ...s.meta, payment: sanitisePayment(s.meta.payment) };
+    scans.push({ ...(s as unknown as ScanRecord), meta: meta as unknown as ScanRecord['meta'], image: dataUrlToBlob(s.image), thumb: dataUrlToBlob(s.thumb) });
   }
   return { lists, observations, scans };
 }

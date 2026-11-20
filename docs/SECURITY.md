@@ -43,7 +43,7 @@ Dev server (`npm run dev`) runs without the meta CSP because Vite injects `<styl
 
 All user/backup-supplied strings are rendered through lit-html text bindings (auto-escaped).
 There is no `innerHTML`/`unsafeHTML` anywhere in the codebase. Backup import validates the
-schema, drops malformed records, accepts only `data:image/*` evidence, and re-derives every
+schema, drops malformed records (including malformed paid-parking data and scan metadata), accepts only `data:image/*` evidence, and re-derives every
 plate matching key so a crafted file cannot cause false exemptions.
 
 ## Storage & permissions
@@ -54,6 +54,7 @@ plate matching key so a crafted file cannot cause false exemptions.
 | Android backup | `allowBackup=false`, `data_extraction_rules.xml` excludes all domains from cloud backup and device transfer. |
 | Android permissions | `CAMERA`, `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `VIBRATE`, `INTERNET` (Capacitor bridge + "open in Maps" link). |
 | Web permissions policy | `camera=(self), geolocation=(self)`, microphone/payment/usb disabled (`_headers`). |
+| Native patrol plugin | `PatrolCamera` (CameraX + bundled ML Kit text recognition). Rejects `start` unless CAMERA is granted; frames are written only to the app cache as `patrol-*.jpg`, and `release` deletes only files matching that name in the cache directory. ML Kit may send usage metrics to Google (no image or text content). |
 | WebView debugging | `webContentsDebuggingEnabled: false` in `capacitor.config.ts`. |
 
 ## Evidence integrity

@@ -34,6 +34,13 @@ public class PatrolCamera extends Plugin {
     private final Set<String> emitted = new HashSet<>();
 
     @PluginMethod public void start(PluginCall call) {
+        // CameraX needs the runtime permission; the WebView camera normally obtains it first,
+        // but fail clearly rather than with an opaque bind error if it was revoked.
+        if (ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.CAMERA)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            call.reject("Camera permission is required for patrol mode. Allow it in Android settings.");
+            return;
+        }
         getActivity().runOnUiThread(() -> {
             if (panel != null) { call.reject("Patrol already active"); return; }
             boolean vehicle = "vehicle".equals(call.getString("mode"));

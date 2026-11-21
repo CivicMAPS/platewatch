@@ -43,18 +43,18 @@ placeholder: officers can find it and scan against it, and it shows *Restriction
 
 | Column | Required | Example | Notes |
 |---|---|---|---|
-| `dataset_id` | | `city-of-port-phillip-patrol-area-10` | Same as `dataset.id` in the JSON. |
-| `segment_id` | | `coventry-st-montague-st-ferrars-st` | Stable segment ID; with `dataset_id` it ties rows to the dataset. |
-| `part_id` | where a side has several parts | `bay-58-72` | |
+| `dataset_id` | | `copp-patrol-area-10` | Same as `dataset.id` in the JSON: `<council code>-<area>`. |
+| `segment_id` | | `copp-31065` | `<council code>-<road segment asset ID>`, or the provisional `copp-normanby-rd-boundary-st-montague-st` until the asset ID is known. With `dataset_id` it ties rows to the dataset. |
+| `part_id` | where a side has several parts | `bay-58-bay-72` | `all` (or blank) for the whole side. |
 | `road_segment_id` | | `20055` | The council's road segment asset ID (the column may also be named `road_segment_asset_id`). Not the same as `segment_id`. |
-| `patrol_zone` | | `10` | Internal patrol zone / enforcement area number. Home groups lists by it. |
+| `patrol_zone` | | `10` | Internal patrol zone / enforcement area number (exported as `copp-10`). Home groups lists by it. |
 | `patrol_zone_name` | | `Flagstaff` | Day-to-day name of the zone. |
 | `road` | ✔ | `Coventry Street` | `St`, `Rd`, `Ave`… are matched to `Street`, `Road`, `Avenue`. |
 | `locality` | | `South Melbourne` | |
 | `between_from`, `between_to` | ✔ | `Montague Street`, `Ferrars Street` | Cross streets or boundaries, in either order. |
 | `side` | | `north` | `both` (default), `north`, `south`, `east`, `west`, `odd`, `even`. |
 | `part_from`, `part_to` | | `Bay 58`, `Bay 72` | Where signs change part way along: a bay, an address or a cross street. |
-| `permit_area` | | `7` | Residential permit area. |
+| `permit_area` | | `7` | Residential permit area code (exported as `copp-rpa-7`, so the same number in another council stays distinct). |
 | `parking_area` | | `645` | Parking area number (one per segment). Kerb plate = area + bay (`64558`). |
 | `easypark_areas` | | `7514;7515` | Separated by `;`. |
 | `paystay_zones` | | `338851200001` or `00042:4521` | Separated by `;`; add `:meter` for a meter ID. |

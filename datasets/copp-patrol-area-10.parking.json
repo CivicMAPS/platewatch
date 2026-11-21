@@ -2,12 +2,13 @@
   "schema": "civicmaps.parking_dataset",
   "schema_version": "1.0.0",
   "dataset": {
-    "id": "city-of-port-phillip-patrol-area-10",
+    "id": "copp-patrol-area-10",
     "title": "City of Port Phillip Parking Enforcement Patrol Area 10 - Working Street Segment and Restriction Dataset",
     "status": "draft",
     "generated_at": null,
     "municipality": {
       "name": "City of Port Phillip",
+      "code": "copp",
       "state": "VIC",
       "country": "AU",
       "timezone": "Australia/Melbourne"
@@ -98,589 +99,3046 @@
   "conventions": {
     "bay_sign_format": null,
     "paystay_zone_pattern": "^3388\\d+$",
+    "easypark_area_pattern": null,
     "notes": [
-      "PayStay zone numbers begin 3388, then the assigned segment number, then four digits for the side of the road."
+      "PayStay zones: 3388, the assigned segment number, then four digits for the side of the road."
     ]
   },
   "patrol_zones": [
     {
-      "id": "10",
+      "id": "copp-10",
       "number": "10",
       "name": null,
-      "kind": "patrol_area"
+      "kind": "patrol_area",
+      "geometry": null
     }
   ],
-  "defaults": {
-    "road_segment_id": null,
-    "patrol_zone": "10",
-    "sides": [
-      {
-        "side": "both",
-        "parts": [
-          {
-            "restrictions_status": "pending_field_capture",
-            "restrictions": []
-          }
-        ]
-      }
-    ],
-    "data_quality": {
-      "status": "pending_field_capture",
-      "source": "user_supplied_area_10_pdf",
-      "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
-    },
-    "geometry": null
-  },
+  "permit_areas": [],
   "segments": [
     {
-      "id": "normanby-rd-boundary-st-montague-st",
+      "id": "copp-normanby-rd-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Normanby Road"
+        "name": "Normanby Road",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "normanby-rd-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "normanby-rd-montague-st-ferrars-st",
+      "id": "copp-normanby-rd-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Normanby Road"
+        "name": "Normanby Road",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "normanby-rd-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "munro-st-boundary-st-kings-way",
+      "id": "copp-munro-st-boundary-st-kings-way",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Munro Street"
+        "name": "Munro Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "munro-st-boundary-st-kings-way"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Kings Way"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "woodgate-st-boundary-st-kings-way",
+      "id": "copp-woodgate-st-boundary-st-kings-way",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Woodgate Street"
+        "name": "Woodgate Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "woodgate-st-boundary-st-kings-way"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Kings Way"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "gladstone-st-boundary-st-montague-st",
+      "id": "copp-gladstone-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Gladstone Street"
+        "name": "Gladstone Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "gladstone-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "gladstone-st-montague-st-ferrars-st",
+      "id": "copp-gladstone-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Gladstone Street"
+        "name": "Gladstone Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "gladstone-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "buckhurst-st-boundary-st-montague-st",
+      "id": "copp-buckhurst-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Buckhurst Street"
+        "name": "Buckhurst Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "buckhurst-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "buckhurst-st-montague-st-ferrars-st",
+      "id": "copp-buckhurst-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Buckhurst Street"
+        "name": "Buckhurst Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "buckhurst-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "thistlethwaite-st-boundary-st-montague-st",
+      "id": "copp-thistlethwaite-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Thistlethwaite Street"
+        "name": "Thistlethwaite Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "thistlethwaite-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "thistlethwaite-st-montague-st-ferrars-st",
+      "id": "copp-thistlethwaite-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Thistlethwaite Street"
+        "name": "Thistlethwaite Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "thistlethwaite-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "city-rd-boundary-st-montague-st",
+      "id": "copp-city-rd-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "City Road"
+        "name": "City Road",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "city-rd-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "city-rd-montague-st-ferrars-st",
+      "id": "copp-city-rd-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "City Road"
+        "name": "City Road",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "city-rd-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "york-st-boundary-st-montague-st",
+      "id": "copp-york-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "York Street"
+        "name": "York Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "york-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "york-st-montague-st-ferrars-st",
+      "id": "copp-york-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "York Street"
+        "name": "York Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "york-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "coventry-st-boundary-st-montague-st",
+      "id": "copp-coventry-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Coventry Street"
+        "name": "Coventry Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "coventry-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "coventry-st-montague-st-ferrars-st",
+      "id": "copp-coventry-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Coventry Street"
+        "name": "Coventry Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "coventry-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "dorcas-st-kings-way-boundary-st",
+      "id": "copp-dorcas-st-kings-way-boundary-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Dorcas Street"
+        "name": "Dorcas Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "dorcas-st-kings-way-boundary-st"
+        }
       },
       "between": {
         "from": "Kings Way",
         "to": "Boundary Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "dorcas-st-boundary-st-montague-st",
+      "id": "copp-dorcas-st-boundary-st-montague-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Dorcas Street"
+        "name": "Dorcas Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "dorcas-st-boundary-st-montague-st"
+        }
       },
       "between": {
         "from": "Boundary Street",
         "to": "Montague Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "dorcas-st-montague-st-ferrars-st",
+      "id": "copp-dorcas-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Dorcas Street"
+        "name": "Dorcas Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "dorcas-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-normanby-rd-gladstone-st",
+      "id": "copp-boundary-st-normanby-rd-gladstone-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-normanby-rd-gladstone-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Gladstone Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-gladstone-st-buckhurst-st",
+      "id": "copp-boundary-st-gladstone-st-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-gladstone-st-buckhurst-st"
+        }
       },
       "between": {
         "from": "Gladstone Street",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-buckhurst-st-thistlethwaite-st",
+      "id": "copp-boundary-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-buckhurst-st-thistlethwaite-st"
+        }
       },
       "between": {
         "from": "Buckhurst Street",
         "to": "Thistlethwaite Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-thistlethwaite-st-city-rd",
+      "id": "copp-boundary-st-thistlethwaite-st-city-rd",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-thistlethwaite-st-city-rd"
+        }
       },
       "between": {
         "from": "Thistlethwaite Street",
         "to": "City Road"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-city-rd-york-st",
+      "id": "copp-boundary-st-city-rd-york-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-city-rd-york-st"
+        }
       },
       "between": {
         "from": "City Road",
         "to": "York Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-york-st-coventry-st",
+      "id": "copp-boundary-st-york-st-coventry-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-york-st-coventry-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Coventry Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "boundary-st-coventry-st-dorcas-st",
+      "id": "copp-boundary-st-coventry-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Boundary Street"
+        "name": "Boundary Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "boundary-st-coventry-st-dorcas-st"
+        }
       },
       "between": {
         "from": "Coventry Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-normanby-rd-gladstone-st",
+      "id": "copp-montague-st-normanby-rd-gladstone-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-normanby-rd-gladstone-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Gladstone Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-gladstone-st-buckhurst-st",
+      "id": "copp-montague-st-gladstone-st-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-gladstone-st-buckhurst-st"
+        }
       },
       "between": {
         "from": "Gladstone Street",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-buckhurst-st-thistlethwaite-st",
+      "id": "copp-montague-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-buckhurst-st-thistlethwaite-st"
+        }
       },
       "between": {
         "from": "Buckhurst Street",
         "to": "Thistlethwaite Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-thistlethwaite-st-city-rd",
+      "id": "copp-montague-st-thistlethwaite-st-city-rd",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-thistlethwaite-st-city-rd"
+        }
       },
       "between": {
         "from": "Thistlethwaite Street",
         "to": "City Road"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-city-rd-york-st",
+      "id": "copp-montague-st-city-rd-york-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-city-rd-york-st"
+        }
       },
       "between": {
         "from": "City Road",
         "to": "York Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-york-st-coventry-st",
+      "id": "copp-montague-st-york-st-coventry-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-york-st-coventry-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Coventry Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "montague-st-coventry-st-dorcas-st",
+      "id": "copp-montague-st-coventry-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Montague Street"
+        "name": "Montague Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "montague-st-coventry-st-dorcas-st"
+        }
       },
       "between": {
         "from": "Coventry Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ferrars-st-normanby-rd-city-rd",
+      "id": "copp-ferrars-st-normanby-rd-city-rd",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ferrars Street"
+        "name": "Ferrars Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ferrars-st-normanby-rd-city-rd"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "City Road"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ferrars-st-city-rd-york-st",
+      "id": "copp-ferrars-st-city-rd-york-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ferrars Street"
+        "name": "Ferrars Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ferrars-st-city-rd-york-st"
+        }
       },
       "between": {
         "from": "City Road",
         "to": "York Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ferrars-st-york-st-coventry-st",
+      "id": "copp-ferrars-st-york-st-coventry-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ferrars Street"
+        "name": "Ferrars Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ferrars-st-york-st-coventry-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Coventry Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ferrars-st-coventry-st-dorcas-st",
+      "id": "copp-ferrars-st-coventry-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ferrars Street"
+        "name": "Ferrars Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ferrars-st-coventry-st-dorcas-st"
+        }
       },
       "between": {
         "from": "Coventry Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-gladstone-st-buckhurst-st",
+      "id": "copp-ingles-st-gladstone-st-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-gladstone-st-buckhurst-st"
+        }
       },
       "between": {
         "from": "Gladstone Street",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-buckhurst-st-thistlethwaite-st",
+      "id": "copp-ingles-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-buckhurst-st-thistlethwaite-st"
+        }
       },
       "between": {
         "from": "Buckhurst Street",
         "to": "Thistlethwaite Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-thistlethwaite-st-city-rd",
+      "id": "copp-ingles-st-thistlethwaite-st-city-rd",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-thistlethwaite-st-city-rd"
+        }
       },
       "between": {
         "from": "Thistlethwaite Street",
         "to": "City Road"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-city-rd-york-st",
+      "id": "copp-ingles-st-city-rd-york-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-city-rd-york-st"
+        }
       },
       "between": {
         "from": "City Road",
         "to": "York Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-york-st-coventry-st",
+      "id": "copp-ingles-st-york-st-coventry-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-york-st-coventry-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Coventry Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ingles-st-coventry-st-dorcas-st",
+      "id": "copp-ingles-st-coventry-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ingles Street"
+        "name": "Ingles Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ingles-st-coventry-st-dorcas-st"
+        }
       },
       "between": {
         "from": "Coventry Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "raglan-st-kings-way-boundary-st",
+      "id": "copp-raglan-st-kings-way-boundary-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Raglan Street"
+        "name": "Raglan Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "raglan-st-kings-way-boundary-st"
+        }
       },
       "between": {
         "from": "Kings Way",
         "to": "Boundary Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "crockford-st-kings-way-boundary-st",
+      "id": "copp-crockford-st-kings-way-boundary-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Crockford Street"
+        "name": "Crockford Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "crockford-st-kings-way-boundary-st"
+        }
       },
       "between": {
         "from": "Kings Way",
         "to": "Boundary Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "garton-st-bay-st-boundary-st",
+      "id": "copp-garton-st-bay-st-boundary-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Garton Street"
+        "name": "Garton Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "garton-st-bay-st-boundary-st"
+        }
       },
       "between": {
         "from": "Bay Street",
         "to": "Boundary Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "bay-st-raglan-st-garton-st",
+      "id": "copp-bay-st-raglan-st-garton-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Bay Street"
+        "name": "Bay Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "bay-st-raglan-st-garton-st"
+        }
       },
       "between": {
         "from": "Raglan Street",
         "to": "Garton Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "brady-st-garton-st-boundary-st",
+      "id": "copp-brady-st-garton-st-boundary-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Brady Street"
+        "name": "Brady Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "brady-st-garton-st-boundary-st"
+        }
       },
       "between": {
         "from": "Garton Street",
         "to": "Boundary Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "kerr-st-normanby-rd-buckhurst-st",
+      "id": "copp-kerr-st-normanby-rd-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Kerr Street"
+        "name": "Kerr Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "kerr-st-normanby-rd-buckhurst-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "meaden-st-normanby-rd-buckhurst-st",
+      "id": "copp-meaden-st-normanby-rd-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Meaden Street"
+        "name": "Meaden Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "meaden-st-normanby-rd-buckhurst-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "railway-pl-normanby-rd-buckhurst-st",
+      "id": "copp-railway-pl-normanby-rd-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Railway Place"
+        "name": "Railway Place",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "railway-pl-normanby-rd-buckhurst-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "ferrars-pl-normanby-rd-buckhurst-st",
+      "id": "copp-ferrars-pl-normanby-rd-buckhurst-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Ferrars Place"
+        "name": "Ferrars Place",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "ferrars-pl-normanby-rd-buckhurst-st"
+        }
       },
       "between": {
         "from": "Normanby Road",
         "to": "Buckhurst Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "eville-st-montague-st-ferrars-st",
+      "id": "copp-eville-st-montague-st-ferrars-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Eville Street"
+        "name": "Eville Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "eville-st-montague-st-ferrars-st"
+        }
       },
       "between": {
         "from": "Montague Street",
         "to": "Ferrars Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "morris-st-york-st-dorcas-st",
+      "id": "copp-morris-st-york-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Morris Street"
+        "name": "Morris Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "morris-st-york-st-dorcas-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     },
     {
-      "id": "coote-st-york-st-dorcas-st",
+      "id": "copp-coote-st-york-st-dorcas-st",
+      "road_segment_id": null,
+      "patrol_zone": "copp-10",
       "road": {
-        "name": "Coote Street"
+        "name": "Coote Street",
+        "locality": null,
+        "external_ids": {
+          "source_segment_id": "coote-st-york-st-dorcas-st"
+        }
       },
       "between": {
         "from": "York Street",
         "to": "Dorcas Street"
-      }
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "both",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "pending_field_capture",
+        "source": "user_supplied_area_10_pdf",
+        "confidence": null,
+        "last_verified": null,
+        "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+      },
+      "notes": null
     }
   ]
 }

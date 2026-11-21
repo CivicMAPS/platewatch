@@ -111,20 +111,20 @@ export const CSV_TEMPLATES = {
     header:
       'dataset_id,segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
     example: [
-      'city-of-port-phillip-patrol-area-10,normanby-rd-boundary-st-montague-st,,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
-      'city-of-port-phillip-patrol-area-10,coventry-st-montague-st-ferrars-st,,,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338851200001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – replace with surveyed signs',
-      'city-of-port-phillip-patrol-area-10,coventry-st-montague-st-ferrars-st,,,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338851200001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – replace with surveyed signs',
-      'com-chinatown,com-20055,bay-58-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
-      'com-chinatown,com-20055,bay-58-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
+      'copp-patrol-area-10,copp-normanby-rd-boundary-st-montague-st,all,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
+      'copp-patrol-area-10,copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – illustrative asset ID and signs; replace',
+      'copp-patrol-area-10,copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – illustrative asset ID and signs; replace',
+      'com-chinatown,com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
+      'com-chinatown,com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
     ].join('\n'),
   },
   bays: {
     fileName: 'platewatch-bays-template.csv',
     header: 'dataset_id,segment_id,part_id,road,between_from,between_to,side,part_from,part_to,bay,lat,lng,sign_number',
     example: [
-      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,',
-      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,',
-      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,',
+      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,',
+      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,',
+      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,',
     ].join('\n'),
   },
   allow: {
@@ -442,9 +442,9 @@ const CONTROL_TEXT: Record<string, string> = {
   accessible: 'Accessible parking', works_zone: 'Works zone', other: 'Other', loading_zone: 'Loading zone (no time limit given)',
 };
 
-/** "dataset/segment/side[/part]" when the CSV gives a segment_id, as in civicmaps.parking_dataset. */
+/** "dataset/segment/side/part" when the CSV gives a segment_id, as in civicmaps.parking_dataset (no part_id: "all"). */
 function csvExternalId(row: Row, side: StreetSide): string | undefined {
-  return row.segment_id ? `${row.dataset_id || 'csv'}/${row.segment_id}/${side}${row.part_id ? `/${row.part_id}` : ''}` : undefined;
+  return row.segment_id ? `${row.dataset_id || 'csv'}/${row.segment_id}/${side}/${row.part_id || 'all'}` : undefined;
 }
 
 function timedFromCsv(file: string, table: string[][], out: ImportResult): void {

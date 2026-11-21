@@ -132,7 +132,7 @@ describe('timed CSV with civicmaps.parking_dataset columns', () => {
       row({ ...base, control: 'no_stopping', days: 'Mon-Fri', start: '07:00', end: '09:00' }),
     ].join('\n');
     const [d] = timedDrafts(csv, 'x.csv');
-    expect(d!.list).toMatchObject({ externalId: 'copp-10/coventry-st-montague-st-ferrars-st/north', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
+    expect(d!.list).toMatchObject({ externalId: 'copp-10/coventry-st-montague-st-ferrars-st/north/all', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
     expect(d!.list.restrictions[0]).toMatchObject({ code: '2P', limitMinutes: 120, graceMinutes: 5, description: 'Ticket · Permit Zone 7 excepted' });
     expect(d!.list.untimedControls).toEqual([{ control: 'no_stopping', label: 'No stopping', days: [1, 2, 3, 4, 5], allDay: false, startTime: '07:00', endTime: '09:00', description: '' }]);
   });
@@ -332,11 +332,11 @@ describe('normalised and area datasets through the importer', () => {
   const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
   it('imports a civicmaps.parking_dataset and reports invalid ones by path without importing them', () => {
-    const r = parseImportFile(read('datasets/examples/example-two-councils.parking.json'), 'example.parking.json');
+    const r = parseImportFile(read('datasets/examples/example-com-copp.parking.json'), 'example.parking.json');
     expect(r.kind).toBe('civicmaps-dataset');
     expect(r.issues).toEqual([]);
     expect(r.drafts.length).toBe(4);
-    const bad = JSON.parse(read('datasets/examples/example-two-councils.parking.json'));
+    const bad = JSON.parse(read('datasets/examples/example-com-copp.parking.json'));
     bad.segments[1].sides[0].parts[0].restrictions[0].days = ['funday'];
     const rb = parseImportFile(JSON.stringify(bad), 'bad.json');
     expect(rb.drafts).toEqual([]);

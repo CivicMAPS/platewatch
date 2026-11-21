@@ -1,0 +1,729 @@
+{
+  "schema": "civicmaps.parking_dataset",
+  "schema_version": "1.0.0",
+  "dataset": {
+    "id": "example-com-copp",
+    "title": "Example: City of Melbourne (numbered bays, parking area, EasyPark) and City of Port Phillip (PayStay, permit area)",
+    "status": "draft",
+    "generated_at": "2026-11-21T00:00:00Z",
+    "municipality": {
+      "name": "Example (two councils)",
+      "code": "example",
+      "state": null,
+      "country": null,
+      "timezone": "Australia/Melbourne"
+    },
+    "sources": [
+      {
+        "id": "civicmaps-kerbside-v1",
+        "name": "CivicMAPS kerbside parking assets v1 (CHINATOWN, road segment 20055)",
+        "publisher": "CivicMAPS",
+        "url": null,
+        "format": "JSON",
+        "reference_date": null,
+        "data_used": [
+          "parking area",
+          "EasyPark area",
+          "bay numbers and positions",
+          "parking rules"
+        ],
+        "limitations": [
+          "bay positions inferred from coordinate sequence"
+        ]
+      }
+    ],
+    "notes": [
+      "One file holds two councils only to show that their records are identical in structure; a real dataset covers one council.",
+      "City of Port Phillip segment 31065 and its restrictions are illustrative, not a real asset ID or surveyed signs."
+    ]
+  },
+  "conventions": {
+    "bay_sign_format": "{parking_area}{bay}",
+    "paystay_zone_pattern": "^3388\\d+$",
+    "easypark_area_pattern": null,
+    "notes": [
+      "City of Melbourne kerb plates: parking area followed by bay number (645 + 58 = 64558).",
+      "City of Port Phillip PayStay zones: 3388, the assigned segment number, then four digits for the side."
+    ]
+  },
+  "patrol_zones": [
+    {
+      "id": "com-chinatown",
+      "number": null,
+      "name": "Chinatown",
+      "kind": "patrol_area",
+      "geometry": null
+    },
+    {
+      "id": "copp-9",
+      "number": "9",
+      "name": "South Melbourne Market",
+      "kind": "patrol_area",
+      "geometry": null
+    }
+  ],
+  "permit_areas": [
+    {
+      "id": "com-rpa-7",
+      "code": "7",
+      "name": null
+    },
+    {
+      "id": "copp-rpa-7",
+      "code": "7",
+      "name": null
+    }
+  ],
+  "segments": [
+    {
+      "id": "com-20055",
+      "road_segment_id": "20055",
+      "patrol_zone": "com-chinatown",
+      "road": {
+        "name": "Little Bourke Street",
+        "locality": "Melbourne",
+        "external_ids": {}
+      },
+      "between": {
+        "from": "Swanston Street",
+        "to": "Elizabeth Street"
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "north",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "supplied",
+              "restrictions": [
+                {
+                  "control": "no_stopping",
+                  "sign_code": null,
+                  "limit_minutes": null,
+                  "days": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri",
+                    "sat",
+                    "sun"
+                  ],
+                  "all_day": true,
+                  "start": null,
+                  "end": null,
+                  "public_holidays": null,
+                  "exceptions": [],
+                  "exempt_permit_areas": [],
+                  "grace_minutes": null,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                }
+              ],
+              "bays": [],
+              "data_quality": {
+                "status": "unverified",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": "No stopping end to end."
+            }
+          ]
+        },
+        {
+          "side": "south",
+          "parts": [
+            {
+              "id": "swanston-street-bay-58",
+              "from": {
+                "kind": "intersection",
+                "label": "Swanston Street",
+                "location": null
+              },
+              "to": {
+                "kind": "bay",
+                "label": "Bay 58",
+                "location": null
+              },
+              "permit_area": null,
+              "payment": {
+                "parking_area": "645",
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "no_parking_spaces",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "unverified",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            },
+            {
+              "id": "bay-58-bay-72",
+              "from": {
+                "kind": "bay",
+                "label": "Bay 58",
+                "location": null
+              },
+              "to": {
+                "kind": "bay",
+                "label": "Bay 72",
+                "location": null
+              },
+              "permit_area": null,
+              "payment": {
+                "parking_area": "645",
+                "easypark_areas": [
+                  "7514"
+                ],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "supplied",
+              "restrictions": [
+                {
+                  "control": "loading_zone",
+                  "sign_code": "LZ 30",
+                  "limit_minutes": 30,
+                  "days": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri"
+                  ],
+                  "all_day": false,
+                  "start": "07:00",
+                  "end": "16:00",
+                  "public_holidays": null,
+                  "exceptions": [
+                    "Commercial vehicles only"
+                  ],
+                  "exempt_permit_areas": [],
+                  "grace_minutes": null,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                },
+                {
+                  "control": "metered",
+                  "sign_code": "2P",
+                  "limit_minutes": 120,
+                  "days": [
+                    "sat",
+                    "sun"
+                  ],
+                  "all_day": false,
+                  "start": "07:00",
+                  "end": "22:00",
+                  "public_holidays": null,
+                  "exceptions": [],
+                  "exempt_permit_areas": [],
+                  "grace_minutes": null,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                }
+              ],
+              "bays": [
+                {
+                  "number": 58,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8127332,
+                    "lng": 144.9645599
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 59,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8127544,
+                    "lng": 144.9644881
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 61,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8128019,
+                    "lng": 144.9643276
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 62,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.812822,
+                    "lng": 144.9642589
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 63,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8128439,
+                    "lng": 144.9641844
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 64,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8128658,
+                    "lng": 144.9641099
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 65,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8128845,
+                    "lng": 144.964046
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 67,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8129901,
+                    "lng": 144.9636815
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 68,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8130116,
+                    "lng": 144.9636084
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 69,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8130336,
+                    "lng": 144.9635337
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 70,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8130557,
+                    "lng": 144.9634588
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 71,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8130758,
+                    "lng": 144.9633902
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                },
+                {
+                  "number": 72,
+                  "sign_number": null,
+                  "location": {
+                    "lat": -37.8130949,
+                    "lng": 144.9633258
+                  },
+                  "kind": "standard",
+                  "data_quality": {
+                    "status": "inferred",
+                    "source": "CivicMAPS kerbside parking assets v1",
+                    "confidence": "medium",
+                    "last_verified": null,
+                    "notes": null
+                  },
+                  "notes": null
+                }
+              ],
+              "data_quality": {
+                "status": "unverified",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            },
+            {
+              "id": "bay-72-elizabeth-street",
+              "from": {
+                "kind": "bay",
+                "label": "Bay 72",
+                "location": null
+              },
+              "to": {
+                "kind": "intersection",
+                "label": "Elizabeth Street",
+                "location": null
+              },
+              "permit_area": null,
+              "payment": {
+                "parking_area": "645",
+                "easypark_areas": [],
+                "paystay_zones": [],
+                "meters": []
+              },
+              "restrictions_status": "pending_field_capture",
+              "restrictions": [],
+              "bays": [],
+              "data_quality": {
+                "status": "pending_field_capture",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "unverified",
+        "source": "CivicMAPS kerbside parking assets v1",
+        "confidence": null,
+        "last_verified": null,
+        "notes": null
+      },
+      "notes": null
+    },
+    {
+      "id": "copp-31065",
+      "road_segment_id": "31065",
+      "patrol_zone": "copp-9",
+      "road": {
+        "name": "Coventry Street",
+        "locality": "South Melbourne",
+        "external_ids": {}
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      },
+      "geometry": null,
+      "sides": [
+        {
+          "side": "north",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": "copp-rpa-7",
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [
+                  {
+                    "zone": "338831065001",
+                    "meter_id": null
+                  }
+                ],
+                "meters": []
+              },
+              "restrictions_status": "supplied",
+              "restrictions": [
+                {
+                  "control": "ticket",
+                  "sign_code": "2P",
+                  "limit_minutes": 120,
+                  "days": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri"
+                  ],
+                  "all_day": false,
+                  "start": "08:00",
+                  "end": "18:00",
+                  "public_holidays": null,
+                  "exceptions": [
+                    "Permit Zone 7 excepted"
+                  ],
+                  "exempt_permit_areas": [
+                    "copp-rpa-7"
+                  ],
+                  "grace_minutes": 5,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                }
+              ],
+              "bays": [],
+              "data_quality": {
+                "status": "unverified",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        },
+        {
+          "side": "south",
+          "parts": [
+            {
+              "id": "all",
+              "from": null,
+              "to": null,
+              "permit_area": null,
+              "payment": {
+                "parking_area": null,
+                "easypark_areas": [],
+                "paystay_zones": [
+                  {
+                    "zone": "338831065002",
+                    "meter_id": null
+                  }
+                ],
+                "meters": []
+              },
+              "restrictions_status": "supplied",
+              "restrictions": [
+                {
+                  "control": "time_limit",
+                  "sign_code": "1P",
+                  "limit_minutes": 60,
+                  "days": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri",
+                    "sat"
+                  ],
+                  "all_day": false,
+                  "start": "08:00",
+                  "end": "18:00",
+                  "public_holidays": null,
+                  "exceptions": [],
+                  "exempt_permit_areas": [],
+                  "grace_minutes": null,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                },
+                {
+                  "control": "no_stopping",
+                  "sign_code": null,
+                  "limit_minutes": null,
+                  "days": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri"
+                  ],
+                  "all_day": false,
+                  "start": "07:00",
+                  "end": "09:00",
+                  "public_holidays": null,
+                  "exceptions": [],
+                  "exempt_permit_areas": [],
+                  "grace_minutes": null,
+                  "source_sign_id": null,
+                  "effective_from": null,
+                  "effective_to": null,
+                  "data_quality": {
+                    "status": "unverified",
+                    "source": null,
+                    "confidence": null,
+                    "last_verified": null,
+                    "notes": null
+                  }
+                }
+              ],
+              "bays": [],
+              "data_quality": {
+                "status": "unverified",
+                "source": null,
+                "confidence": null,
+                "last_verified": null,
+                "notes": null
+              },
+              "notes": null
+            }
+          ]
+        }
+      ],
+      "data_quality": {
+        "status": "unverified",
+        "source": null,
+        "confidence": null,
+        "last_verified": null,
+        "notes": "Illustrative segment."
+      },
+      "notes": null
+    }
+  ]
+}

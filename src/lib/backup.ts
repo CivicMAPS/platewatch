@@ -1,13 +1,14 @@
 /** JSON backup / restore. Images are embedded as base64 data URLs when included. */
-import { getAllObservations, getAllScans, getLists, replaceAll } from './db';
+import { getAllObservations, getAllScans, getDismissed, getLists, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
-import type { Observation, PaymentAreas, PlateList, ScanRecord } from './types';
+import type { DismissedCapture, Observation, PaymentAreas, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
 export const BACKUP_VERSION = 1;
 
 type SerialScan = Omit<ScanRecord, 'image' | 'thumb'> & { image: string | null; thumb: string | null };
+type SerialDismissed = Omit<DismissedCapture, 'image' | 'thumb'> & { image: string; thumb: string };
 
 export interface BackupFile {
   schema: typeof BACKUP_SCHEMA;
@@ -18,24 +19,36 @@ export interface BackupFile {
   lists: PlateList[];
   observations: Observation[];
   scans: SerialScan[];
+  /** Optional: patrol captures dismissed at review (absent in backups made before 21 Nov 2026). */
+  includesDismissed?: boolean;
+  dismissed?: SerialDismissed[];
 }
 
-function blobToDataUrl(b: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(b);
-  });
+export interface BackupOptions {
+  /** Add the global Dismissed list, with its evidence images. Off by default. */
+  includeDismissed?: boolean;
 }
 
-export async function createBackup(includeScans: boolean, appVersion: string): Promise<Blob> {
+async function blobToDataUrl(b: Blob): Promise<string> {
+  const bytes = new Uint8Array(await b.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${b.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+}
+
+export async function createBackup(includeScans: boolean, appVersion: string, options: BackupOptions = {}): Promise<Blob> {
   const lists = await getLists();
   const observations = includeScans ? await getAllObservations() : [];
   const scans: SerialScan[] = [];
   if (includeScans) {
     for (const s of await getAllScans()) {
       scans.push({ ...s, image: await blobToDataUrl(s.image), thumb: await blobToDataUrl(s.thumb) });
+    }
+  }
+  const dismissed: SerialDismissed[] = [];
+  if (options.includeDismissed) {
+    for (const d of await getDismissed()) {
+      dismissed.push({ ...d, image: await blobToDataUrl(d.image), thumb: await blobToDataUrl(d.thumb) });
     }
   }
   const file: BackupFile = {
@@ -47,6 +60,8 @@ export async function createBackup(includeScans: boolean, appVersion: string): P
     lists,
     observations,
     scans,
+    includesDismissed: !!options.includeDismissed,
+    dismissed,
   };
   return new Blob([JSON.stringify(file)], { type: 'application/json' });
 }
@@ -70,7 +85,13 @@ export function sanitisePayment(v: unknown): PaymentAreas | undefined {
 }
 
 /** Validate and sanitise lists from an untrusted file. Throws with a readable message. */
-export function parseBackup(text: string): { lists: PlateList[]; observations: Observation[]; scans: ScanRecord[] } {
+export function parseBackup(text: string): {
+  lists: PlateList[];
+  observations: Observation[];
+  scans: ScanRecord[];
+  /** Undefined when the backup does not include the Dismissed list. */
+  dismissed?: DismissedCapture[];
+} {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -97,6 +118,7 @@ export function parseBackup(text: string): { lists: PlateList[]; observations: O
       if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
       l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
       l.payment = sanitisePayment(l.payment);
+      for (const k of ['patrolZone', 'rpa'] as const) if (typeof l[k] !== 'string') delete l[k];
     }
     lists.push(l as unknown as PlateList);
   }
@@ -113,13 +135,32 @@ export function parseBackup(text: string): { lists: PlateList[]; observations: O
     const meta = { ...s.meta, payment: sanitisePayment(s.meta.payment) };
     scans.push({ ...(s as unknown as ScanRecord), meta: meta as unknown as ScanRecord['meta'], image: dataUrlToBlob(s.image), thumb: dataUrlToBlob(s.thumb) });
   }
-  return { lists, observations, scans };
+  let dismissed: DismissedCapture[] | undefined;
+  if (raw.includesDismissed === true) {
+    dismissed = [];
+    for (const d of Array.isArray(raw.dismissed) ? raw.dismissed : []) {
+      if (!isObj(d) || typeof d.id !== 'string' || typeof d.image !== 'string' || typeof d.thumb !== 'string') continue;
+      if (!d.image.startsWith('data:image/') || !d.thumb.startsWith('data:image/')) continue;
+      if (!isObj(d.meta) || typeof d.meta.capturedAt !== 'number') continue;
+      dismissed.push({
+        ...(d as unknown as DismissedCapture),
+        plate: str(d.plate),
+        ocrText: str(d.ocrText),
+        intendedListId: str(d.intendedListId),
+        intendedListName: str(d.intendedListName),
+        createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.meta.capturedAt,
+        image: dataUrlToBlob(d.image),
+        thumb: dataUrlToBlob(d.thumb),
+      });
+    }
+  }
+  return { lists, observations, scans, dismissed };
 }
 
-export async function restoreBackup(text: string, merge: boolean): Promise<{ lists: number; scans: number }> {
+export async function restoreBackup(text: string, merge: boolean): Promise<{ lists: number; scans: number; dismissed: number }> {
   const data = parseBackup(text);
   await replaceAll({ ...data, merge });
-  return { lists: data.lists.length, scans: data.scans.length };
+  return { lists: data.lists.length, scans: data.scans.length, dismissed: data.dismissed?.length ?? 0 };
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

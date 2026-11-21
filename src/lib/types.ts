@@ -79,6 +79,10 @@ export interface PaymentAreas {
 export interface TimedList extends BaseList {
   payment?: PaymentAreas;
   type: 'timed';
+  /** Parking enforcement area / patrol zone, e.g. "1". Home groups and filters lists by it. */
+  patrolZone?: string;
+  /** Residential permit area, e.g. "12". */
+  rpa?: string;
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */
@@ -270,6 +274,8 @@ export interface Settings {
   cameraZoom: number;
   /** Record field diagnostics on this device (see src/lib/diagnostics.ts). */
   diagnostics: boolean;
+  /** Home: patrol zone shown (null = all zones, '' = lists without a zone). */
+  listZoneFilter: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -281,4 +287,5 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraZoom: 1,
   // On during the development field-test stage; turn the default off before production.
   diagnostics: true,
+  listZoneFilter: null,
 };

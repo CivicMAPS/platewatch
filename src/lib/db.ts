@@ -256,15 +256,19 @@ export async function replaceAll(data: {
   lists: PlateList[];
   observations: Observation[];
   scans: ScanRecord[];
+  /** Only when the backup includes the Dismissed list; otherwise dismissed captures are untouched. */
+  dismissed?: DismissedCapture[];
   merge: boolean;
 }): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['lists', 'scans', 'observations'], 'readwrite');
+  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed'], 'readwrite');
   if (!data.merge) {
     await tx.objectStore('lists').clear();
     await tx.objectStore('scans').clear();
     await tx.objectStore('observations').clear();
+    if (data.dismissed) await tx.objectStore('dismissed').clear();
   }
+  for (const x of data.dismissed ?? []) await tx.objectStore('dismissed').put(x);
   for (const l of data.lists) await tx.objectStore('lists').put(l);
   for (const o of data.observations) await tx.objectStore('observations').put(o);
   for (const s of data.scans) await tx.objectStore('scans').put(s);

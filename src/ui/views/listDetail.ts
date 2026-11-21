@@ -1,4 +1,5 @@
 import { paymentLines } from '../../lib/payment';
+import { zoneLabel } from '../../lib/listIndex';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import {
   deleteList,
@@ -118,7 +119,7 @@ export function listDetailView(params: Record<string, string>, app: App): View {
     return html`<section class="card mt-4">
         <h2 class="section-title">Segment</h2>
         <p class="font-semibold">${segmentLabel(l)} ${paymentLines(l.payment).map(line => html`<span class="chip">${line}</span>`)}</p>
-        <p class="text-sm text-slate-400">${[l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides'].filter(Boolean).join(' · ')}</p>
+        <p class="text-sm text-slate-400">${[l.patrolZone ? zoneLabel(l.patrolZone) : '', l.rpa ? `RPA ${l.rpa}` : '', l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides'].filter(Boolean).join(' · ')}</p>
         <ul class="mt-3 grid gap-1 text-sm">
           ${l.restrictions.map(
             (r) => html`<li class="flex items-center gap-2">

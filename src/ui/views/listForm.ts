@@ -1,5 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit-html';
-import { getAllowLists, getList, putList, uid } from '../../lib/db';
+import { getAllowLists, getList, getTimedLists, putList, uid } from '../../lib/db';
+import { patrolZones } from '../../lib/listIndex';
 import { isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
 import { describeRestriction, minutesFromCode, validateRestriction } from '../../lib/restriction';
 import {
@@ -111,6 +112,9 @@ export function listFormView(params: Record<string, string>, app: App): View {
   const prefillPlate = new URLSearchParams(location.hash.split('?')[1] ?? '').get('plate') ?? '';
   let list: PlateList | null = null;
   let allowLists: AllowList[] = [];
+  /** Patrol zones and RPAs already used, offered as suggestions so the same zone is typed one way. */
+  let knownZones: string[] = [];
+  let knownRpas: string[] = [];
   let errors: Record<string, string> = {};
   let saving = false;
   let allowDraft = emptyAllowDraft();
@@ -167,6 +171,11 @@ export function listFormView(params: Record<string, string>, app: App): View {
         suburb: cleaned.segment.suburb.trim(),
       };
       cleaned.restrictions = cleaned.restrictions.map((r) => ({ ...r, code: r.code.trim().toUpperCase() }));
+      for (const k of ['patrolZone', 'rpa'] as const) {
+        const v = cleaned[k]?.trim();
+        if (v) cleaned[k] = v;
+        else delete cleaned[k];
+      }
     }
     errors = validate(cleaned);
     if (Object.keys(errors).length) {
@@ -306,6 +315,16 @@ export function listFormView(params: Record<string, string>, app: App): View {
     const pay = l.payment ??= { easyPark: [], payStay: [] };
     const seg = (patch: Partial<typeof l.segment>) => set(() => (l.segment = { ...l.segment, ...patch }));
     return html`
+      <section class="card mt-4 grid gap-3">
+        <h2 class="section-title">Enforcement area</h2>
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'patrolZone', label: 'Patrol zone', value: l.patrolZone ?? '', onInput: (v) => set(() => (l.patrolZone = v)), placeholder: 'e.g. 1', list: 'known-zones', maxlength: 24 })}
+          ${text({ id: 'rpa', label: 'Residential permit area (RPA)', value: l.rpa ?? '', onInput: (v) => set(() => (l.rpa = v)), placeholder: 'Optional', list: 'known-rpas', maxlength: 24 })}
+        </div>
+        <p class="text-xs text-slate-400">Home groups timed lists by patrol zone, then road. Search also finds lists by RPA, EasyPark area, PayStay zone and meter ID.</p>
+        <datalist id="known-zones">${knownZones.map((z) => html`<option value=${z}></option>`)}</datalist>
+        <datalist id="known-rpas">${knownRpas.map((r) => html`<option value=${r}></option>`)}</datalist>
+      </section>
       <section class="card mt-4 grid gap-3">
         <h2 class="section-title">Street segment</h2>
         ${text({ id: 'street', label: 'Street / segment name', value: l.segment.street, onInput: (v) => seg({ street: v }), placeholder: 'e.g. Smith Street', required: true, errKey: 'street' })}
@@ -615,6 +634,9 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
   return {
     async mount() {
       allowLists = (await getAllowLists()).sort((a, b) => a.name.localeCompare(b.name));
+      const timedLists = await getTimedLists();
+      knownZones = patrolZones(timedLists);
+      knownRpas = [...new Set(timedLists.map((t) => t.rpa?.trim() ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'en-AU', { numeric: true }));
       if (editingId) {
         const found = await getList(editingId);
         if (!found) {

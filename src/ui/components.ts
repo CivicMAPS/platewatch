@@ -6,6 +6,7 @@ import type { ListType, RiskLevel } from '../lib/types';
 const ICON_PATHS = {
   back: 'M15 18l-6-6 6-6',
   plus: 'M12 5v14M5 12h14',
+  search: 'M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35',
   camera:
     'M3 8a2 2 0 012-2h2l1.5-2h7L17 6h2a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V8zM12 17a4 4 0 100-8 4 4 0 000 8z',
   settings:

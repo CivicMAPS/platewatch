@@ -1,7 +1,7 @@
 import { html, nothing } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { createBackup, restoreBackup } from '../../lib/backup';
-import { purgeScansOlderThan } from '../../lib/db';
+import { countDismissed, purgeScansOlderThan } from '../../lib/db';
 import { clearDiagnostics, countDiagnostics, diagnosticsExport } from '../../lib/diagnostics';
 import { saveFile } from '../../lib/files';
 import { formatLatLng, geo, type GeoState } from '../../lib/geo';
@@ -33,10 +33,14 @@ export function settingsView(_p: Record<string, string>, app: App): View {
   let busy = false;
   let unsubGeo: (() => void) | null = null;
   let diagCount = 0;
+  let dismissedCount = 0;
+  /** Add the Dismissed list to the next export (off by default; it carries evidence images). */
+  let includeDismissed = false;
 
   const refresh = async () => {
     [cameraPerm, geoPerm] = await Promise.all([permission('camera'), permission('geolocation')]);
     diagCount = await countDiagnostics().catch(() => 0);
+    dismissedCount = await countDismissed().catch(() => 0);
     if (navigator.storage?.estimate) {
       const e = await navigator.storage.estimate();
       storage = { usage: e.usage ?? 0, quota: e.quota ?? 0, persisted: (await navigator.storage.persisted?.()) ?? false };
@@ -54,8 +58,9 @@ export function settingsView(_p: Record<string, string>, app: App): View {
     busy = true;
     app.update();
     try {
-      const blob = await createBackup(includeScans, __APP_VERSION__);
-      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}_platewatch-${includeScans ? 'full' : 'lists'}.json`;
+      const withDismissed = includeDismissed && dismissedCount > 0;
+      const blob = await createBackup(includeScans, __APP_VERSION__, { includeDismissed: withDismissed });
+      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}_platewatch-${includeScans ? 'full' : 'lists'}${withDismissed ? '+dismissed' : ''}.json`;
       await saveFile(blob, name, 'PlateWatch backup');
     } catch (e) {
       app.toast(`Export failed: ${(e as Error).message}`, 'error');
@@ -111,7 +116,7 @@ export function settingsView(_p: Record<string, string>, app: App): View {
     app.update();
     try {
       const r = await restoreBackup(await file.text(), merge);
-      app.toast(`Imported ${r.lists} list(s) and ${r.scans} scan record(s).`, 'success');
+      app.toast(`Imported ${r.lists} list(s), ${r.scans} scan record(s)${r.dismissed ? ` and ${r.dismissed} dismissed capture(s)` : ''}.`, 'success');
     } catch (e) {
       app.toast(`Import failed: ${(e as Error).message}`, 'error');
     } finally {
@@ -252,6 +257,11 @@ export function settingsView(_p: Record<string, string>, app: App): View {
 
           <section class="card mt-4 grid gap-3">
             <h2 class="section-title">Backup</h2>
+            <label class="flex min-h-11 items-center gap-3 text-sm">
+              <input type="checkbox" class="h-5 w-5" data-testid="include-dismissed" .checked=${includeDismissed} ?disabled=${!dismissedCount}
+                @change=${(e: Event) => { includeDismissed = (e.target as HTMLInputElement).checked; app.update(); }} />
+              <span>Include dismissed captures <span class="text-slate-400">(${dismissedCount}${dismissedCount ? ', with evidence images' : ''})</span></span>
+            </label>
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => void exportBackup(false)}>${icon('share')} Export lists</button>
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => void exportBackup(true)}>${icon('share')} Export lists + scan records</button>
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => importRef.value?.click()}>${icon('upload')} Import backup</button>

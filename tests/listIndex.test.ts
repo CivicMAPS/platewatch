@@ -81,6 +81,12 @@ describe('searchTimedLists', () => {
     expect(ids('338851200002')).toEqual(['market']);
     expect(searchTimedLists(lists, '338851200002')[0]?.matches[0]).toEqual({ label: 'PayStay zone', value: '338851200002' });
   });
+  it('treats field words that are part of an address as ordinary words (Bay Street + suburb)', () => {
+    expect(ids('bay street south melbourne')[0]).toBe('loose');
+    expect(ids('york street cecil')[0]).toBe('york');
+    // A leading field word still narrows the search.
+    expect(ids('rpa 12')).toEqual(['york']);
+  });
   it('matches nothing for unrelated text', () => {
     expect(ids('qqqq')).toEqual([]);
   });

@@ -108,45 +108,57 @@ function baySign(t: string, f: Field): (FieldMatch & { s: number }) | null {
   return { label: 'Bay sign', value: `${t} = area ${area} · bay ${bay}`, s: Math.min(95, 85 + area.length) };
 }
 
+type Scored = FieldMatch & { s: number };
+
+/** Every token must match one of the fields; returns the summed score, or null. */
+function matchList(list: TimedList, tokens: readonly string[], allowed: Set<FieldKind> | null, bayLookup: boolean): { score: number; matches: FieldMatch[] } | null {
+  const fs = fields(list).filter((f) => !allowed || allowed.has(f.kind));
+  let score = 0;
+  const matches: Scored[] = [];
+  for (const t of tokens) {
+    let best: Scored | null = null;
+    for (const f of fs) {
+      const s = tokenScore(t, f.value);
+      if (s > (best?.s ?? 0)) best = { label: f.label, value: f.value, s };
+      const sign = bayLookup && s < 100 ? baySign(t, f) : null;
+      if (sign && sign.s > (best?.s ?? 0)) best = sign;
+    }
+    if (!best) return null;
+    score += best.s;
+    matches.push(best);
+  }
+  return { score, matches: matches.sort((a, b) => b.s - a.s).map(({ label, value }) => ({ label, value })) };
+}
+
 /**
- * Lists matching every word of the query, best first. Field words narrow the search ("rpa 12"
- * looks at RPAs only); every other word must match some field.
+ * Lists matching every word of the query, best first. Field words at the start of the query
+ * narrow the search ("rpa 12" looks at RPAs only, "bay 63758" at kerb signs). The same words
+ * inside an address are ordinary words: a list that does not match the narrowed search is tried
+ * again with every word against every field, so "Bay Street South Melbourne" still finds Bay
+ * Street. Narrowed matches rank first.
  */
 export function searchTimedLists(lists: readonly TimedList[], query: string): SearchResult[] {
   const raw = query.trim().split(/\s+/).map(norm).filter(Boolean);
   if (!raw.length) return lists.map((list) => ({ list, score: 0, matches: [] }));
-  const hinted = raw.filter((t) => FIELD_WORDS[t]);
-  const terms = raw.filter((t) => !FIELD_WORDS[t]);
-  // Only field words ("zone"): treat them as ordinary words.
-  const tokens = terms.length ? terms : raw;
+  let lead = 0;
+  while (lead < raw.length && FIELD_WORDS[raw[lead]!]) lead++;
+  const hinted = raw.slice(0, lead);
+  const terms = raw.slice(lead);
+  // Only field words ("zone"), or none: no narrowing.
   const allowed = terms.length && hinted.length ? new Set(hinted.flatMap((t) => FIELD_WORDS[t]!)) : null;
   // "area 637" means the parking area itself; a plain number or "bay …" may be a kerb sign.
   const bayLookup = !allowed || hinted.includes('bay');
 
-  const out: SearchResult[] = [];
+  const out: (SearchResult & { narrowed: boolean })[] = [];
   for (const list of lists) {
-    const fs = fields(list).filter((f) => !allowed || allowed.has(f.kind));
-    let score = 0;
-    const matches: (FieldMatch & { s: number })[] = [];
-    let all = true;
-    for (const t of tokens) {
-      let best: (FieldMatch & { s: number }) | null = null;
-      for (const f of fs) {
-        const s = tokenScore(t, f.value);
-        if (s > (best?.s ?? 0)) best = { label: f.label, value: f.value, s };
-        const sign = bayLookup && s < 100 ? baySign(t, f) : null;
-        if (sign && sign.s > (best?.s ?? 0)) best = sign;
-      }
-      if (!best) {
-        all = false;
-        break;
-      }
-      score += best.s;
-      matches.push(best);
-    }
-    if (all) out.push({ list, score, matches: matches.sort((a, b) => b.s - a.s).map(({ label, value }) => ({ label, value })) });
+    const narrowed = allowed ? matchList(list, terms, allowed, bayLookup) : null;
+    const plain = narrowed ? null : matchList(list, raw, null, true);
+    const m = narrowed ?? plain;
+    if (m) out.push({ list, ...m, narrowed: !!narrowed });
   }
-  return out.sort((a, b) => b.score - a.score || compareText(a.list.segment.street, b.list.segment.street));
+  return out
+    .sort((a, b) => Number(b.narrowed) - Number(a.narrowed) || b.score - a.score || compareText(a.list.segment.street, b.list.segment.street))
+    .map(({ narrowed: _n, ...r }) => r);
 }
 
 const collator = new Intl.Collator('en-AU', { numeric: true, sensitivity: 'base' });

@@ -29,7 +29,13 @@ screen, zoom (0.6–10×) and ML Kit work on the device. They also measured what
 | Record shows "Status: active · allowance ends 09:52:08" at 13:22 while the list says OVERDUE | Record screen printed the observation status only | Shows "overdue · allowance ended 09:52 (3h 30m ago). Re-scan the vehicle to record an overstay." |
 | Times on the York St list (first seen 08:52, 4h 28m overdue at 13:20) | Not a bug: the captures were at 08:52–08:54 and the vehicles were not re-scanned | — |
 
-New in the diagnostics: `sighting.raw`, `variant` events, and in `patrol_stats` the visible crop size
+Review screen, from the officer's feedback on the same test: patrol captures offer **Check** and
+**Dismiss** instead of Retake (in Multi mode the vehicle is gone by review). Dismissed captures go to
+a global Dismissed list (IndexedDB store `dismissed`, database version 2) and are logged as
+`dismiss` diagnostics events, which measure the false-capture rate. The camera's patrol buttons are
+now an evenly spaced, centred pair labelled **Walking** and **Vehicle**.
+
+New in the diagnostics: `sighting.raw`, `variant` and `dismiss` events, and in `patrol_stats` the visible crop size
 (`cropWidth`/`cropHeight`) and the lines ignored (`outsideGuide`, `notPlate`) or merged (`variants`).
 
 Still to confirm on the device: (1) patrol frames saved for review are cropped to what was on screen and the

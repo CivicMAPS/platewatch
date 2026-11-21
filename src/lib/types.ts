@@ -206,6 +206,28 @@ export interface ScanRecord {
   createdAt: number;
 }
 
+/**
+ * A patrol capture the officer dismissed at review (sign text, a misread, a vehicle not of
+ * interest). Kept in one global list, apart from every plate list: it starts no timing and
+ * matches nothing, but the frame and its metadata stay available until deleted or purged.
+ */
+export interface DismissedCapture {
+  id: string;
+  /** Plate field as it stood when dismissed (the reading, or the officer's edit). */
+  plate: string;
+  ocrText: string;
+  ocrEngine: ScanRecord['ocrEngine'];
+  /** List the capture was being reviewed for; the list may since have been deleted. */
+  intendedListId: string;
+  intendedListName: string;
+  meta: CaptureMeta;
+  image: Blob;
+  thumb: Blob;
+  sha256: string;
+  /** When it was dismissed. */
+  createdAt: number;
+}
+
 export type ObservationStatus = 'active' | 'expired' | 'reset';
 
 /**

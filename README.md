@@ -81,7 +81,11 @@ again; it is attached to that capture as an alternative reading. Each sighting s
 beeps if the plate is on a hot list, a linked allow list or already being timed. *Finish patrol
 and review* then walks the officer through every sighting in the normal Confirm → Check flow,
 using the frame time and the best GPS fix at or before it; cached frames are deleted once
-reviewed. Patrol mode is not available in the PWA.
+reviewed. A patrol capture can be **checked** or **dismissed** (there is no retake: the vehicle
+is usually gone by review). The plate stays editable either way. A dismissed capture is saved
+with its evidence frame and metadata to the global **Dismissed** list (Home → Dismissed captures),
+apart from every plate list: it starts no timing and matches nothing. A plate on a hot list
+asks for confirmation before it can be dismissed. Dismissed captures follow the retention setting. Patrol mode is not available in the PWA.
 
 ## Install
 

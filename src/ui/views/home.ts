@@ -1,6 +1,6 @@
 import { paymentLines } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
-import { getAllObservations, getLists } from '../../lib/db';
+import { countDismissed, getAllObservations, getLists } from '../../lib/db';
 import { describeRestriction, nextRestrictionStart, restrictionInForce } from '../../lib/restriction';
 import { formatUntil } from '../../lib/time';
 import type { ListType, Observation, PlateList, TimedList } from '../../lib/types';
@@ -14,12 +14,14 @@ export function segmentLabel(l: TimedList): string {
 export function homeView(_p: Record<string, string>, app: App): View {
   let lists: PlateList[] = [];
   let active: Observation[] = [];
+  let dismissedCount = 0;
   let loaded = false;
   let timer: number | undefined;
 
   const load = async () => {
     lists = await getLists();
     active = (await getAllObservations()).filter((o) => o.status === 'active');
+    dismissedCount = await countDismissed();
     loaded = true;
     app.update();
   };
@@ -97,6 +99,12 @@ export function homeView(_p: Record<string, string>, app: App): View {
                   html`<button type="button" class="btn-primary" @click=${() => app.navigate('/new')}>${icon('plus')} Create list</button>`,
                 )
               : html`${section('timed', now)}${section('hot', now)}${section('allow', now)}`}
+          ${loaded && dismissedCount
+            ? html`<button type="button" class="card flex w-full items-center justify-between text-left" data-testid="dismissed-link" @click=${() => app.navigate('/dismissed')}>
+                <span><span class="font-semibold">Dismissed captures</span><span class="block text-sm text-slate-400">Patrol captures dismissed at review, kept apart from every list</span></span>
+                <span class="chip border-ink-600 bg-ink-800 text-slate-300">${dismissedCount}</span>
+              </button>`
+            : nothing}
         `)}
         ${loaded && lists.length
           ? html`<button type="button" class="btn-primary fixed right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-20 rounded-full px-5 shadow-xl" @click=${() => app.navigate('/new')}>

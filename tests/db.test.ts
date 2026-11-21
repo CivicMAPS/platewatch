@@ -1,16 +1,21 @@
+import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  clearDismissed,
   closeDb,
+  deleteDismissed,
   deleteList,
+  getDismissed,
   getActiveObservations,
   getList,
   getScansForList,
   purgeScansOlderThan,
   putList,
+  saveDismissed,
   saveScan,
 } from '../src/lib/db';
 import { newObservation } from '../src/lib/engine';
-import type { ScanRecord } from '../src/lib/types';
+import type { DismissedCapture, ScanRecord } from '../src/lib/types';
 import { allow, at, r2P, timed } from './fixtures';
 
 const scan = (id: string, listId: string, createdAt: number, observationId: string | null = null): ScanRecord => ({
@@ -95,4 +100,74 @@ it('rechecks a corrected first sighting and preserves capture time, original ima
   expect(edited).toMatchObject({plate:'ABQ123',sha256:original.sha256,meta:{payment,capturedAt:t},
     observationId:null,amendmentResult:'timed_exempt',revisions:[{plate:'ABC123'}]});
   expect(await getActiveObservations(list.id)).toHaveLength(0);
+});
+
+describe('dismissed patrol captures (global list)', () => {
+  const dismissed = (id: string, createdAt: number, intendedListId = 'L1'): DismissedCapture => ({
+    id,
+    plate: 'CITYOFP',
+    ocrText: 'CITYOFP',
+    ocrEngine: 'patrol',
+    intendedListId,
+    intendedListName: 'york_784',
+    meta: { capturedAt: createdAt, capturedAtLocal: '', timeZone: 'Australia/Melbourne', location: null, locationAgeMs: null, userAgent: 'test' },
+    image: new Blob(['jpeg'], { type: 'image/jpeg' }),
+    thumb: new Blob(['jpeg'], { type: 'image/jpeg' }),
+    sha256: 'x',
+    createdAt,
+  });
+
+  it('keeps dismissed captures out of the intended list and its timing', async () => {
+    const list = timed();
+    await putList(list);
+    await saveDismissed(dismissed('d1', at(2026, 11, 20, 9), list.id));
+    expect(await getScansForList(list.id)).toEqual([]);
+    expect(await getActiveObservations(list.id)).toEqual([]);
+    expect((await getDismissed()).map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('lists newest first, survives deleting the intended list, and deletes one or all', async () => {
+    const list = timed();
+    await putList(list);
+    await saveDismissed(dismissed('old', at(2026, 11, 20, 9), list.id));
+    await saveDismissed(dismissed('new', at(2026, 11, 20, 10), list.id));
+    await deleteList(list.id);
+    expect((await getDismissed()).map((d) => d.id)).toEqual(['new', 'old']);
+    await deleteDismissed('new');
+    expect((await getDismissed()).map((d) => d.id)).toEqual(['old']);
+    await clearDismissed();
+    expect(await getDismissed()).toEqual([]);
+  });
+
+  it('applies the retention period to dismissed captures too', async () => {
+    const now = at(2026, 11, 30, 9);
+    await saveDismissed(dismissed('stale', now - 10 * 86_400_000));
+    await saveDismissed(dismissed('fresh', now - 86_400_000));
+    expect(await purgeScansOlderThan(7, now)).toBe(1);
+    expect((await getDismissed()).map((d) => d.id)).toEqual(['fresh']);
+  });
+
+  it('upgrades a version 1 database without losing lists or scans', async () => {
+    const v1 = await openDB('platewatch', 1, {
+      upgrade(d) {
+        d.createObjectStore('lists', { keyPath: 'id' }).createIndex('by-type', 'type');
+        const s = d.createObjectStore('scans', { keyPath: 'id' });
+        s.createIndex('by-list', 'listId');
+        s.createIndex('by-observation', 'observationId');
+        s.createIndex('by-created', 'createdAt');
+        const o = d.createObjectStore('observations', { keyPath: 'id' });
+        o.createIndex('by-list', 'listId');
+        o.createIndex('by-list-status', ['listId', 'status']);
+        d.createObjectStore('kv');
+      },
+    });
+    const list = timed();
+    await v1.put('lists', list);
+    await v1.put('scans', scan('s1', list.id, at(2026, 11, 20, 9)));
+    v1.close();
+    expect((await getList(list.id))?.id).toBe(list.id);
+    expect((await getScansForList(list.id)).map((s) => s.id)).toEqual(['s1']);
+    await saveDismissed(dismissed('d1', at(2026, 11, 20, 9)));
+    expect(await getDismissed()).toHaveLength(1);
+  });
 });

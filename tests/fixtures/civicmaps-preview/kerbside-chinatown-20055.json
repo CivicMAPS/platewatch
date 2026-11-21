@@ -1,0 +1,635 @@
+{
+  "schema": "civicmaps.kerbside_parking_segment.v1",
+  "schema_revision": "v1.1-normalised-sub-segments-and-bay-rules",
+  "patrol_zone": "CHINATOWN",
+  "road_segment_id": 20055,
+  "on_street": "Little Bourke Street",
+  "street_from": "Swanston Street",
+  "street_to": "Elizabeth Street",
+  "segment": {
+    "between": {
+      "from": "Swanston Street",
+      "to": "Elizabeth Street"
+    }
+  },
+  "display": {
+    "compact_lines": [
+      "CHINATOWN",
+      "Little Bourke Street",
+      "btwn Swanston + Elizabeth"
+    ]
+  },
+  "sides": [
+    {
+      "street_side": "northern",
+      "display_side": "North side",
+      "sub_segments": [
+        {
+          "from": "Swanston Street",
+          "to": "Elizabeth Street",
+          "sub_segment_type": "restriction_only",
+          "easypark_area": null,
+          "parking_area": null,
+          "parking_rules": [
+            {
+              "type": "no_stopping",
+              "rules": [
+                {
+                  "time": "00:00-24:00",
+                  "days": "Mon-Sun"
+                }
+              ]
+            }
+          ],
+          "parking_rules_status": "supplied",
+          "bays": [],
+          "notes": "Northern side of this road segment is no stopping from end to end."
+        }
+      ]
+    },
+    {
+      "street_side": "southern",
+      "display_side": "South side",
+      "sub_segments": [
+        {
+          "from": "Swanston Street",
+          "to": "Bay 58",
+          "sub_segment_type": "no_parking_spaces",
+          "start_location": {
+            "latitude": -37.81259845452667,
+            "longitude": 144.9651659309343
+          },
+          "end_location": {
+            "latitude": -37.8127332,
+            "longitude": 144.9645599
+          },
+          "easypark_area": null,
+          "parking_area": 645,
+          "parking_rules": [],
+          "parking_rules_status": "not_applicable_no_parking_spaces",
+          "bays": [],
+          "unallocated_points": [
+            {
+              "location": {
+                "latitude": -37.8126189,
+                "longitude": 144.9649479
+              },
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "medium",
+                "last_verified": null
+              },
+              "notes": "Source row supplied without street side, EasyPark area, parking area, or bay. Retained within no-parking-spaces sub-segment."
+            },
+            {
+              "location": {
+                "latitude": -37.8126377,
+                "longitude": 144.964884
+              },
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "medium",
+                "last_verified": null
+              },
+              "notes": "Source row supplied without street side, EasyPark area, parking area, or bay. Retained within no-parking-spaces sub-segment."
+            },
+            {
+              "location": {
+                "latitude": -37.812693,
+                "longitude": 144.9646964
+              },
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "medium",
+                "last_verified": null
+              },
+              "notes": "Source row supplied without street side, EasyPark area, parking area, or bay. Retained within no-parking-spaces sub-segment."
+            },
+            {
+              "location": {
+                "latitude": -37.8127128,
+                "longitude": 144.9646294
+              },
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "medium",
+                "last_verified": null
+              },
+              "notes": "Source row supplied without street side, EasyPark area, parking area, or bay. Retained within no-parking-spaces sub-segment."
+            }
+          ],
+          "notes": "Southern side start section has no parking spaces from supplied coordinate boundary through to bay 58."
+        },
+        {
+          "from": "Bay 58",
+          "to": "Bay 72",
+          "sub_segment_type": "parking_bays",
+          "start_location": {
+            "latitude": -37.8127332,
+            "longitude": 144.9645599
+          },
+          "end_location": {
+            "latitude": -37.8130949,
+            "longitude": 144.9633258
+          },
+          "easypark_area": 7514,
+          "parking_area": 645,
+          "parking_rules": [
+            {
+              "type": "loading_zone",
+              "rules": [
+                {
+                  "time": "07:00-16:00",
+                  "days": "Mon-Fri"
+                }
+              ]
+            },
+            {
+              "type": "2p_meter",
+              "rules": [
+                {
+                  "time": "07:00-22:00",
+                  "days": "Sat-Sun"
+                }
+              ]
+            }
+          ],
+          "parking_rules_status": "supplied",
+          "bays": [
+            {
+              "bay": 58,
+              "location": {
+                "latitude": -37.8127332,
+                "longitude": 144.9645599
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "side_and_easypark_inferred_high",
+              "notes": "Bay number, parking area, and coordinate supplied. Street side and EasyPark area inferred from supplied segment rule: bay 58 through bay 72 on southern side use EasyPark 7514."
+            },
+            {
+              "bay": 59,
+              "location": {
+                "latitude": -37.8127544,
+                "longitude": 144.9644881
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 61,
+              "location": {
+                "latitude": -37.8128019,
+                "longitude": 144.9643276
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 62,
+              "location": {
+                "latitude": -37.812822,
+                "longitude": 144.9642589
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 63,
+              "location": {
+                "latitude": -37.8128439,
+                "longitude": 144.9641844
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 64,
+              "location": {
+                "latitude": -37.8128658,
+                "longitude": 144.9641099
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 65,
+              "location": {
+                "latitude": -37.8128845,
+                "longitude": 144.964046
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 67,
+              "location": {
+                "latitude": -37.8129901,
+                "longitude": 144.9636815
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "side_and_easypark_inferred_high",
+              "notes": "Bay number, parking area, and coordinate supplied. Street side and EasyPark area inferred from supplied segment rule: bay 58 through bay 72 on southern side use EasyPark 7514."
+            },
+            {
+              "bay": 68,
+              "location": {
+                "latitude": -37.8130116,
+                "longitude": 144.9636084
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "side_and_easypark_inferred_high",
+              "notes": "Bay number, parking area, and coordinate supplied. Street side and EasyPark area inferred from supplied segment rule: bay 58 through bay 72 on southern side use EasyPark 7514."
+            },
+            {
+              "bay": 69,
+              "location": {
+                "latitude": -37.8130336,
+                "longitude": 144.9635337
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "side_and_easypark_inferred_high",
+              "notes": "Bay number, parking area, and coordinate supplied. Street side and EasyPark area inferred from supplied segment rule: bay 58 through bay 72 on southern side use EasyPark 7514."
+            },
+            {
+              "bay": 70,
+              "location": {
+                "latitude": -37.8130557,
+                "longitude": 144.9634588
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 71,
+              "location": {
+                "latitude": -37.8130758,
+                "longitude": 144.9633902
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            },
+            {
+              "bay": 72,
+              "location": {
+                "latitude": -37.8130949,
+                "longitude": 144.9633258
+              },
+              "parking_rules": [
+                {
+                  "type": "loading_zone",
+                  "rules": [
+                    {
+                      "time": "07:00-16:00",
+                      "days": "Mon-Fri"
+                    }
+                  ]
+                },
+                {
+                  "type": "2p_meter",
+                  "rules": [
+                    {
+                      "time": "07:00-22:00",
+                      "days": "Sat-Sun"
+                    }
+                  ]
+                }
+              ],
+              "parking_rules_status": "supplied",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied"
+            }
+          ],
+          "notes": "Parking rules apply to listed southern-side bays from bay 58 through bay 72. Bays 60 and 66 were not present in the supplied source rows and have not been inferred."
+        },
+        {
+          "from": "Bay 72",
+          "to": "Elizabeth Street",
+          "sub_segment_type": "unallocated_reference",
+          "easypark_area": null,
+          "parking_area": 645,
+          "parking_rules": [],
+          "parking_rules_status": "pending_field_capture",
+          "bays": [],
+          "unallocated_points": [
+            {
+              "location": {
+                "latitude": -37.8131461,
+                "longitude": 144.9630258
+              },
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "medium",
+                "last_verified": null
+              },
+              "notes": "Source row supplied without street side, EasyPark area, parking area, or bay. Retained as an unallocated kerbside reference point beyond bay 72 toward Elizabeth Street."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

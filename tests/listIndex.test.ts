@@ -87,6 +87,30 @@ describe('searchTimedLists', () => {
     // A leading field word still narrows the search.
     expect(ids('rpa 12')).toEqual(['york']);
   });
+  it('finds a segment by its council road segment ID', () => {
+    const withId = [...lists, seg('lb-south', 'Little Bourke Street', 'Swanston Street', 'Elizabeth Street', { roadSegmentId: '20055' })];
+    expect(searchTimedLists(withId, '20055').map((r) => r.list.id)).toEqual(['lb-south']);
+    expect(searchTimedLists(withId, '20055')[0]?.matches[0]?.label).toBe('Segment ID');
+  });
+  it('uses bay numbers to pick the sub-segment a bay sign belongs to', () => {
+    const subs = [
+      seg('bays-58-72', 'Little Bourke Street', 'Swanston Street', 'Elizabeth Street', { payment: { parkingArea: '645', easyPark: [], payStay: [] }, bays: [58, 59, 72] }),
+      seg('bays-80-90', 'Little Bourke Street', 'Swanston Street', 'Elizabeth Street', { payment: { parkingArea: '645', easyPark: [], payStay: [] }, bays: [80, 90] }),
+      seg('no-bays', 'Little Bourke Street', 'Swanston Street', 'Elizabeth Street', { payment: { parkingArea: '645', easyPark: [], payStay: [] } }),
+    ];
+    const ids = searchTimedLists(subs, '64558').map((r) => r.list.id);
+    // Bay 58 is listed for the first; the second lists its bays without 58; the third does not list bays.
+    expect(ids).toEqual(['bays-58-72', 'no-bays']);
+  });
+  it('finds a bay by its own plate number when it does not follow area + bay', () => {
+    const odd = seg('odd-plates', 'Bay Street', 'Graham Street', 'Ross Street', { bays: [3], bayPoints: [{ bay: 3, lat: -37.84, lng: 144.94, sign: 'PM-0003' }] });
+    expect(searchTimedLists([...lists, odd], 'PM-0003').map((r) => r.list.id)).toEqual(['odd-plates']);
+  });
+  it('matches sub-segment bounds such as an address', () => {
+    const part = seg('part', 'Little Bourke Street', 'Swanston Street', 'Russell Street');
+    part.segment = { ...part.segment, subFrom: 'Russell Street', subTo: '234 Little Bourke Street' };
+    expect(searchTimedLists([...lists, part], '234').map((r) => r.list.id)).toEqual(['part']);
+  });
   it('matches nothing for unrelated text', () => {
     expect(ids('qqqq')).toEqual([]);
   });

@@ -1,0 +1,81 @@
+{
+  "street": "Little Collins Street",
+  "segments": [
+    {
+      "between": {
+        "from": "Swanston Street",
+        "to": "Elizabeth Street"
+      },
+      "side": "south",
+      "easypark_area": 7526,
+      "parking_area_number": 629,
+      "signs": []
+    },
+    {
+      "between": {
+        "from": "Swanston Street",
+        "to": "Sugden Place"
+      },
+      "side": "south",
+      "easypark_area": null,
+      "parking_area_number": null,
+      "signs": [
+        {
+          "type": "loading_zone",
+          "rules": [
+            {
+              "time": "07:00-16:00",
+              "days": "Mon-Fri"
+            }
+          ]
+        },
+        {
+          "type": "2p_meter",
+          "rules": [
+            {
+              "time": "16:00-22:00",
+              "days": "Mon-Fri"
+            },
+            {
+              "time": "07:00-22:00",
+              "days": "Sat-Sun"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "between": {
+        "from": "Sugden Place",
+        "to": "Elizabeth Street"
+      },
+      "side": "south",
+      "easypark_area": null,
+      "parking_area_number": null,
+      "signs": [
+        {
+          "type": "loading_zone",
+          "rules": [
+            {
+              "time": "07:00-16:00",
+              "days": "Mon-Fri"
+            }
+          ]
+        },
+        {
+          "type": "2p_meter",
+          "rules": [
+            {
+              "time": "16:00-22:00",
+              "days": "Mon-Fri"
+            },
+            {
+              "time": "07:00-22:00",
+              "days": "Sat-Sun"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

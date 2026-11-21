@@ -265,6 +265,7 @@ export function settingsView(_p: Record<string, string>, app: App): View {
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => void exportBackup(false)}>${icon('share')} Export lists</button>
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => void exportBackup(true)}>${icon('share')} Export lists + scan records</button>
             <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => importRef.value?.click()}>${icon('upload')} Import backup</button>
+            <button type="button" class="btn-secondary" @click=${() => app.navigate('/import')}>${icon('upload')} Import lists from CSV / CivicMAPS files</button>
             <p class="text-xs text-slate-500">All data stays on this device unless you export it. Backups containing scan records include evidence images, locations and number plates — handle as personal information.</p>
           </section>
 

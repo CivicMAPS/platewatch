@@ -72,13 +72,26 @@ export interface TimedRestriction {
 }
 
 export interface PaymentAreas {
+  /**
+   * Parking area number (e.g. City of Melbourne): one per road segment, used to pay at the meter
+   * or in EasyPark. A bay's kerb sign is this number followed by the bay number (637 + 58 = 63758).
+   */
+  parkingArea?: string;
+  /** EasyPark area numbers; a segment can have several (e.g. one side changes restriction mid-day). */
   easyPark: string[];
+  /** PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side. */
   payStay: { zone: string; meter: string }[];
 }
 
 export interface TimedList extends BaseList {
   payment?: PaymentAreas;
   type: 'timed';
+  /** Internal patrol zone / enforcement area number, e.g. "9". Home groups and filters lists by it. */
+  patrolZone?: string;
+  /** Operational name of the patrol zone used day to day, e.g. "Flagstaff". */
+  patrolZoneName?: string;
+  /** Residential permit area, e.g. "12". */
+  rpa?: string;
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */
@@ -190,8 +203,10 @@ export interface ScanRecord {
   key: string;
   /** Raw OCR text before officer correction. */
   ocrText: string;
-  /** Tesseract mean confidence 0–100 (null when entered manually). */
+  /** Tesseract mean confidence 0–100 (null for ML Kit and patrol readings, and manual entry). */
   ocrConfidence: number | null;
+  /** Engine that read the plate; null when typed. Absent on records saved before 21 Nov 2026. */
+  ocrEngine?: 'tesseract' | 'mlkit' | 'patrol' | null;
   /** True when the officer changed the OCR result before checking. */
   corrected: boolean;
   outcome: ScanOutcome;
@@ -201,6 +216,28 @@ export interface ScanRecord {
   thumb: Blob;
   /** Hex SHA-256 of `image` bytes, computed at capture. */
   sha256: string;
+  createdAt: number;
+}
+
+/**
+ * A patrol capture the officer dismissed at review (sign text, a misread, a vehicle not of
+ * interest). Kept in one global list, apart from every plate list: it starts no timing and
+ * matches nothing, but the frame and its metadata stay available until deleted or purged.
+ */
+export interface DismissedCapture {
+  id: string;
+  /** Plate field as it stood when dismissed (the reading, or the officer's edit). */
+  plate: string;
+  ocrText: string;
+  ocrEngine: ScanRecord['ocrEngine'];
+  /** List the capture was being reviewed for; the list may since have been deleted. */
+  intendedListId: string;
+  intendedListName: string;
+  meta: CaptureMeta;
+  image: Blob;
+  thumb: Blob;
+  sha256: string;
+  /** When it was dismissed. */
   createdAt: number;
 }
 
@@ -246,6 +283,8 @@ export interface Settings {
   cameraZoom: number;
   /** Record field diagnostics on this device (see src/lib/diagnostics.ts). */
   diagnostics: boolean;
+  /** Home: patrol zone shown (null = all zones, '' = lists without a zone). */
+  listZoneFilter: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -257,4 +296,5 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraZoom: 1,
   // On during the development field-test stage; turn the default off before production.
   diagnostics: true,
+  listZoneFilter: null,
 };

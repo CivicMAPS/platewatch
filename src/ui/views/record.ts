@@ -6,6 +6,7 @@ import { html, nothing, type TemplateResult } from 'lit-html';
 import { evidenceFileName } from '../../lib/capture';
 import { deleteScan, getList, getObservation, getScan, getScansForObservation, putObservation } from '../../lib/db';
 import { readExifSummary } from '../../lib/exif';
+import { describeOcr, timingState } from '../../lib/recordSummary';
 import { shareFile } from '../../lib/files';
 import { formatLatLng, mapUrl } from '../../lib/geo';
 import { sha256Hex } from '../../lib/hash';
@@ -14,6 +15,19 @@ import type { Observation, PlateList, ScanRecord } from '../../lib/types';
 import type { App, View } from '../app';
 import { header, icon, page, plateBadge, UrlBag } from '../components';
 import { outcomeChip } from './listDetail';
+
+/** Timing status; "overdue" matches OVERDUE on the list once allowance + grace has run out. */
+function timingLine(o: Observation): TemplateResult {
+  const now = Date.now();
+  const state = timingState(o, now);
+  const started = `started ${formatDateTime(o.startedAt)}`;
+  if (state === 'overdue') {
+    const endedAt = o.allowanceEndsAt + o.graceMinutes * 60_000;
+    return html`<p class="text-sm text-slate-300">Status: <strong class="text-red-300">overdue</strong> · ${started} · allowance ended ${formatClock(endedAt)} (${formatDuration(now - endedAt)} ago). Re-scan the vehicle to record an overstay.</p>`;
+  }
+  const label = state === 'running' ? 'active' : state;
+  return html`<p class="text-sm text-slate-300">Status: <strong>${label}</strong> · ${started} · allowance ends ${formatClock(o.allowanceEndsAt)}</p>`;
+}
 
 export function recordView(params: Record<string, string>, app: App): View {
   const id = params.id ?? '';
@@ -164,7 +178,7 @@ export function recordView(params: Record<string, string>, app: App): View {
           ${observation
             ? html`<section class="card mt-4">
                 <h2 class="section-title">Timing (${observation.restrictionCode} · ${formatMinutes(observation.limitMinutes)}${observation.graceMinutes ? ` + ${observation.graceMinutes}m grace` : ''})</h2>
-                <p class="text-sm text-slate-300">Status: <strong>${observation.status}</strong> · started ${formatDateTime(observation.startedAt)} · allowance ends ${formatClock(observation.allowanceEndsAt)}</p>
+                ${timingLine(observation)}
                 <ol class="mt-3 grid gap-2">
                   ${timeline.map(
                     (t, i) => html`<li>
@@ -200,7 +214,7 @@ export function recordView(params: Record<string, string>, app: App): View {
                   ${loc.speed !== null ? row('Speed', `${(loc.speed * 3.6).toFixed(1)} km/h`) : nothing}
                   ${row('Fix age', s.meta.locationAgeMs !== null ? `${(s.meta.locationAgeMs / 1000).toFixed(1)} s` : '—')}`
                 : row('Location', html`<span class="text-red-300">Unavailable</span>`)}
-              ${row('OCR', s.ocrConfidence !== null ? `${s.ocrConfidence}% · “${s.ocrText || '—'}”` : 'Manual entry')}
+              ${row('OCR', describeOcr(s))}
               ${row('SHA-256', html`<span class="font-plate text-xs">${s.sha256}</span>`)}
             </dl>
             <button type="button" class="btn-secondary mt-3 w-full" @click=${verify} ?disabled=${integrity === 'checking'}>${icon('shield')} Verify image integrity & EXIF</button>

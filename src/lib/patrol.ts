@@ -5,8 +5,10 @@ export type PatrolMode = 'walking' | 'vehicle';
 export type CaptureMode = 'single' | 'multi';
 
 export interface Sighting {
-  /** Plate read by ML Kit; empty for a shutter capture where no plate-shaped text was read. */
+  /** Plate read by ML Kit, cleaned up by PlateRules; empty for a shutter capture where no plate-shaped text was read. */
   plate:string;
+  /** The ML Kit line as read, before clean-up (e.g. "1URX6YF" for plate 1UR6YF). */
+  raw?:string;
   at:number;
   path:string;
   x:number;
@@ -43,6 +45,20 @@ export interface PatrolStats extends DeviceStatus {
   zoomMax:number;
   frameWidth:number;
   frameHeight:number;
+  /** The part of the frame shown on screen (the analysis crop shared with the preview). */
+  cropWidth?:number;
+  cropHeight?:number;
+  /** Plate-shaped lines ignored: outside the guide (walking) or the screen, or not plate-like (sign words). */
+  outsideGuide?:number;
+  notPlate?:number;
+  /** Readings merged into an earlier capture instead of captured again. */
+  variants?:number;
+}
+
+/** Another reading of a captured plate (1UP6YF for 1UR6YF), offered at review instead of a second capture. */
+export interface PlateVariant {
+  plate:string;
+  variant:string;
 }
 
 interface PatrolPlugin {
@@ -56,6 +72,7 @@ interface PatrolPlugin {
   deviceStatus():Promise<DeviceStatus>;
   addListener(event:'sighting', handler:(s:Sighting)=>void):Promise<PluginListenerHandle>;
   addListener(event:'finished', handler:()=>void):Promise<PluginListenerHandle>;
+  addListener(event:'variant', handler:(v:PlateVariant)=>void):Promise<PluginListenerHandle>;
   /** The officer settled on a new zoom; persisted so the next session starts there. */
   addListener(event:'zoom', handler:(z:{ratio:number})=>void):Promise<PluginListenerHandle>;
   addListener(event:'stats', handler:(s:PatrolStats)=>void):Promise<PluginListenerHandle>;

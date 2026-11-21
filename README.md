@@ -20,12 +20,14 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Device date/time | Clock read *at the shutter* (before location is awaited): epoch ms, ISO 8601 local with offset, IANA zone. Embedded as **EXIF DateTimeOriginal + OffsetTimeOriginal + SubSecTime**, plus GPS UTC stamp. |
 | Image text → editable text | On-device Tesseract LSTM (no network). Plate mode: guide-box crop, contrast stretch + Otsu binarisation, 3-pass consensus; result is an editable field with alternative candidates. **Text reader** screen converts any photo (signs, permits) to editable text. |
 | Allow list | Plates (+ label, permit no., optional validity dates), bulk paste import. Exact matches on a linked timed list show a green "Permit valid": the sighting is recorded as evidence, no allowance clock starts, so the vehicle is never an overstay while the permit is valid. A permit typed but not yet added is saved with the list. |
-| Timed list | Street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
+| Timed list | Patrol zone: the internal enforcement area number (e.g. 9) and its operational name (e.g. Flagstaff); residential permit area (RPA); street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
+| Finding lists | Home groups timed lists by patrol zone, then road segment name, as compact rows with a scan button, live restriction status and overdue counts. Zone chips show one patrol zone (remembered). Fuzzy search matches patrol zone number or name, RPA, road segment and cross streets (prefix, any word, one typo), parking area number, EasyPark area, PayStay zone (any part, e.g. the assigned segment number inside a Port Phillip `3388…` number) and meter ID, and shows which field matched. A bay's kerb sign number finds its segment: `63758` → parking area 637, bay 58. A leading `rpa`, `meter`, `zone`, `area`, `bay`, `easypark` or `paystay` searches only that field (`rpa 12`). |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
 | Camera zoom and focus | One zoom button on every camera: each tap steps 1× → 1.75× → 3.5× → 5× → 1× (steps beyond the lens range are skipped); long-press for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
-| Plate reading | Android app: Google ML Kit (on-device) reads the plate guide plus a margin and picks the plate from the recognised lines. Browser build, or if ML Kit fails: Tesseract on the guide crop. |
-| Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together; Single reads only on the shutter. The shutter works in both. Every capture flashes the screen and vibrates. |
+| Plate reading | Android app: Google ML Kit (on-device) reads the plate guide plus a margin and picks the plate from the recognised lines. Browser build, or if ML Kit fails: Tesseract on the guide crop. Readings are cleaned up with Australian plate formats (VIC first): letters at digit positions become digits (`IUR6YF` → `1UR6YF`), and a reading that fits no format is retried without the VIC triangle (`1URX6YF` → `1UR6YF`) or a plate-frame edge (`EDTS512` → `DTS512`). Letter positions are never changed, and the raw reading is always shown for the officer to confirm. |
+| Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together, but only plate-like text (letters *and* digits, 4–8 characters) on screen, inside the guide in walking patrol; a second reading of the same plate (`1UP6YF` after `1UR6YF`) is offered as a choice at review instead of a new capture. Single reads only on the shutter, which also takes all-letter personalised plates. The shutter works in both. Every capture flashes the screen and vibrates. |
 | Field diagnostics | On by default during the development stage (Settings → Field diagnostics). Records camera resolution and zoom range, each capture's OCR engine, reading and time, the plate the officer confirmed, GPS accuracy and fix age, and every minute battery, battery temperature and Android thermal status; patrol adds frame and read rates every 30 s. On-device only; export as JSON from Settings. |
+| Backup | Export lists, or lists + scan records, as JSON; *Include dismissed captures* (off by default) adds the Dismissed list with its evidence images. Import merges or replaces; a backup without dismissed captures leaves the device's Dismissed list untouched. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
 ## Scan workflow (as implemented)
@@ -59,7 +61,7 @@ Interpretation notes:
   **possible match**: a *Near match* dialog shows the capture beside the candidate(s) and the
   officer edits or dismisses it. A possible match never exempts a vehicle automatically.
 - Checks are evaluated against the shutter time, not the time "Check" was pressed.
-- **Paid parking:** a timed list can carry EasyPark area numbers and PayStay zone / meter IDs.
+- **Paid parking:** a timed list can carry a parking area number (one per segment, e.g. City of Melbourne), EasyPark area numbers (several when a side changes restriction during the day) and PayStay zones with an optional meter ID (City of Port Phillip uses the zone number only: `3388` + segment number + four digits for the side).
   They are snapshotted into each capture, burned into the evidence data bar and shown as
   *Check payment before enforcing* on first sightings and re-sightings.
 - **Correcting a saved record:** *Record → Edit plate* re-runs the check for the corrected
@@ -72,11 +74,20 @@ Interpretation notes:
 On the APK the scan screen also offers **Walking patrol** / **Vehicle patrol**. A native
 CameraX + ML Kit text-recognition overlay (`PatrolCamera.java`, bridged by
 `src/lib/patrol.ts`) reads plates continuously; a plate must be seen in two frames within
-1.5 s (walking) / 0.9 s (vehicle) to count. Each sighting saves a frame to the app cache and
+1.5 s (walking) / 0.9 s (vehicle) to count. Preview and analysis share one CameraX `ViewPort`, so
+only text visible on screen is read; walking patrol also requires the plate inside the guide.
+Readings go through `PlateRules.java` (the native twin of `canonicalPlate` / `isAutoCapturePlate`
+/ `isPlateVariant` in `src/lib/plate.ts`; both run `tests/fixtures/plate-readings.tsv`). A reading
+within one character of a plate captured in the last 8 s (walking) / 4 s (vehicle) is not captured
+again; it is attached to that capture as an alternative reading. Each sighting saves a frame to the app cache and
 beeps if the plate is on a hot list, a linked allow list or already being timed. *Finish patrol
 and review* then walks the officer through every sighting in the normal Confirm → Check flow,
 using the frame time and the best GPS fix at or before it; cached frames are deleted once
-reviewed. Patrol mode is not available in the PWA.
+reviewed. A patrol capture can be **checked** or **dismissed** (there is no retake: the vehicle
+is usually gone by review). The plate stays editable either way. A dismissed capture is saved
+with its evidence frame and metadata to the global **Dismissed** list (Home → Dismissed captures),
+apart from every plate list: it starts no timing and matches nothing. A plate on a hot list
+asks for confirmation before it can be dismissed. Dismissed captures follow the retention setting. Patrol mode is not available in the PWA.
 
 ## Install
 

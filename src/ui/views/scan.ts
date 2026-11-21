@@ -14,6 +14,7 @@ import {
   getList,
   getScan,
   putObservation,
+  saveDismissed,
   saveScan,
   uid,
 } from '../../lib/db';
@@ -163,8 +164,11 @@ export function scanView(params: Record<string, string>, app: App): View {
   let dismissed = '';
   let editing = false;
   const listeners: PluginListenerHandle[] = [];
-  const queue: {s:Sighting; meta:PendingCapture['meta']}[] = [];
+  /** Patrol captures awaiting review; `variants` are other readings of the same plate seen after it. */
+  const queue: {s:Sighting; meta:PendingCapture['meta']; variants:string[]}[] = [];
   let nativeActive = false;
+  /** The capture under review came from a patrol: it can only be checked or dismissed, not retaken. */
+  let fromPatrol = false;
 
   const reviewNext = async () => {
     const item = queue[0];
@@ -177,7 +181,9 @@ export function scanView(params: Record<string, string>, app: App): View {
       pending = {frame,crop,meta:item.meta};
       cropUrl = crop.toDataURL('image/jpeg');
       plateInput = item.s.plate;
-      ocr = {plate:plateInput,candidates:plateInput ? [plateInput] : [],confidence:0,rawText:plateInput,durationMs:0,engine:'patrol'};
+      const candidates = [...new Set([item.s.plate,...item.variants].filter(Boolean))];
+      ocr = {plate:plateInput,candidates,confidence:0,rawText:item.s.raw || plateInput,durationMs:0,engine:'patrol'};
+      fromPatrol = true;
       phase = 'confirm';
       queue.shift();
       await patrol.release({path:item.s.path});
@@ -195,11 +201,17 @@ export function scanView(params: Record<string, string>, app: App): View {
       listeners.push(await patrol.addListener('sighting', s => {
         // Best fix produced at or before the frame; a later fix must not displace older valid ones.
         const location = geo.bestRecent(s.at, s.at);
-        void logDiag('sighting', { mode, manual: !!s.manual, captureMode: s.captureMode, plate: s.plate, zoom: s.zoom, fix: fixInfo(location, s.at) });
-        queue.push({s,meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
+        void logDiag('sighting', { mode, manual: !!s.manual, captureMode: s.captureMode, plate: s.plate, raw: s.raw ?? s.plate, zoom: s.zoom, fix: fixInfo(location, s.at) });
+        queue.push({s,variants:[],meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
           locationAgeMs:location ? s.at-location.timestamp:null,userAgent:navigator.userAgent,
           payment:selected.type === 'timed' ? structuredClone(selected.payment) : undefined}});
         if (keys.has(s.plate) && settings().sound) void patrol.alert();
+      }));
+      listeners.push(await patrol.addListener('variant', v => {
+        void logDiag('variant', { mode, plate: v.plate, variant: v.variant });
+        // Attach to the latest capture of that plate; offered as a candidate chip at review.
+        const item = [...queue].reverse().find(q => q.s.plate === v.plate);
+        if (item && !item.variants.includes(v.variant)) item.variants.push(v.variant);
       }));
       listeners.push(await patrol.addListener('zoom', ({ratio}) => void app.updateSettings({cameraZoom: ratio})));
       listeners.push(await patrol.addListener('stats', stats => void logDiag('patrol_stats', {...stats})));
@@ -222,6 +234,7 @@ export function scanView(params: Record<string, string>, app: App): View {
   };
 
   const resetToLive = () => {
+    fromPatrol = false;
     suggestions = [];
     dismissed = '';
     editing = false;
@@ -373,6 +386,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       plate,
       key: plateKey(plate),
       ocrText: ocr?.rawText ?? '',
+      ocrEngine: ocr?.engine ?? null,
       ocrConfidence: ocr?.durationMs && ocr.engine === 'tesseract' ? ocr.confidence : null,
       corrected,
       outcome,
@@ -412,6 +426,51 @@ export function scanView(params: Record<string, string>, app: App): View {
     const obs = newObservation({ id: obsId, list: l, plate, scanId: saved.id, at, instance });
     await saveScan(saved, obs);
     return saved;
+  };
+
+  /**
+   * Patrol review: discard the capture from the intended list. It is kept, with its evidence
+   * frame and metadata, in the global Dismissed list (Home → Dismissed) and starts no timing.
+   */
+  const dismiss = async () => {
+    if (!pending || !list || phase !== 'confirm') return;
+    const plate = normalisePlate(plateInput);
+    // Officer safety: a hot-list plate is never dismissed without a second look.
+    const hot = plate ? (await getHotLists()).find(h => h.entries.some(e => plateKey(e.plate) === plateKey(plate))) : undefined;
+    if (hot && !(await app.confirm({
+      title: 'Hot list plate',
+      body: `${plate} is on the hot list “${hot.name}”. Dismiss it anyway?`,
+      confirmLabel: 'Dismiss',
+      cancelLabel: 'Keep reviewing',
+      danger: true,
+    }))) return;
+    phase = 'saving';
+    app.update();
+    try {
+      const ev = await ensureEvidence(plate || '—');
+      await saveDismissed({
+        id: uid(),
+        plate,
+        ocrText: ocr?.rawText ?? '',
+        ocrEngine: ocr?.engine ?? null,
+        intendedListId: list.id,
+        intendedListName: list.name,
+        meta: pending.meta,
+        image: ev.image,
+        thumb: ev.thumb,
+        sha256: ev.sha256,
+        createdAt: Date.now(),
+      });
+      // Which readings officers throw away: the false-capture rate for the next field test.
+      void logDiag('dismiss', { engine: ocr?.engine ?? null, ocrPlate: ocr?.plate ?? '', plate, listId: list.id });
+      app.toast(`${plate || 'Capture'} dismissed`, 'info');
+    } catch (e) {
+      phase = 'confirm';
+      app.toast(`Could not dismiss: ${(e as Error).message}`, 'error');
+      app.update();
+      return;
+    }
+    resetToLive();
   };
 
   const check = async () => {
@@ -630,7 +689,10 @@ export function scanView(params: Record<string, string>, app: App): View {
   };
 
   const liveControls = (): TemplateResult => html`<div class="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 to-transparent px-4 pt-10 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-    ${hasPatrol() ? html`<div class="mb-3 flex gap-2"><button class="btn-secondary" @click=${() => beginPatrol('walking')}>Walking patrol</button><button class="btn-secondary" @click=${() => beginPatrol('vehicle')}>Vehicle patrol</button></div>` : nothing}
+    ${hasPatrol() ? html`<div class="mx-auto mb-4 grid max-w-md grid-cols-2 gap-3">
+        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start walking patrol" @click=${() => beginPatrol('walking')}>Walking</button>
+        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start vehicle patrol" @click=${() => beginPatrol('vehicle')}>Vehicle</button>
+      </div>` : nothing}
     ${zoomControls()}
     <div class="flex items-center justify-between">
       <button type="button" class="btn-ghost min-h-14 w-16 flex-col gap-0 px-0 text-xs text-white" @click=${() => void capture(true)} ?disabled=${phase !== 'live'}>
@@ -685,8 +747,9 @@ export function scanView(params: Record<string, string>, app: App): View {
     const busy = phase === 'saving';
     return html`<div class="mx-auto max-w-xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-28">
       <div class="flex items-center gap-2">
-        <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Retake" @click=${resetToLive}>${icon('back', 'h-6 w-6')}</button>
+        <button type="button" class="btn-ghost min-h-11 px-2" aria-label=${fromPatrol ? 'Dismiss' : 'Retake'} @click=${() => fromPatrol ? void dismiss() : resetToLive()} ?disabled=${busy}>${icon('back', 'h-6 w-6')}</button>
         <h1 class="text-lg font-bold">Confirm plate</h1>
+        ${fromPatrol ? html`<span class="ml-auto text-sm text-slate-400" data-testid="review-remaining">${queue.length ? `${queue.length} more to review` : 'Last capture'}</span>` : nothing}
       </div>
       ${cropUrl || frameUrl
         ? html`<img src=${cropUrl || frameUrl} alt="Captured plate" class="mt-3 w-full rounded-xl border border-ink-600 bg-black object-contain ${frameUrl ? 'max-h-64' : 'max-h-40'}" />`
@@ -712,7 +775,9 @@ export function scanView(params: Record<string, string>, app: App): View {
           : html`<p class="mt-2 text-xs text-slate-400">${ocrError || 'Manual entry'}</p>`}
         <div class="mt-4 border-t border-ink-700 pt-3">${metaSummary(p)}</div>
         <div class="mt-4 grid grid-cols-2 gap-3">
-          <button type="button" class="btn-secondary" @click=${resetToLive} ?disabled=${busy}>${icon('refresh')} Retake</button>
+          ${fromPatrol
+            ? html`<button type="button" class="btn-secondary" data-testid="dismiss" @click=${() => void dismiss()} ?disabled=${busy}>${icon('x')} Dismiss</button>`
+            : html`<button type="button" class="btn-secondary" @click=${resetToLive} ?disabled=${busy}>${icon('refresh')} Retake</button>`}
           <button type="submit" class="btn-primary" data-testid="check" ?disabled=${busy}>${busy ? spinner() : icon('check')} ${editing ? 'Save and recheck' : 'Check'}</button>
         </div>
       </form>

@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Base64;
+import android.util.Rational;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -53,6 +54,10 @@ import java.util.*;
  *
  * Capture modes:
  *  - Multi: every frame is read; a plate seen in consecutive frames is captured automatically.
+ *    Only text the officer can see counts (preview and analysis share one ViewPort); in walking
+ *    patrol it must also sit in the plate guide. Readings are cleaned up and filtered by
+ *    PlateRules, and a near-duplicate of a recent capture (1UR6YF / 1UP6YF) is not captured
+ *    again: it is reported to the web layer as an alternative reading ("variant" event).
  *  - Single: frames are only read when the officer presses the shutter (saves battery).
  * The shutter works in both modes. Every capture flashes the screen and vibrates.
  */
@@ -69,6 +74,11 @@ public class PatrolCamera extends Plugin {
     private String session;
     private final Map<String,Long> lastSeen = new HashMap<>();
     private final Set<String> emitted = new HashSet<>();
+    /** Captured plates and when a reading of them (or of a variant) was last seen. */
+    private final Map<String,Long> recent = new HashMap<>();
+    private final Set<String> variantsReported = new HashSet<>();
+    /** Plate guide as fractions of the screen: left, top, right, bottom. Set by fitGuide. */
+    private final float[] guideNorm = {0.09f,0.4f,0.91f,0.6f};
     private OnBackPressedCallback backCallback;
 
     private Camera camera;
@@ -85,7 +95,10 @@ public class PatrolCamera extends Plugin {
 
     // Diagnostics counters, reported every STATS_INTERVAL_MS while diagnostics are on.
     private long statsSince, ocrMsTotal;
-    private int framesSeen, framesRead, linesSeen, plateLines, frameWidth, frameHeight;
+    private int framesSeen, framesRead, linesSeen, plateLines, frameWidth, frameHeight, cropWidth, cropHeight;
+    private int outsideGuide, notPlate, variants;
+    /** A reading similar to a capture within this time (since it was last seen) is the same vehicle. */
+    private static final long VARIANT_WINDOW_WALKING_MS = 8_000, VARIANT_WINDOW_VEHICLE_MS = 4_000;
 
     /* ───────────── Lifecycle ───────────── */
 
@@ -135,7 +148,12 @@ public class PatrolCamera extends Plugin {
                         ImageAnalysis analysis = new ImageAnalysis.Builder().setTargetResolution(new Size(1920,1080))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build();
                         analysis.setAnalyzer(main,frame -> analyze(frame,current,vehicle));
-                        camera = provider.bindToLifecycle(getActivity(),CameraSelector.DEFAULT_BACK_CAMERA,feed,analysis);
+                        // One ViewPort for both use cases: each analysis frame then carries a crop
+                        // rect matching what the preview shows. Without it the square analysis frame
+                        // saw well beyond the screen edges and read sign text the officer never saw.
+                        UseCaseGroup group = new UseCaseGroup.Builder().setViewPort(viewPort())
+                            .addUseCase(feed).addUseCase(analysis).build();
+                        camera = provider.bindToLifecycle(getActivity(),CameraSelector.DEFAULT_BACK_CAMERA,group);
                         zoomReady = false;
                         camera.getCameraInfo().getZoomState().observe(getActivity(),this::onZoomState);
                         applyPlateFocus();
@@ -160,7 +178,7 @@ public class PatrolCamera extends Plugin {
         if(reader!=null)reader.close();
         if(tone!=null){tone.release();tone=null;}
         ((ViewGroup)panel.getParent()).removeView(panel);
-        panel=null;lastSeen.clear();emitted.clear();shutterRequested=false;
+        panel=null;lastSeen.clear();emitted.clear();recent.clear();variantsReported.clear();shutterRequested=false;
         notifyListeners("finished",new JSObject());
     }
     @Override protected void handleOnDestroy(){finish();}
@@ -270,7 +288,7 @@ public class PatrolCamera extends Plugin {
         row.addView(shutter,sp);
 
         modeButton = button("","Capture mode. Tap to switch between Multi and Single.");
-        modeButton.setOnClickListener(v -> { multi = !multi; emitted.clear(); lastSeen.clear(); showStatus(); });
+        modeButton.setOnClickListener(v -> { multi = !multi; emitted.clear(); lastSeen.clear(); recent.clear(); variantsReported.clear(); showStatus(); });
         row.addView(modeButton,new LinearLayout.LayoutParams(0,-2,1f));
         controls.addView(row,new LinearLayout.LayoutParams(-1,-2));
         panel.addView(controls,new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM));
@@ -305,6 +323,43 @@ public class PatrolCamera extends Plugin {
         FrameLayout.LayoutParams p = (FrameLayout.LayoutParams)guide.getLayoutParams();
         p.width = w; p.height = w/3;
         guide.setLayoutParams(p);
+        // The guide is centred (Gravity.CENTER) on the full-screen preview.
+        guideNorm[0] = (width-w)/2f/width; guideNorm[2] = (width+w)/2f/width;
+        guideNorm[1] = (height-w/3f)/2f/height; guideNorm[3] = (height+w/3f)/2f/height;
+    }
+
+    /** The preview's visible area (FILL_CENTER, like PreviewView), shared with the analysis use case. */
+    private ViewPort viewPort() {
+        PreviewView view = (PreviewView)panel.getChildAt(0);
+        ViewPort port = view.getViewPort();
+        if (port!=null) return port;
+        // Not laid out yet: the panel fills the screen, so use the display size.
+        var metrics = getContext().getResources().getDisplayMetrics();
+        int rotation = panel.getDisplay()!=null ? panel.getDisplay().getRotation() : Surface.ROTATION_0;
+        return new ViewPort.Builder(new Rational(metrics.widthPixels,metrics.heightPixels),rotation).build();
+    }
+
+    /** The part of the frame shown on screen, in upright image coordinates (as ML Kit reports boxes). */
+    private static Rect visibleRect(ImageProxy frame,int rotation) {
+        Rect c = frame.getCropRect();
+        int w = frame.getWidth(), h = frame.getHeight();
+        switch (rotation) {
+            case 90: return new Rect(h-c.bottom,c.left,h-c.top,c.right);
+            case 180: return new Rect(w-c.right,h-c.bottom,w-c.left,h-c.top);
+            case 270: return new Rect(c.top,w-c.right,c.bottom,w-c.left);
+            default: return new Rect(c);
+        }
+    }
+
+    /** The plate guide in upright image coordinates, grown by the given fractions of its size. */
+    private Rect guideRect(Rect visible,float growX,float growY) {
+        float l = guideNorm[0], t = guideNorm[1], r = guideNorm[2], b = guideNorm[3];
+        float gx = (r-l)*growX, gy = (b-t)*growY;
+        return new Rect(
+            visible.left+Math.round(Math.max(0f,l-gx)*visible.width()),
+            visible.top+Math.round(Math.max(0f,t-gy)*visible.height()),
+            visible.left+Math.round(Math.min(1f,r+gx)*visible.width()),
+            visible.top+Math.round(Math.min(1f,b+gy)*visible.height()));
     }
 
     private void confirmCapture() {
@@ -329,6 +384,30 @@ public class PatrolCamera extends Plugin {
         return box!=null && plateText(line).matches("[A-Z0-9]{2,8}") && box.width()>=1.4*box.height();
     }
 
+    private boolean recentlyCaptured(String plate,long now,boolean vehicle) {
+        long window = vehicle ? VARIANT_WINDOW_VEHICLE_MS : VARIANT_WINDOW_WALKING_MS;
+        for (Map.Entry<String,Long> e:recent.entrySet()) {
+            if (now-e.getValue()>window || !PlateRules.variant(e.getKey(),plate)) continue;
+            e.setValue(now);
+            if (!e.getKey().equals(plate) && variantsReported.add(e.getKey()+"|"+plate)) {
+                variants++;
+                JSObject event = new JSObject();
+                event.put("plate",e.getKey()); event.put("variant",plate);
+                notifyListeners("variant",event);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** Drop stale entries so the maps stay small on a long patrol. */
+    private void prune(long now) {
+        if (lastSeen.size()<200 && recent.size()<200) return;
+        lastSeen.values().removeIf(t -> now-t>10_000);
+        recent.values().removeIf(t -> now-t>60_000);
+        emitted.retainAll(lastSeen.keySet());
+    }
+
     @androidx.camera.core.ExperimentalGetImage
     private void analyze(ImageProxy frame,String current,boolean vehicle) {
         if (!current.equals(session) || frame.getImage()==null) {frame.close();return;}
@@ -347,60 +426,88 @@ public class PatrolCamera extends Plugin {
         int rotation = frame.getImageInfo().getRotationDegrees();
         long at = System.currentTimeMillis();
         long t0 = SystemClock.elapsedRealtime();
+        Rect visible = visibleRect(frame,rotation);
+        if (cropWidth==0) { cropWidth = visible.width(); cropHeight = visible.height(); }
+        // Walking: the officer aims the plate into the guide; allow some slack around it.
+        // Vehicle: plates pass anywhere across the screen, so the whole visible area counts.
+        Rect zone = vehicle ? visible : guideRect(visible,0.05f,0.5f);
         InputImage image = InputImage.fromMediaImage(frame.getImage(),rotation);
         reader.process(image).addOnSuccessListener(result -> {
             ocrMsTotal += SystemClock.elapsedRealtime()-t0;
             if (!current.equals(session)) return;
-            if (manual) { captureManual(frame,rotation,at,result); return; }
+            if (manual) { captureManual(frame,rotation,at,result,visible); return; }
             Set<String> seen = new HashSet<>();
+            long now = SystemClock.elapsedRealtime();
+            prune(now);
             for (Text.TextBlock block:result.getTextBlocks()) for (Text.Line line:block.getLines()) {
                 linesSeen++;
                 if (!plateShaped(line)) continue;
+                Rect box = line.getBoundingBox();
+                if (!zone.contains(box.centerX(),box.centerY())) {outsideGuide++;continue;}
+                String raw = plateText(line);
+                String plate = PlateRules.canonical(raw);
+                if (!PlateRules.autoCapture(plate)) {notPlate++;continue;}
                 plateLines++;
-                String plate = plateText(line);
                 if (!seen.add(plate)) continue;
-                long now = SystemClock.elapsedRealtime();
+                if (recentlyCaptured(plate,now,vehicle)) continue;
                 Long previous = lastSeen.put(plate,now);
                 // A plate must be read in two frames close together before it is captured.
                 if (previous==null || now-previous>(vehicle?900:1500)) {emitted.remove(plate);continue;}
                 if (emitted.contains(plate)) continue;
                 emitted.add(plate);
-                if (!emitSighting(frame,rotation,at,plate,line.getBoundingBox(),false)) {finish();break;}
+                recent.put(plate,now);
+                if (!emitSighting(frame,rotation,at,plate,raw,box,visible,false)) {finish();break;}
             }
         }).addOnFailureListener(e -> {
-            if (manual && current.equals(session)) captureManual(frame,rotation,at,null);
+            if (manual && current.equals(session)) captureManual(frame,rotation,at,null,visible);
         }).addOnCompleteListener(task -> frame.close());
     }
 
-    /** Shutter press: always capture the frame, with the most central plate-shaped line if one was read. */
-    private void captureManual(ImageProxy frame,int rotation,long at,Text result) {
-        int w = rotation%180==0 ? frame.getWidth() : frame.getHeight();
-        int h = rotation%180==0 ? frame.getHeight() : frame.getWidth();
+    /**
+     * Shutter press: always capture the frame, with the plate-shaped line nearest the guide if one
+     * was read on screen. Any text counts here (the officer chose the moment), including all-letter
+     * personalised plates that Multi does not capture on its own.
+     */
+    private void captureManual(ImageProxy frame,int rotation,long at,Text result,Rect visible) {
+        Rect guideBox = guideRect(visible,0f,0f);
         Text.Line best = null;
         double bestScore = Double.MAX_VALUE;
         if (result!=null) for (Text.TextBlock block:result.getTextBlocks()) for (Text.Line line:block.getLines()) {
             if (!plateShaped(line)) continue;
             Rect b = line.getBoundingBox();
-            double dx = b.exactCenterX()-w/2.0, dy = b.exactCenterY()-h/2.0;
-            // Prefer the line nearest the guide (screen centre); larger text breaks near-ties.
-            double score = Math.hypot(dx,dy)-b.height();
+            if (!visible.contains(b.centerX(),b.centerY())) continue;
+            double dx = b.exactCenterX()-guideBox.exactCenterX(), dy = b.exactCenterY()-guideBox.exactCenterY();
+            // Prefer the line nearest the guide; larger text breaks near-ties; plate formats win.
+            double score = Math.hypot(dx,dy)-b.height()-(PlateRules.autoCapture(PlateRules.canonical(plateText(line))) ? guideBox.height() : 0);
             if (score<bestScore) {bestScore=score;best=line;}
         }
-        Rect box;
-        if (best!=null) box = best.getBoundingBox();
-        else { int gw = (int)(w*0.82f), gh = gw/3; box = new Rect((w-gw)/2,(h-gh)/2,(w+gw)/2,(h+gh)/2); }
-        if (!emitSighting(frame,rotation,at,best!=null ? plateText(best) : "",box,true)) finish();
+        String raw = best!=null ? plateText(best) : "";
+        Rect box = best!=null ? best.getBoundingBox() : guideBox;
+        if (!emitSighting(frame,rotation,at,PlateRules.canonical(raw),raw,box,visible,true)) finish();
     }
 
-    private boolean emitSighting(ImageProxy frame,int rotation,long at,String plate,Rect box,boolean manual) {
+    /**
+     * Save the frame as the officer saw it (cropped to the visible area) and report the plate box
+     * relative to that saved image.
+     */
+    private boolean emitSighting(ImageProxy frame,int rotation,long at,String plate,String rawText,Rect plateBox,Rect visible,boolean manual) {
         try {
             Bitmap raw = frame.toBitmap();
             Matrix m = new Matrix(); m.postRotate(rotation);
             Bitmap upright = Bitmap.createBitmap(raw,0,0,raw.getWidth(),raw.getHeight(),m,true);
+            // raw is in buffer orientation, like frame.getWidth()/getHeight().
+            boolean full = raw.getWidth()==frame.getWidth() && raw.getHeight()==frame.getHeight();
+            Rect v = new Rect(visible);
+            // toBitmap() may or may not apply the crop rect; only crop when it returned the full frame.
+            if (full && v.intersect(0,0,upright.getWidth(),upright.getHeight()) && (v.width()<upright.getWidth() || v.height()<upright.getHeight()))
+                upright = Bitmap.createBitmap(upright,v.left,v.top,v.width(),v.height());
+            Rect box = new Rect(plateBox);
+            box.offset(-visible.left,-visible.top);
+            if (!box.intersect(0,0,upright.getWidth(),upright.getHeight())) box.set(0,0,upright.getWidth(),upright.getHeight());
             File path = File.createTempFile("patrol-", ".jpg",getContext().getCacheDir());
             try(FileOutputStream out = new FileOutputStream(path)) {upright.compress(Bitmap.CompressFormat.JPEG,88,out);}
             JSObject event = new JSObject();
-            event.put("plate",plate); event.put("at",at); event.put("path",path.getAbsolutePath());
+            event.put("plate",plate); event.put("raw",rawText); event.put("at",at); event.put("path",path.getAbsolutePath());
             event.put("x",box.left);event.put("y",box.top);event.put("width",box.width());event.put("height",box.height());
             event.put("manual",manual); event.put("zoom",(double)currentZoom);
             event.put("captureMode",multi ? "multi" : "single");
@@ -541,8 +648,9 @@ public class PatrolCamera extends Plugin {
     private void resetStats() {
         statsSince = SystemClock.elapsedRealtime();
         framesSeen = framesRead = linesSeen = plateLines = 0;
+        outsideGuide = notPlate = variants = 0;
         ocrMsTotal = 0;
-        frameWidth = frameHeight = 0;
+        frameWidth = frameHeight = cropWidth = cropHeight = 0;
     }
 
     private JSObject deviceStatusObject() {
@@ -577,10 +685,12 @@ public class PatrolCamera extends Plugin {
         e.put("lines",linesSeen); e.put("plateLines",plateLines); e.put("captures",captures);
         e.put("zoom",(double)currentZoom); e.put("zoomMin",(double)zoomMin); e.put("zoomMax",(double)zoomMax);
         e.put("frameWidth",frameWidth); e.put("frameHeight",frameHeight);
+        e.put("cropWidth",cropWidth); e.put("cropHeight",cropHeight);
+        e.put("outsideGuide",outsideGuide); e.put("notPlate",notPlate); e.put("variants",variants);
         notifyListeners("stats",e);
-        int w = frameWidth, h = frameHeight;
+        int w = frameWidth, h = frameHeight, cw = cropWidth, ch = cropHeight;
         resetStats();
-        frameWidth = w; frameHeight = h;
+        frameWidth = w; frameHeight = h; cropWidth = cw; cropHeight = ch;
     }
 
     /* ───────────── Misc ───────────── */

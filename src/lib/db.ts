@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import {
   DEFAULT_SETTINGS,
   type AllowList,
+  type DismissedCapture,
   type HotList,
   type Observation,
   type PlateList,
@@ -11,7 +12,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -26,6 +27,8 @@ interface PlateWatchDB extends DBSchema {
     indexes: { 'by-list': string; 'by-list-status': [string, string] };
   };
   kv: { key: string; value: unknown };
+  /** Version 2: patrol captures dismissed at review (one global list). */
+  dismissed: { key: string; value: DismissedCapture; indexes: { 'by-created': number } };
 }
 
 let dbPromise: Promise<IDBPDatabase<PlateWatchDB>> | null = null;
@@ -44,6 +47,9 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
         obs.createIndex('by-list', 'listId');
         obs.createIndex('by-list-status', ['listId', 'status']);
         database.createObjectStore('kv');
+      }
+      if (oldVersion < 2) {
+        database.createObjectStore('dismissed', { keyPath: 'id' }).createIndex('by-created', 'createdAt');
       }
     },
     blocked() {
@@ -184,19 +190,23 @@ export async function deleteScan(id: string): Promise<void> {
   await (await db()).delete('scans', id);
 }
 
-/** Delete scans (and their closed observations) created before now − days. Returns count deleted. */
+/**
+ * Delete scans (and their closed observations) and dismissed captures created before
+ * now − days. Returns the number of scans and dismissed captures deleted.
+ */
 export async function purgeScansOlderThan(days: number, now = Date.now()): Promise<number> {
   if (days <= 0) return 0;
   const cutoff = now - days * 86_400_000;
   const d = await db();
-  const tx = d.transaction(['scans', 'observations'], 'readwrite');
-  const scans = tx.objectStore('scans');
+  const tx = d.transaction(['scans', 'observations', 'dismissed'], 'readwrite');
   let n = 0;
-  let cursor = await scans.index('by-created').openCursor(IDBKeyRange.upperBound(cutoff, true));
-  while (cursor) {
-    await cursor.delete();
-    n++;
-    cursor = await cursor.continue();
+  for (const store of ['scans', 'dismissed'] as const) {
+    let cursor = await tx.objectStore(store).index('by-created').openCursor(IDBKeyRange.upperBound(cutoff, true));
+    while (cursor) {
+      await cursor.delete();
+      n++;
+      cursor = await cursor.continue();
+    }
   }
   const obsStore = tx.objectStore('observations');
   for (const o of await obsStore.getAll()) {
@@ -204,6 +214,29 @@ export async function purgeScansOlderThan(days: number, now = Date.now()): Promi
   }
   await tx.done;
   return n;
+}
+
+/* ─────────────────────── Dismissed captures ─────────────────────── */
+
+export async function saveDismissed(d: DismissedCapture): Promise<void> {
+  await (await db()).put('dismissed', d);
+}
+
+/** Newest first. */
+export async function getDismissed(): Promise<DismissedCapture[]> {
+  return (await (await db()).getAll('dismissed')).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function countDismissed(): Promise<number> {
+  return (await db()).count('dismissed');
+}
+
+export async function deleteDismissed(id: string): Promise<void> {
+  await (await db()).delete('dismissed', id);
+}
+
+export async function clearDismissed(): Promise<void> {
+  await (await db()).clear('dismissed');
 }
 
 /* ──────────────────────────── Settings ──────────────────────────── */
@@ -223,15 +256,19 @@ export async function replaceAll(data: {
   lists: PlateList[];
   observations: Observation[];
   scans: ScanRecord[];
+  /** Only when the backup includes the Dismissed list; otherwise dismissed captures are untouched. */
+  dismissed?: DismissedCapture[];
   merge: boolean;
 }): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['lists', 'scans', 'observations'], 'readwrite');
+  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed'], 'readwrite');
   if (!data.merge) {
     await tx.objectStore('lists').clear();
     await tx.objectStore('scans').clear();
     await tx.objectStore('observations').clear();
+    if (data.dismissed) await tx.objectStore('dismissed').clear();
   }
+  for (const x of data.dismissed ?? []) await tx.objectStore('dismissed').put(x);
   for (const l of data.lists) await tx.objectStore('lists').put(l);
   for (const o of data.observations) await tx.objectStore('observations').put(o);
   for (const s of data.scans) await tx.objectStore('scans').put(s);

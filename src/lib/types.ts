@@ -190,8 +190,10 @@ export interface ScanRecord {
   key: string;
   /** Raw OCR text before officer correction. */
   ocrText: string;
-  /** Tesseract mean confidence 0–100 (null when entered manually). */
+  /** Tesseract mean confidence 0–100 (null for ML Kit and patrol readings, and manual entry). */
   ocrConfidence: number | null;
+  /** Engine that read the plate; null when typed. Absent on records saved before 21 Nov 2026. */
+  ocrEngine?: 'tesseract' | 'mlkit' | 'patrol' | null;
   /** True when the officer changed the OCR result before checking. */
   corrected: boolean;
   outcome: ScanOutcome;

@@ -25,6 +25,15 @@ describe('plate from ML Kit lines', () => {
     expect(r.plate).toBe('XYZ789');
   });
 
+  it('drops the VIC triangle read as X between the groups (field test 1URX6YF)', () => {
+    const r = plateFromLines([line('1UR X 6YF', 300, 120, 600, 150), line('VICTORIA - THE EDUCATION STATE', 350, 300, 500, 30)], image);
+    expect(r.plate).toBe('1UR6YF');
+  });
+
+  it('drops a plate-frame edge read as a leading E (field test EDTS512)', () => {
+    expect(plateFromLines([line('EDTS 512', 300, 120, 600, 150)], image).plate).toBe('DTS512');
+  });
+
   it('returns no plate when nothing plate-like was read', () => {
     expect(plateFromLines([], image).plate).toBe('');
     expect(plateFromLines([line('A', 600, 200, 20, 20)], image).plate).toBe('');

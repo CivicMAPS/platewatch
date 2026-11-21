@@ -59,6 +59,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx cap sync android
+      - name: Native unit tests (plate rules share tests/fixtures/plate-readings.tsv with vitest)
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --no-daemon
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon

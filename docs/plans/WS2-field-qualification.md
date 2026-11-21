@@ -15,6 +15,28 @@ Status: in progress. Prepared 20 November 2026 by Claude Code (agent). Base: `ma
 Still to confirm on the device: the patrol screen's controls are now visible and reachable, the camera
 reports a usable zoom range (logged as `patrol_camera`), and ML Kit's readings (`capture` vs `record` events).
 
+## Second field test (21 Nov 2026, Coventry St and York St), and what changed
+
+Source: diagnostics export (13:13) plus screenshots (13:18–13:22). The diagnostics confirm that the patrol
+screen, zoom (0.6–10×) and ML Kit work on the device. They also measured what went wrong:
+
+| Finding (evidence) | Root cause | Change |
+|---|---|---|
+| Walking patrol at a parking sign: 20 auto captures in two sessions, 14 of them sign words (`CITYOFP`, `LAWS`, `AUTHORIS`, `WHOSEPHO`, `TOCERTI` …); the officer discarded all of them | Analysis frame is 2736×2736 (1:1), the preview 9:16, with no shared `ViewPort`: ML Kit read the full square frame, well past the screen edges. Any 2–8 character line was a "plate". | Preview and analysis bound in one `UseCaseGroup` with the preview's `ViewPort`; text off screen is ignored, walking patrol needs the plate inside the guide. Auto capture needs letters and digits. |
+| One car (1UR 6YF) captured five times as `IUR6YF`, `IUP6YF`, `1UP6YF`, `IUDGYF`, `1URX6YF` | Duplicate check was exact string match | Readings cleaned up by plate format (1→I, 6→G at digit positions, VIC triangle read as X). A reading within one character of a recent capture is attached to it as an alternative (candidate chip at review), not captured again. |
+| Officer corrected `EDTS512` → `DTS512` and `EDA8899` → `DA8899` | Plate frame edge read as a leading E | Dropped when the rest fits a format exactly (`DTS512`). `DA8899` matches no format, so that one stays for the officer. |
+| Record shows "OCR: Manual entry" for a patrol reading | Record screen only described Tesseract readings | Engine stored on new records (`ocrEngine`) and shown with the raw text; older records with OCR text show "OCR". |
+| Record shows "Status: active · allowance ends 09:52:08" at 13:22 while the list says OVERDUE | Record screen printed the observation status only | Shows "overdue · allowance ended 09:52 (3h 30m ago). Re-scan the vehicle to record an overstay." |
+| Times on the York St list (first seen 08:52, 4h 28m overdue at 13:20) | Not a bug: the captures were at 08:52–08:54 and the vehicles were not re-scanned | — |
+
+New in the diagnostics: `sighting.raw`, `variant` events, and in `patrol_stats` the visible crop size
+(`cropWidth`/`cropHeight`) and the lines ignored (`outsideGuide`, `notPlate`) or merged (`variants`).
+
+Still to confirm on the device: (1) patrol frames saved for review are cropped to what was on screen and the
+review crop lands on the plate; (2) a plate held at the guide's edge is still captured in walking patrol
+(margin: 5% of the guide's width, 50% of its height); (3) vehicle patrol, which recorded 0 captures in two
+sessions of under 5 s each: that is too short to judge, so it needs a real drive.
+
 PR #2 fixed the location stamped at capture and added quick zoom with plate-area focus.
 This workstream turns the Galaxy S26 Ultra field test into measured evidence, then makes the battery
 and camera changes from [the integration assessment](../EMAPS-INTEGRATION-ASSESSMENT.md#4-battery-life-and-gps-accuracy).

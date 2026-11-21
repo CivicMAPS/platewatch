@@ -1,0 +1,40 @@
+# Shared plate-reading vectors, run by tests/plateRules.test.ts (TypeScript) and
+# android/app/src/test/.../PlateRulesTest.java (native patrol), so both readers agree.
+# Columns (tab-separated): raw reading, canonical plate, auto-capture (yes/no).
+# Most rows are real readings from the 21 Nov 2026 S26 Ultra field test (Coventry St / York St).
+#
+# VIC 1AB2CD read with the VIC triangle as X, the digit 1 as I, and 6 as G
+1URX6YF	1UR6YF	yes
+IUR6YF	1UR6YF	yes
+IUP6YF	1UP6YF	yes
+1UP6YF	1UP6YF	yes
+IUDGYF	1UD6YF	yes
+1UR6YF	1UR6YF	yes
+# Plate frame read as a leading E (officer corrected EDTS512 to DTS512)
+EDTS512	DTS512	yes
+# Leading E but no known format remains after dropping it: left for the officer (corrected to DA8899)
+EDA8899	EDA8899	yes
+DA8899	DA8899	yes
+# Correct readings stay as read; letter positions are never changed (O and 0 stay distinct)
+2FE70T	2FE70T	yes
+2FF2NR	2FF2NR	yes
+ZAF402	ZAF402	yes
+1XA5PL	1XA5PL	yes
+DTS512	DTS512	yes
+1DSAVXI	1DSAVXI	yes
+ABC123	ABC123	yes
+# Parking-sign words and other text: never captured automatically
+OBEL	OBEL	no
+TOCERTI	TOCERTI	no
+WHICH	WHICH	no
+MOBEL	MOBEL	no
+MOBELE	MOBELE	no
+LAWS	LAWS	no
+UNDER	UNDER	no
+APPEAROR	APPEAROR	no
+ANDAUTHO	ANDAUTHO	no
+WHOSEPHO	WHOSEPHO	no
+CITYOFP	CITYOFP	no
+AUTHORIS	AUTHORIS	no
+KID	KID	no
+1170	1170	no

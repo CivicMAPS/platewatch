@@ -163,7 +163,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   let dismissed = '';
   let editing = false;
   const listeners: PluginListenerHandle[] = [];
-  const queue: {s:Sighting; meta:PendingCapture['meta']}[] = [];
+  /** Patrol captures awaiting review; `variants` are other readings of the same plate seen after it. */
+  const queue: {s:Sighting; meta:PendingCapture['meta']; variants:string[]}[] = [];
   let nativeActive = false;
 
   const reviewNext = async () => {
@@ -177,7 +178,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       pending = {frame,crop,meta:item.meta};
       cropUrl = crop.toDataURL('image/jpeg');
       plateInput = item.s.plate;
-      ocr = {plate:plateInput,candidates:plateInput ? [plateInput] : [],confidence:0,rawText:plateInput,durationMs:0,engine:'patrol'};
+      const candidates = [...new Set([item.s.plate,...item.variants].filter(Boolean))];
+      ocr = {plate:plateInput,candidates,confidence:0,rawText:item.s.raw || plateInput,durationMs:0,engine:'patrol'};
       phase = 'confirm';
       queue.shift();
       await patrol.release({path:item.s.path});
@@ -195,11 +197,17 @@ export function scanView(params: Record<string, string>, app: App): View {
       listeners.push(await patrol.addListener('sighting', s => {
         // Best fix produced at or before the frame; a later fix must not displace older valid ones.
         const location = geo.bestRecent(s.at, s.at);
-        void logDiag('sighting', { mode, manual: !!s.manual, captureMode: s.captureMode, plate: s.plate, zoom: s.zoom, fix: fixInfo(location, s.at) });
-        queue.push({s,meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
+        void logDiag('sighting', { mode, manual: !!s.manual, captureMode: s.captureMode, plate: s.plate, raw: s.raw ?? s.plate, zoom: s.zoom, fix: fixInfo(location, s.at) });
+        queue.push({s,variants:[],meta:{capturedAt:s.at,capturedAtLocal:toLocalIso(s.at),timeZone:deviceTimeZone(),location,
           locationAgeMs:location ? s.at-location.timestamp:null,userAgent:navigator.userAgent,
           payment:selected.type === 'timed' ? structuredClone(selected.payment) : undefined}});
         if (keys.has(s.plate) && settings().sound) void patrol.alert();
+      }));
+      listeners.push(await patrol.addListener('variant', v => {
+        void logDiag('variant', { mode, plate: v.plate, variant: v.variant });
+        // Attach to the latest capture of that plate; offered as a candidate chip at review.
+        const item = [...queue].reverse().find(q => q.s.plate === v.plate);
+        if (item && !item.variants.includes(v.variant)) item.variants.push(v.variant);
       }));
       listeners.push(await patrol.addListener('zoom', ({ratio}) => void app.updateSettings({cameraZoom: ratio})));
       listeners.push(await patrol.addListener('stats', stats => void logDiag('patrol_stats', {...stats})));
@@ -373,6 +381,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       plate,
       key: plateKey(plate),
       ocrText: ocr?.rawText ?? '',
+      ocrEngine: ocr?.engine ?? null,
       ocrConfidence: ocr?.durationMs && ocr.engine === 'tesseract' ? ocr.confidence : null,
       corrected,
       outcome,

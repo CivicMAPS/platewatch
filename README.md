@@ -23,8 +23,8 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Timed list | Street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
 | Camera zoom and focus | One zoom button on every camera: each tap steps 1× → 1.75× → 3.5× → 5× → 1× (steps beyond the lens range are skipped); long-press for a slider up to 10×. The last zoom is remembered. Autofocus and exposure stay continuous but measure only inside the plate guide, so the lens does not refocus onto passing objects. |
-| Plate reading | Android app: Google ML Kit (on-device) reads the plate guide plus a margin and picks the plate from the recognised lines. Browser build, or if ML Kit fails: Tesseract on the guide crop. |
-| Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together; Single reads only on the shutter. The shutter works in both. Every capture flashes the screen and vibrates. |
+| Plate reading | Android app: Google ML Kit (on-device) reads the plate guide plus a margin and picks the plate from the recognised lines. Browser build, or if ML Kit fails: Tesseract on the guide crop. Readings are cleaned up with Australian plate formats (VIC first): letters at digit positions become digits (`IUR6YF` → `1UR6YF`), and a reading that fits no format is retried without the VIC triangle (`1URX6YF` → `1UR6YF`) or a plate-frame edge (`EDTS512` → `DTS512`). Letter positions are never changed, and the raw reading is always shown for the officer to confirm. |
+| Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together, but only plate-like text (letters *and* digits, 4–8 characters) on screen, inside the guide in walking patrol; a second reading of the same plate (`1UP6YF` after `1UR6YF`) is offered as a choice at review instead of a new capture. Single reads only on the shutter, which also takes all-letter personalised plates. The shutter works in both. Every capture flashes the screen and vibrates. |
 | Field diagnostics | On by default during the development stage (Settings → Field diagnostics). Records camera resolution and zoom range, each capture's OCR engine, reading and time, the plate the officer confirmed, GPS accuracy and fix age, and every minute battery, battery temperature and Android thermal status; patrol adds frame and read rates every 30 s. On-device only; export as JSON from Settings. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
@@ -72,7 +72,12 @@ Interpretation notes:
 On the APK the scan screen also offers **Walking patrol** / **Vehicle patrol**. A native
 CameraX + ML Kit text-recognition overlay (`PatrolCamera.java`, bridged by
 `src/lib/patrol.ts`) reads plates continuously; a plate must be seen in two frames within
-1.5 s (walking) / 0.9 s (vehicle) to count. Each sighting saves a frame to the app cache and
+1.5 s (walking) / 0.9 s (vehicle) to count. Preview and analysis share one CameraX `ViewPort`, so
+only text visible on screen is read; walking patrol also requires the plate inside the guide.
+Readings go through `PlateRules.java` (the native twin of `canonicalPlate` / `isAutoCapturePlate`
+/ `isPlateVariant` in `src/lib/plate.ts`; both run `tests/fixtures/plate-readings.tsv`). A reading
+within one character of a plate captured in the last 8 s (walking) / 4 s (vehicle) is not captured
+again; it is attached to that capture as an alternative reading. Each sighting saves a frame to the app cache and
 beeps if the plate is on a hot list, a linked allow list or already being timed. *Finish patrol
 and review* then walks the officer through every sighting in the normal Confirm → Check flow,
 using the frame time and the best GPS fix at or before it; cached frames are deleted once

@@ -41,7 +41,7 @@ describe('Area 10 (street_segments + record_defaults) → civicmaps.parking_data
     expect(dataset.patrol_zones).toEqual([{ id: '10', number: '10', name: null, kind: 'patrol_area' }]);
     expect(dataset.segments).toHaveLength(55);
     // Shared values sit in defaults, as record_defaults did; each segment keeps its id, road and between.
-    expect(Object.keys(dataset.defaults!).sort()).toEqual(['data_quality', 'geometry', 'patrol_zone', 'sides']);
+    expect(Object.keys(dataset.defaults!).sort()).toEqual(['data_quality', 'geometry', 'patrol_zone', 'road_segment_id', 'sides']);
     expect(Object.keys(dataset.segments[0]!).sort()).toEqual(['between', 'id', 'road']);
     expect(resolvedSegments(dataset)[0]).toMatchObject({
       id: 'normanby-rd-boundary-st-montague-st',
@@ -67,6 +67,17 @@ describe('Area 10 (street_segments + record_defaults) → civicmaps.parking_data
     expect(drafts).toHaveLength(55);
     expect(drafts.every((d) => d.pending)).toBe(true);
     expect(drafts[0]!.list).toMatchObject({ patrolZone: '10', segment: { street: 'Normanby Road', side: 'both' }, externalId: 'city-of-port-phillip-patrol-area-10/normanby-rd-boundary-st-montague-st/both' });
+  });
+
+  it('keeps the road segment asset ID: null until known (shown in defaults), read under its usual names', () => {
+    expect(dataset.defaults!.road_segment_id).toBeNull();
+    const withIds = structuredClone(source);
+    withIds.street_segments[0].road_segment_asset_id = 'RS-10442';
+    withIds.street_segments[1].road_segment_id = 10443;
+    withIds.street_segments[2].asset_id = 'RS-10444';
+    const segs = resolvedSegments(convertAreaDataset(withIds).dataset);
+    expect(segs.slice(0, 4).map((s) => s.road_segment_id)).toEqual(['RS-10442', '10443', 'RS-10444', null]);
+    expect(datasetToDrafts(convertAreaDataset(withIds).dataset).drafts[0]!.list.roadSegmentId).toBe('RS-10442');
   });
 
   it('maps restrictions once they are supplied', () => {

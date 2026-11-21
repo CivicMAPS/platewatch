@@ -146,6 +146,7 @@ export interface Side {
 export interface Segment {
   /** Stable and unique within the dataset (re-imports match on it). */
   id: string;
+  /** The council's road segment asset ID (e.g. City of Melbourne road corridor 20055); null until known. */
   road_segment_id?: string | null;
   patrol_zone?: string | null;
   road: { name: string; locality?: string | null; external_ids?: Record<string, string> };
@@ -544,6 +545,8 @@ export function convertAreaDataset(src: Json, opts: { municipalityTimezone?: str
     const dq = isObj(r.data_quality) ? r.data_quality : {};
     segments.push({
       id: str(r.segment_id) || slug(`${str(r.road_segment_name)}-${str(r.between_street_name)}-${str(r.and_street_name)}`),
+      // The council's road segment asset ID; null (not guessed) until the source gives one.
+      road_segment_id: str(r.road_segment_id) || str(r.road_segment_asset_id) || str(r.asset_id) || null,
       ...(zone ? { patrol_zone: zone } : {}),
       road: { name: str(r.road_segment_name) },
       between: { from: str(r.between_street_name), to: str(r.and_street_name) },
@@ -592,7 +595,7 @@ export function convertAreaDataset(src: Json, opts: { municipalityTimezone?: str
 
 /** Move values every segment shares (zone, sides, data quality) into `defaults`, as record_defaults did. */
 function factorDefaults(segments: Segment[]): { defaults?: ParkingDataset['defaults']; segments: Segment[] } {
-  const keys = ['patrol_zone', 'sides', 'data_quality', 'geometry'] as const;
+  const keys = ['road_segment_id', 'patrol_zone', 'sides', 'data_quality', 'geometry'] as const;
   const defaults: Record<string, unknown> = {};
   for (const k of keys) {
     const first = JSON.stringify(segments[0]?.[k]);

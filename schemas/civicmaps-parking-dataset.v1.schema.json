@@ -220,7 +220,7 @@
     "segmentCommon": {
       "type": "object",
       "properties": {
-        "road_segment_id": { "$ref": "#/$defs/nullableString", "description": "Council road segment / corridor ID, e.g. City of Melbourne 20055." },
+        "road_segment_id": { "$ref": "#/$defs/nullableString", "description": "The council's road segment asset ID (also called road segment asset ID or corridor ID), e.g. City of Melbourne 20055. Distinct from segment.id, the dataset's own stable identifier. Null until known." },
         "patrol_zone": { "$ref": "#/$defs/nullableString", "description": "patrol_zones[].id" },
         "geometry": { "$ref": "#/$defs/geometry" },
         "sides": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/side" } },

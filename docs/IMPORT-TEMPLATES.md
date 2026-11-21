@@ -46,7 +46,7 @@ placeholder: officers can find it and scan against it, and it shows *Restriction
 | `dataset_id` | | `city-of-port-phillip-patrol-area-10` | Same as `dataset.id` in the JSON. |
 | `segment_id` | | `coventry-st-montague-st-ferrars-st` | Stable segment ID; with `dataset_id` it ties rows to the dataset. |
 | `part_id` | where a side has several parts | `bay-58-72` | |
-| `road_segment_id` | | `20055` | Council road segment / corridor ID. |
+| `road_segment_id` | | `20055` | The council's road segment asset ID (the column may also be named `road_segment_asset_id`). Not the same as `segment_id`. |
 | `patrol_zone` | | `10` | Internal patrol zone / enforcement area number. Home groups lists by it. |
 | `patrol_zone_name` | | `Flagstaff` | Day-to-day name of the zone. |
 | `road` | ✔ | `Coventry Street` | `St`, `Rd`, `Ave`… are matched to `Street`, `Road`, `Avenue`. |

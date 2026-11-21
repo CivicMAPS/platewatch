@@ -416,6 +416,7 @@ const COLUMN_ALIASES: Record<string, string> = {
   bay_number: 'bay',
   road_side: 'side',
   enforcement_zone: 'patrol_zone',
+  road_segment_asset_id: 'road_segment_id',
 };
 
 function rowsWithHeader(table: string[][]): { header: string[]; rows: { line: number; row: Row }[] } {

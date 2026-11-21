@@ -51,9 +51,15 @@ dataset ─┬─ dataset        id, title, status, municipality (name, timezone
 ### Segments, sides and parts
 
 - **Segment:** a road between two cross streets or boundaries (`between.from` / `between.to`,
-  in either direction). `road_segment_id` carries the council's own asset or corridor ID, for
-  example City of Melbourne road corridor `20055`. `road.external_ids` holds other references,
-  such as `vicmap_ufi`.
+  in either direction). It has two identifiers:
+  - `id` is the dataset's own stable identifier (e.g. `coventry-st-montague-st-ferrars-st`).
+    Re-imports match on it, so it must not change.
+  - `road_segment_id` is the council's **road segment asset ID**, e.g. City of Melbourne road
+    corridor `20055`. It is `null` until the council supplies it; Area 10 has it in `defaults`
+    as `null`, ready to fill in per segment. PlateWatch shows it on the list (*Segment ID*) and
+    search finds it. Source files may call it `road_segment_asset_id` or `asset_id`.
+
+  `road.external_ids` holds other references, such as `vicmap_ufi`.
 - **Side:** `both` when controls are the same on both sides, or not yet known (Area 10 uses
   this until kerb data exists). Otherwise a compass side, or `odd` / `even` for numbered sides.
 - **Part:** with no `from`/`to`, a part is the whole side. Where signs change part way along,
@@ -110,6 +116,7 @@ The Area 10 *Working Street Segment and Restriction Dataset* converts without lo
 | `record_defaults` | `defaults`: `patrol_zone`, `sides`, `data_quality`, `geometry` |
 | `enforcement_zone` | `patrol_zone` → `patrol_zones[] {id: "10", number: "10"}` |
 | `segment_id`, `road_segment_name`, `between_street_name`, `and_street_name` | `id`, `road.name`, `between.from`, `between.to` |
+| `road_segment_id` / `road_segment_asset_id` / `asset_id` (when added) | `road_segment_id` (`null` until then) |
 | `road_side` | `sides[].side` |
 | `parking_restrictions[]` with `restriction_applied: null` | a part with `restrictions_status: pending_field_capture`, `restrictions: []` |
 | `parking_restrictions[]` with a control | `restrictions[]`: `control`, `sign_code`, `limit_minutes`, `days` (Monday → `mon`), `start`/`end`, `exceptions`, `source_sign_id`, `effective_from`/`to`, `data_quality.status` |

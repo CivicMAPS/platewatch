@@ -145,6 +145,12 @@ describe('timed CSV with civicmaps.parking_dataset columns', () => {
     expect(r.skipped[0]).toMatch(/south side: no parking spaces/);
   });
 
+  it('accepts road_segment_asset_id as the column name for the road segment ID', () => {
+    const header = CSV_TEMPLATES.timed.header.replace('road_segment_id', 'road_segment_asset_id');
+    const [d] = timedDrafts([header, row({ ...base, road_segment_id: 'RS-10442', restrictions_status: 'pending_field_capture' })].join('\n'), 'x.csv');
+    expect(d!.list.roadSegmentId).toBe('RS-10442');
+  });
+
   it('rejects an unknown control or status, and a fractional allowance', () => {
     const csv = [CSV_TEMPLATES.timed.header, row({ ...base, control: 'parking_maybe', days: 'Mon' }), row({ ...base, restrictions_status: 'done' }), row({ ...base, control: 'time_limit', limit_minutes: '90.5', days: 'Mon' })].join('\n');
     expect(parseImportFile(csv, 'x.csv').issues.map((i) => i.row)).toEqual([2, 3, 4]);

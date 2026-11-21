@@ -1,70 +1,98 @@
-# Bulk import templates
+# Bulk import
 
-Bulk import loads street segments, permit (allow) lists and hot lists from files, so that
-segments don't have to be entered one by one in the field. Open it from **Home → New list → Import
+Bulk import loads street segments, numbered bays, permit (allow) lists and hot lists from files,
+so that segments are not entered one by one in the field. Open it from **Home → New list → Import
 from file**, **Settings → Backup → Import lists from CSV / CivicMAPS files**, or the empty Home
 screen.
 
-1. Download a template from the Import screen, or copy it from [`templates/`](../templates).
-2. Fill it in with Excel, Google Sheets or similar, then **save as CSV**. UTF-8 is preferred;
-   Excel's "CSV UTF-8" works.
-3. On the Import screen, choose one or more files. You can mix CSV templates and CivicMAPS-preview
-   JSON files.
-4. Check the plan: lists created, lists updated, placeholders, rows not imported (with row
-   numbers) and stretches left out. Nothing is saved until you press **Import**.
+The normalised format is **[civicmaps.parking_dataset](PARKING-DATA-SCHEMA.md)** (JSON). The CSV
+templates below are a spreadsheet-friendly view of the same model, for office staff, with the
+same column names. The Import screen reads:
 
-Importing the same file again is safe. Timed lists are matched by street, cross streets, side and
-sub-segment, and allow and hot lists by name. A matching list is updated in place. It keeps its
-name, linked allow lists and scan history, and restrictions already entered are kept when the
-import has none for it. To leave matching lists untouched, untick *Update lists already on this
-device*.
+| File | Kind |
+|---|---|
+| `*.parking.json` with `"schema": "civicmaps.parking_dataset"` | The normalised dataset. It is validated first; a dataset with errors is not imported, and each problem is listed by path (e.g. `segments[12].sides[0].parts[1].restrictions[0].days`). |
+| Area datasets with `street_segments` and `record_defaults` (e.g. City of Port Phillip *Patrol Area 10*) | Converted to the normalised dataset on the way in. |
+| `platewatch-timed-segments-template.csv` | Street segments and their signs. |
+| `platewatch-bays-template.csv` | Numbered bays with positions, for segments in the same import or already on the device. |
+| `platewatch-allow-list-template.csv`, `platewatch-hot-list-template.csv` | Permits and hot-list plates. |
+| CivicMAPS-preview kerbside, road-segment, field-survey and parking-area-zone JSON | See [PARKING-DATA-SCHEMA.md](PARKING-DATA-SCHEMA.md#civicmaps-preview-data). |
+
+To import:
+
+1. Choose one or more files; kinds can be mixed.
+2. Check the plan: lists created, lists updated, placeholders, rows not imported (with row
+   numbers or paths), stretches left out, and bays without a matching segment.
+3. Press **Import**. Nothing is saved before then.
+
+Importing the same data again is safe. Timed lists are matched by their dataset ID
+(`dataset_id/segment_id/side/part_id`), then by street, cross streets, side and part. Allow and
+hot lists are matched by name. A matching list is updated in place and keeps its name, linked
+allow lists and scan history. Restrictions already entered are kept when the import has none.
+
+The Import screen also **exports** all timed lists as a civicmaps.parking_dataset, for
+EnforcementMAPS or another device.
 
 ## Timed segments: `platewatch-timed-segments-template.csv`
 
-**One row per sign.** Rows with the same `street`, `from_street`/`to_street` (in either order),
-`side` and `sub_from`/`sub_to` become one timed list, with one restriction per row. A segment with
-no signs yet gets a single row with `sign` blank. It is imported as a placeholder: it can be found
-and scanned against, and shows *Restrictions to enter* until its restrictions are added.
+**One row per signed control.** Rows for the same part form one timed list, with one restriction
+per row. A part is identified by `dataset_id` + `segment_id` + `side` + `part_id` when
+`segment_id` is given, otherwise by road, cross streets, side and part bounds. A part with no
+signs yet gets one row with `restrictions_status` = `pending_field_capture`. It is imported as a
+placeholder: officers can find it and scan against it, and it shows *Restrictions to enter*.
 
 | Column | Required | Example | Notes |
 |---|---|---|---|
-| `patrol_zone` | | `9` | Internal patrol zone / enforcement area number. Home groups lists by it. |
-| `patrol_zone_name` | | `South Melbourne Market` | Day-to-day name of the zone (e.g. `Flagstaff`). |
-| `street` | ✔ | `Little Bourke Street` | Road segment name. `St`, `Rd`, `Ave`… are matched to `Street`, `Road`, `Avenue`. |
-| `from_street` | ✔ | `Swanston Street` | Cross street at one end. |
-| `to_street` | ✔ | `Elizabeth Street` | Cross street at the other end. |
-| `side` | | `south` | `north`, `south`, `east`, `west`, `both` (default), `odd` or `even`. `N`, `northern`, `North side` also work. |
-| `suburb` | | `Melbourne` | |
-| `sub_from`, `sub_to` | | `Bay 58`, `Bay 72` | Only where signs change part way along a side: a bay, an address (`234 Little Bourke Street`) or a cross street. Each part becomes its own list. |
-| `rpa` | | `7` | Residential permit area. |
-| `parking_area` | | `645` | Parking area number (one per segment, e.g. City of Melbourne). Shown under *Check payment*. With a bay number it forms the kerb sign (645 + 58 = `64558`), which search finds. |
-| `easypark_areas` | | `7514;7515` | EasyPark area numbers, separated by `;`. |
-| `paystay_zones` | | `338851200002` or `00042:4521` | PayStay zones separated by `;`; add `:meter` for a meter ID. Port Phillip uses the zone number only (3388 + segment number + four digits for the side). |
-| `bays` | | `58-59;61-65;67-72` | Bay numbers and ranges. Search then sends a kerb sign only to the part that holds that bay. |
-| `sign` | | `2P`, `1/2P`, `P15`, `LZ30`, `2P Meter`, `No Stopping` | See *Signs* below. Blank = placeholder. |
-| `minutes` | | `90` | Overrides the allowance read from `sign`, or gives one for a sign PlateWatch does not know. |
-| `days` | with a sign | `Mon-Fri`, `Sat-Sun`, `Sat`, `Mon,Wed,Fri`, `Every day` | Blank = every day. |
+| `dataset_id` | | `city-of-port-phillip-patrol-area-10` | Same as `dataset.id` in the JSON. |
+| `segment_id` | | `coventry-st-montague-st-ferrars-st` | Stable segment ID; with `dataset_id` it ties rows to the dataset. |
+| `part_id` | where a side has several parts | `bay-58-72` | |
+| `road_segment_id` | | `20055` | Council road segment / corridor ID. |
+| `patrol_zone` | | `10` | Internal patrol zone / enforcement area number. Home groups lists by it. |
+| `patrol_zone_name` | | `Flagstaff` | Day-to-day name of the zone. |
+| `road` | ✔ | `Coventry Street` | `St`, `Rd`, `Ave`… are matched to `Street`, `Road`, `Avenue`. |
+| `locality` | | `South Melbourne` | |
+| `between_from`, `between_to` | ✔ | `Montague Street`, `Ferrars Street` | Cross streets or boundaries, in either order. |
+| `side` | | `north` | `both` (default), `north`, `south`, `east`, `west`, `odd`, `even`. |
+| `part_from`, `part_to` | | `Bay 58`, `Bay 72` | Where signs change part way along: a bay, an address or a cross street. |
+| `permit_area` | | `7` | Residential permit area. |
+| `parking_area` | | `645` | Parking area number (one per segment). Kerb plate = area + bay (`64558`). |
+| `easypark_areas` | | `7514;7515` | Separated by `;`. |
+| `paystay_zones` | | `338851200001` or `00042:4521` | Separated by `;`; add `:meter` for a meter ID. |
+| `restrictions_status` | | `supplied` | `supplied`, `pending_field_capture` (placeholder) or `no_parking_spaces` (left out). |
+| `control` | | `time_limit` | `time_limit`, `metered`, `ticket`, `loading_zone`, `permit_zone`, `no_stopping`, `no_parking`, `clearway`, `bus_zone`, `taxi_zone`, `accessible`, `works_zone`, `other`. Can be left blank when `sign_code` says it (`2P`, `No Stopping`). |
+| `sign_code` | | `2P`, `1/2P`, `P15`, `LZ 30`, `No Stopping` | As printed on the sign. |
+| `limit_minutes` | timed controls | `120` | Whole minutes. Read from `sign_code` when blank (2P = 120). |
+| `days` | with a control | `Mon-Fri`, `Sat-Sun`, `Sat`, `Mon,Wed,Fri`, `Every day` | Blank = every day. |
 | `start`, `end` | | `08:00`, `18:00` | 24-hour time. Both blank, or `00:00`–`24:00`, means all times. An end before the start runs overnight. |
-| `grace` | | `5` | Minutes of tolerance before an overstay (0–120). |
-| `road_segment_id` | | `20055` | Council road segment ID; searchable. |
+| `exceptions` | | `Permit Zone 7 excepted` | Separated by `;`. |
+| `grace_minutes` | | `5` | 0–120. |
 | `list_name` | | | Optional. Default: `Little Bourke St, Swanston St – Elizabeth St (S) · Bay 58 – Bay 72`. |
-| `notes` | | | Free text, added to the list's notes. |
+| `notes` | | | Added to the list's notes. |
 
-For single-valued columns (zone, RPA, parking area…), the first value given in a list's rows is
-used. EasyPark areas, PayStay zones and bays from all of a list's rows are combined.
+- Timed controls (`time_limit`, `metered`, `ticket`, and `loading_zone` with an allowance)
+  become restrictions.
+- Other controls are kept as *Other signs* on the list. A part with only those has nothing to
+  time; it is left out and listed under *Left out*.
+- For single-valued columns (zone, permit area, parking area…), the first value given in a
+  part's rows is used. EasyPark areas and PayStay zones from all of a part's rows are combined.
 
-### Signs
+Older files that use the first template's columns (`street`, `from_street`, `to_street`,
+`sub_from`, `sub_to`, `rpa`, `sign`, `minutes`, `grace`, `bays`) still import.
 
-| Written as | Becomes |
-|---|---|
-| `2P`, `1P`, `4P`, `2P Meter`, `2P Ticket` | 2P = 120 min (the word after the code is kept as the description) |
-| `1/2P`, `1/4P` | 30 min, 15 min |
-| `P5`, `P15`, `15 min` | 5 min, 15 min |
-| `LZ30`, `Loading Zone 30 min` | Loading zone, 30 min |
-| `No Stopping`, `No Parking`, `Clearway`, `Bus Zone`, `Loading Zone` with no time, … | No time allowance: **kept as a note** on the list, not timed |
+## Numbered bays: `platewatch-bays-template.csv`
 
-A list whose rows are all untimed signs (a No Stopping side, for example) has nothing to time. It
-is left out and listed under *Left out* on the Import screen.
+**One row per bay.** Rows are matched to the part they belong to: in the same import, or a timed
+list already on the device. They never create a list on their own; bays whose part cannot be
+found are listed on the Import screen.
+
+| Column | Required | Example | Notes |
+|---|---|---|---|
+| `dataset_id`, `segment_id`, `part_id` | | `com-chinatown`, `com-20055`, `bay-58-72` | As in the timed template; preferred for matching. |
+| `road`, `between_from`, `between_to` | ✔ | `Little Bourke Street`, `Swanston Street`, `Elizabeth Street` | |
+| `side`, `part_from`, `part_to` | | `south`, `Bay 58`, `Bay 72` | |
+| `bay` | ✔ | `58` | Bay number. |
+| `lat`, `lng` | | `-37.8127332`, `144.9645599` | WGS84 decimal degrees. |
+| `sign_number` | | | Only when the kerb plate is not parking area + bay. |
 
 ## Allow list: `platewatch-allow-list-template.csv`
 
@@ -89,19 +117,5 @@ Link an allow list to timed lists from each timed list's *Edit* screen.
 | `make`, `model`, `body_type`, `colour` | | `Toyota`, `Hilux`, `Ute`, `White` | |
 | `notes` | | | |
 
-## CivicMAPS-preview data files (JSON)
-
-The files collected in the CivicMAPS-preview repository import as they are. Select them on the
-Import screen; a file can hold one record or an array of records.
-
-| File (CivicMAPS-preview `civicmaps/data/…`) | Becomes |
-|---|---|
-| `location/kerbside-parking-assets/v1/…` (`civicmaps.kerbside_parking_segment.v1`) | One list per side sub-segment. Patrol zone (e.g. `CHINATOWN` → *Chinatown*), road segment ID, parking area, EasyPark area, bays and `parking_rules`. A `no_parking_spaces` stretch is left out. A sub-segment with `parking_rules_status: pending_field_capture` is a placeholder that keeps its identifiers and bays. |
-| `road-segments/<street>/<from>-to-<to>.json` | One list per segment side, or per `sub_segments` entry, with its own EasyPark area and `signs`. |
-| Field surveys (`civicmaps.parking_segment`, e.g. `spencer/…`) | Restrictions at the same place (`location_reference` and `bay_numbers`) form one sub-segment list. Laneways and No Stopping / No Parking-only places are left out. |
-| `parking-area-zones/<area>.json` | Placeholder lists per segment with parking area, EasyPark number, road segment ID and meter count; the area (e.g. *West Melbourne*) becomes the zone name. Records not yet linked to a street are counted and left out. |
-
-Sign types (`2p_meter`, `loading_zone` with `limit: "30_min"`, `loading_zone_30_min`,
-`no_stopping` …) and rule times (`07:00-16:00`, `00:00-24:00`, `all_times`; days `Mon-Fri`,
-`all_days` …) map as in the CSV table above. A rule PlateWatch cannot read (`all_other_times` on
-a timed sign, say) is reported and left out, and the rest of the segment is still imported.
+The example rows in each template are illustrations to overwrite. Restrictions marked
+*Example – replace* are not surveyed signs.

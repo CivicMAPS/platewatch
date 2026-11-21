@@ -1,0 +1,513 @@
+{
+  "dataset_title": "City of Port Phillip Parking Enforcement Patrol Area 10 - Working Street Segment and Restriction Dataset",
+  "dataset_status": "public_sources_integrated_restrictions_still_not_enforcement_ready",
+  "scope": {
+    "municipality": "City of Port Phillip",
+    "area_depicted": "Parking Enforcement Patrol Area 10, centred on South Melbourne between the Normanby Road corridor, Ferrars Street, Dorcas Street and the Kings Way/Boundary Street corridor",
+    "requested_enforcement_zones": [
+      "10"
+    ],
+    "important_distinction": "The PDF depicts an operational parking enforcement patrol area, not a residential parking permit area."
+  },
+  "schema_notes": {
+    "segment_granularity": "One record per visible road section between named intersections or the depicted patrol-area boundary.",
+    "record_defaults_policy": "Every value in record_defaults applies to every street_segments record unless that record contains an overriding value.",
+    "road_side_policy": "Road side is recorded as both because kerb-side controls are not shown in the source map.",
+    "multiple_controls": "Add one parking_restrictions object for every distinct signed day, time and control combination after authoritative sign or kerb data is obtained.",
+    "null_policy": "Null and empty values mean the information is not shown in the supplied PDF or accessible public datasets and has not been guessed.",
+    "colour_policy": "Map colours and line styles are treated as cartographic road, route or patrol-boundary symbology, not parking restrictions.",
+    "completeness_note": "Complete as a working transcription of clearly named streets and intersections visible within Area 10 at the supplied map scale. Minor lanes, obscured labels and ambiguous junctions require GIS validation."
+  },
+  "accessible_sources": [
+    {
+      "name": "User supplied Parking Enforcement Patrol Area 10 map",
+      "reference": "Area 10.pdf",
+      "document_date": "December 2018",
+      "map_reference": "R33635",
+      "data_used": [
+        "patrol area number 10",
+        "depicted patrol-area boundary",
+        "visible street names",
+        "visible intersections",
+        "approximate road network"
+      ],
+      "limitations": [
+        "schematic small-scale map",
+        "no parking-restriction legend",
+        "no signed days or times",
+        "no kerb-side controls",
+        "no sign or asset identifiers",
+        "no authoritative segment geometries",
+        "minor streets and labels may be obscured"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Parking Machines",
+      "publisher": "City of Port Phillip",
+      "catalogue_url": "https://data.gov.au/data/dataset/city-of-port-phillip-parking-machines",
+      "resource_url": "https://data.gov.au/data/dataset/9304b79f-866f-40a1-afea-53ccded06ecd/resource/2d715933-43fc-47fa-8a6c-92422e8ab81d/download/city-of-port-phillip-parking-machines.geojson",
+      "format": "GeoJSON",
+      "reference_period": "2017-11-29",
+      "data_used": [
+        "public source confirmed",
+        "machine identifier field SerNo",
+        "machine point coordinates available"
+      ],
+      "limitations": [
+        "machine locations do not encode signed restriction type, days or times",
+        "dataset states motorists must observe displayed signs",
+        "no direct street-segment relationship"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Accessible Parking",
+      "publisher": "City of Port Phillip",
+      "catalogue_url": "https://data.gov.au/data/dataset/874498ce-a720-43c3-b7d5-0a750653ffa2",
+      "resource_url": "https://data.gov.au/data/dataset/874498ce-a720-43c3-b7d5-0a750653ffa2/resource/2ae71d07-8def-469d-976c-24193b968288/download/city-of-port-phillip-accessible-parking.geojson",
+      "format": "GeoJSON",
+      "reference_period": "2018-02-28",
+      "data_used": [
+        "public source confirmed",
+        "accessible-parking point locations available"
+      ],
+      "limitations": [
+        "point inventory only",
+        "does not provide a complete kerb-restriction network",
+        "does not establish all signed days, times or exceptions"
+      ]
+    },
+    {
+      "name": "Vicmap Transport - Road Line",
+      "publisher": "Victorian Department of Transport and Planning",
+      "catalogue_url": "https://discover.data.vic.gov.au/dataset/vicmap-transport-road-line",
+      "wfs_url": "https://opendata.maps.vic.gov.au/geoserver/wfs?request=GetCapabilities&service=WFS",
+      "format": "WFS and downloadable spatial formats",
+      "data_used": [
+        "authoritative statewide road-network source identified",
+        "road names, classes, direction, locality and unique feature identifiers available"
+      ],
+      "limitations": [
+        "road centreline geometry is not kerb geometry",
+        "does not contain City of Port Phillip parking restrictions or patrol-area assignments"
+      ]
+    }
+  ],
+  "field_definitions": {
+    "segment_id": "Locally assigned identifier for the working road segment.",
+    "enforcement_zone": "Operational parking enforcement patrol area shown by the supplied map.",
+    "enforcement_zone_candidates": "Possible patrol areas where assignment remains subject to authoritative GIS confirmation.",
+    "road_segment_name": "Road containing the working segment.",
+    "between_street_name": "Cross street or boundary at the beginning of the segment.",
+    "and_street_name": "Cross street or boundary at the end of the segment.",
+    "road_side": "Side of the road to which a restriction applies.",
+    "parking_restrictions": "One or more signed parking-control combinations applying to the segment.",
+    "applicable_days": "Explicit signed operating days.",
+    "applicable_times": "Local signed start and end times in 24-hour HH:MM format.",
+    "restriction_applied": "Signed control such as No Stopping, Loading Zone, 1P, 2P, Metered Parking or Permit Zone.",
+    "permit_or_vehicle_exceptions": "Permit, vehicle-class or activity exceptions shown on an authoritative sign.",
+    "source_sign_or_asset_id": "Council sign, parking-control or asset identifier.",
+    "effective_from": "Date from which the restriction is effective.",
+    "effective_to": "Date on which the restriction ceases, if applicable.",
+    "verification_status": "Whether the restriction has been verified against an authoritative source.",
+    "geometry": "Authoritative GeoJSON LineString or MultiLineString for the controlled kerb section."
+  },
+  "record_defaults": {
+    "enforcement_zone": "10",
+    "enforcement_zone_candidates": [
+      "10"
+    ],
+    "road_side": "both",
+    "parking_restrictions": [
+      {
+        "applicable_days": [],
+        "applicable_times": {
+          "start": null,
+          "end": null
+        },
+        "restriction_applied": null,
+        "permit_or_vehicle_exceptions": [],
+        "source_sign_or_asset_id": null,
+        "effective_from": null,
+        "effective_to": null,
+        "verification_status": "unknown_not_shown_on_patrol_area_map"
+      }
+    ],
+    "geometry": null,
+    "data_quality": {
+      "street_segment_source": "user_supplied_area_10_pdf",
+      "street_names_visually_confirmed": true,
+      "endpoints_status": "interpreted_from visible map intersections; requires GIS validation",
+      "zone_assignment_status": "inside_or_on_depicted_patrol_area_10_boundary",
+      "restriction_status": "not shown and not inferred from map symbology"
+    }
+  },
+  "street_segments": [
+    {
+      "segment_id": "normanby-rd-boundary-st-montague-st",
+      "road_segment_name": "Normanby Road",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "normanby-rd-montague-st-ferrars-st",
+      "road_segment_name": "Normanby Road",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "munro-st-boundary-st-kings-way",
+      "road_segment_name": "Munro Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Kings Way"
+    },
+    {
+      "segment_id": "woodgate-st-boundary-st-kings-way",
+      "road_segment_name": "Woodgate Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Kings Way"
+    },
+    {
+      "segment_id": "gladstone-st-boundary-st-montague-st",
+      "road_segment_name": "Gladstone Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "gladstone-st-montague-st-ferrars-st",
+      "road_segment_name": "Gladstone Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "buckhurst-st-boundary-st-montague-st",
+      "road_segment_name": "Buckhurst Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "buckhurst-st-montague-st-ferrars-st",
+      "road_segment_name": "Buckhurst Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "thistlethwaite-st-boundary-st-montague-st",
+      "road_segment_name": "Thistlethwaite Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "thistlethwaite-st-montague-st-ferrars-st",
+      "road_segment_name": "Thistlethwaite Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "city-rd-boundary-st-montague-st",
+      "road_segment_name": "City Road",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "city-rd-montague-st-ferrars-st",
+      "road_segment_name": "City Road",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "york-st-boundary-st-montague-st",
+      "road_segment_name": "York Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "york-st-montague-st-ferrars-st",
+      "road_segment_name": "York Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "coventry-st-boundary-st-montague-st",
+      "road_segment_name": "Coventry Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "coventry-st-montague-st-ferrars-st",
+      "road_segment_name": "Coventry Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "dorcas-st-kings-way-boundary-st",
+      "road_segment_name": "Dorcas Street",
+      "between_street_name": "Kings Way",
+      "and_street_name": "Boundary Street"
+    },
+    {
+      "segment_id": "dorcas-st-boundary-st-montague-st",
+      "road_segment_name": "Dorcas Street",
+      "between_street_name": "Boundary Street",
+      "and_street_name": "Montague Street"
+    },
+    {
+      "segment_id": "dorcas-st-montague-st-ferrars-st",
+      "road_segment_name": "Dorcas Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "boundary-st-normanby-rd-gladstone-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Gladstone Street"
+    },
+    {
+      "segment_id": "boundary-st-gladstone-st-buckhurst-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "Gladstone Street",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "boundary-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "Buckhurst Street",
+      "and_street_name": "Thistlethwaite Street"
+    },
+    {
+      "segment_id": "boundary-st-thistlethwaite-st-city-rd",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "Thistlethwaite Street",
+      "and_street_name": "City Road"
+    },
+    {
+      "segment_id": "boundary-st-city-rd-york-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "City Road",
+      "and_street_name": "York Street"
+    },
+    {
+      "segment_id": "boundary-st-york-st-coventry-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Coventry Street"
+    },
+    {
+      "segment_id": "boundary-st-coventry-st-dorcas-st",
+      "road_segment_name": "Boundary Street",
+      "between_street_name": "Coventry Street",
+      "and_street_name": "Dorcas Street"
+    },
+    {
+      "segment_id": "montague-st-normanby-rd-gladstone-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Gladstone Street"
+    },
+    {
+      "segment_id": "montague-st-gladstone-st-buckhurst-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "Gladstone Street",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "montague-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "Buckhurst Street",
+      "and_street_name": "Thistlethwaite Street"
+    },
+    {
+      "segment_id": "montague-st-thistlethwaite-st-city-rd",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "Thistlethwaite Street",
+      "and_street_name": "City Road"
+    },
+    {
+      "segment_id": "montague-st-city-rd-york-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "City Road",
+      "and_street_name": "York Street"
+    },
+    {
+      "segment_id": "montague-st-york-st-coventry-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Coventry Street"
+    },
+    {
+      "segment_id": "montague-st-coventry-st-dorcas-st",
+      "road_segment_name": "Montague Street",
+      "between_street_name": "Coventry Street",
+      "and_street_name": "Dorcas Street"
+    },
+    {
+      "segment_id": "ferrars-st-normanby-rd-city-rd",
+      "road_segment_name": "Ferrars Street",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "City Road"
+    },
+    {
+      "segment_id": "ferrars-st-city-rd-york-st",
+      "road_segment_name": "Ferrars Street",
+      "between_street_name": "City Road",
+      "and_street_name": "York Street"
+    },
+    {
+      "segment_id": "ferrars-st-york-st-coventry-st",
+      "road_segment_name": "Ferrars Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Coventry Street"
+    },
+    {
+      "segment_id": "ferrars-st-coventry-st-dorcas-st",
+      "road_segment_name": "Ferrars Street",
+      "between_street_name": "Coventry Street",
+      "and_street_name": "Dorcas Street"
+    },
+    {
+      "segment_id": "ingles-st-gladstone-st-buckhurst-st",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "Gladstone Street",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "ingles-st-buckhurst-st-thistlethwaite-st",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "Buckhurst Street",
+      "and_street_name": "Thistlethwaite Street"
+    },
+    {
+      "segment_id": "ingles-st-thistlethwaite-st-city-rd",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "Thistlethwaite Street",
+      "and_street_name": "City Road"
+    },
+    {
+      "segment_id": "ingles-st-city-rd-york-st",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "City Road",
+      "and_street_name": "York Street"
+    },
+    {
+      "segment_id": "ingles-st-york-st-coventry-st",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Coventry Street"
+    },
+    {
+      "segment_id": "ingles-st-coventry-st-dorcas-st",
+      "road_segment_name": "Ingles Street",
+      "between_street_name": "Coventry Street",
+      "and_street_name": "Dorcas Street"
+    },
+    {
+      "segment_id": "raglan-st-kings-way-boundary-st",
+      "road_segment_name": "Raglan Street",
+      "between_street_name": "Kings Way",
+      "and_street_name": "Boundary Street"
+    },
+    {
+      "segment_id": "crockford-st-kings-way-boundary-st",
+      "road_segment_name": "Crockford Street",
+      "between_street_name": "Kings Way",
+      "and_street_name": "Boundary Street"
+    },
+    {
+      "segment_id": "garton-st-bay-st-boundary-st",
+      "road_segment_name": "Garton Street",
+      "between_street_name": "Bay Street",
+      "and_street_name": "Boundary Street"
+    },
+    {
+      "segment_id": "bay-st-raglan-st-garton-st",
+      "road_segment_name": "Bay Street",
+      "between_street_name": "Raglan Street",
+      "and_street_name": "Garton Street"
+    },
+    {
+      "segment_id": "brady-st-garton-st-boundary-st",
+      "road_segment_name": "Brady Street",
+      "between_street_name": "Garton Street",
+      "and_street_name": "Boundary Street"
+    },
+    {
+      "segment_id": "kerr-st-normanby-rd-buckhurst-st",
+      "road_segment_name": "Kerr Street",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "meaden-st-normanby-rd-buckhurst-st",
+      "road_segment_name": "Meaden Street",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "railway-pl-normanby-rd-buckhurst-st",
+      "road_segment_name": "Railway Place",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "ferrars-pl-normanby-rd-buckhurst-st",
+      "road_segment_name": "Ferrars Place",
+      "between_street_name": "Normanby Road",
+      "and_street_name": "Buckhurst Street"
+    },
+    {
+      "segment_id": "eville-st-montague-st-ferrars-st",
+      "road_segment_name": "Eville Street",
+      "between_street_name": "Montague Street",
+      "and_street_name": "Ferrars Street"
+    },
+    {
+      "segment_id": "morris-st-york-st-dorcas-st",
+      "road_segment_name": "Morris Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Dorcas Street"
+    },
+    {
+      "segment_id": "coote-st-york-st-dorcas-st",
+      "road_segment_name": "Coote Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Dorcas Street"
+    }
+  ],
+  "missing_authoritative_fields": [
+    "authoritative Area 10 boundary geometry",
+    "road-side-specific kerb geometry",
+    "restriction type",
+    "applicable days",
+    "applicable start and end times",
+    "permit or vehicle exceptions",
+    "sign or parking-asset identifiers",
+    "effective dates"
+  ],
+  "validation_summary": {
+    "segment_record_count": 55,
+    "unique_roads": 26,
+    "restriction_records_with_verified_control": 0,
+    "source_map_date": "December 2018",
+    "enforcement_ready": false,
+    "public_sources_integrated": 3
+  },
+  "public_data_findings": {
+    "research_date": "2026-11-20",
+    "result": "No publicly discoverable City of Port Phillip dataset was found that supplies a complete segment-level parking-sign or kerb-restriction network for Area 10.",
+    "usable_for_completion": {
+      "road_geometry": "Vicmap Transport TR_ROAD can validate street names and centreline geometry.",
+      "paid_parking_assets": "City of Port Phillip Parking Machines can identify nearby machine points and SerNo identifiers.",
+      "accessible_parking": "City of Port Phillip Accessible Parking can identify accessible-parking points."
+    },
+    "not_publicly_resolved": [
+      "restriction type by kerb segment",
+      "signed applicable days",
+      "signed operating times",
+      "permit and vehicle exceptions",
+      "sign identifiers and sign-to-kerb extents",
+      "effective dates",
+      "authoritative Area 10 polygon"
+    ],
+    "required_authoritative_release": "A City of Port Phillip parking sign or sign-plate asset layer plus sign-face restriction schedules and controlled kerb extents, or an equivalent line-segment parking-restriction layer."
+  }
+}

@@ -4,7 +4,9 @@
  */
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
-import { getLists, putLists } from '../../lib/db';
+import { getLists, getTimedLists, putLists } from '../../lib/db';
+import { listsToDataset } from '../../lib/parkingDataset';
+import { deviceTimeZone } from '../../lib/time';
 import { saveFile } from '../../lib/files';
 import { CSV_TEMPLATES, parseImportFile, planImport, templateCsv, type ImportPlan, type ImportResult } from '../../lib/importer';
 import type { PlateList } from '../../lib/types';
@@ -15,11 +17,14 @@ const KIND_LABEL: Record<ImportResult['kind'], string> = {
   'timed-csv': 'Timed segments (CSV)',
   'allow-csv': 'Allow list (CSV)',
   'hot-csv': 'Hot list (CSV)',
+  'bays-csv': 'Numbered bays (CSV)',
   'civicmaps-kerbside': 'CivicMAPS kerbside segment',
   'civicmaps-road-segment': 'CivicMAPS road segment',
   'civicmaps-survey': 'CivicMAPS field survey',
   'civicmaps-parking-areas': 'CivicMAPS parking areas',
   'civicmaps-mixed': 'CivicMAPS (several kinds)',
+  'civicmaps-dataset': 'civicmaps.parking_dataset',
+  'area-dataset': 'Area dataset (street segments)',
   unknown: 'Not recognised',
 };
 
@@ -32,6 +37,8 @@ export function importView(_p: Record<string, string>, app: App): View {
   let updateExisting = true;
   let busy = false;
   let showAllIssues = false;
+  /** Export: council or area the dataset describes. */
+  let municipality = '';
 
   const plan = (): ImportPlan => planImport(results.flatMap((r) => r.drafts), existing, { updateExisting });
 
@@ -76,6 +83,21 @@ export function importView(_p: Record<string, string>, app: App): View {
       app.toast(`Could not save the template: ${e.message}`, 'error'),
     );
 
+  const exportDataset = async () => {
+    const timed = await getTimedLists();
+    if (!timed.length) {
+      app.toast('There are no timed lists to export.', 'warn');
+      return;
+    }
+    const name = municipality.trim() || 'Unspecified council';
+    const date = new Date().toISOString().slice(0, 10);
+    const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'platewatch'}-${date}`;
+    const dataset = listsToDataset(timed, { id, title: `${name} street segments (PlateWatch export ${date})`, municipality: name, timezone: deviceTimeZone() });
+    await saveFile(new Blob([JSON.stringify(dataset, null, 2)], { type: 'application/json' }), `${id}.parking.json`, 'PlateWatch segments').catch((e: Error) =>
+      app.toast(`Could not save the export: ${e.message}`, 'error'),
+    );
+  };
+
   const counts = (p: ImportPlan) => {
     const by = (type: PlateList['type'], ls: PlateList[]) => ls.filter((l) => l.type === type).length;
     const entries = [...p.created, ...p.updated].reduce((n, l) => n + (l.type === 'timed' ? 0 : l.entries.length), 0);
@@ -106,6 +128,10 @@ export function importView(_p: Record<string, string>, app: App): View {
           <li><strong>${c.timedUpd}</strong> timed list${c.timedUpd === 1 ? '' : 's'} updated</li>
           ${c.otherNew || c.otherUpd ? html`<li><strong>${c.otherNew}</strong> allow/hot list(s) created, <strong>${c.otherUpd}</strong> updated · ${c.entries} plate${c.entries === 1 ? '' : 's'}</li>` : nothing}
           ${p.unchanged ? html`<li class="text-slate-400">${p.unchanged} matching list(s) left as they are</li>` : nothing}
+          ${p.unmatchedBays.length
+            ? html`<li class="text-amber-300">${p.unmatchedBays.length} set(s) of bays have no matching timed list and will not be imported:
+                <ul class="mt-1 grid gap-0.5 text-xs text-slate-400">${p.unmatchedBays.map((u) => html`<li>${u}</li>`)}</ul></li>`
+            : nothing}
         </ul>
         <label class="mt-3 flex min-h-11 items-center gap-3 text-sm">
           <input type="checkbox" class="h-5 w-5" .checked=${updateExisting} @change=${(e: Event) => { updateExisting = (e.target as HTMLInputElement).checked; app.update(); }} />
@@ -142,7 +168,7 @@ export function importView(_p: Record<string, string>, app: App): View {
         ${page(html`
           <section class="card">
             <h2 class="section-title">Choose files</h2>
-            <p class="text-sm text-slate-300">Select one or more CSV files made from the templates below, or CivicMAPS-preview JSON files (kerbside segments, road segments, field surveys, parking areas). Nothing is saved until you press Import.</p>
+            <p class="text-sm text-slate-300">Select one or more files: civicmaps.parking_dataset JSON (the normalised format), area datasets (street_segments), CSV files made from the templates below, or CivicMAPS-preview data files. Nothing is saved until you press Import.</p>
             <input ${ref(fileRef)} type="file" accept=".csv,.json,text/csv,application/json" multiple class="hidden" data-testid="import-file"
               @change=${(e: Event) => void read((e.target as HTMLInputElement).files)} />
             <button type="button" class="btn-primary mt-3 w-full" ?disabled=${busy} @click=${() => fileRef.value?.click()}>
@@ -156,8 +182,16 @@ export function importView(_p: Record<string, string>, app: App): View {
             <div class="mt-3 grid gap-2">
               <button type="button" class="btn-secondary" @click=${() => download('timed')}>${icon('share')} Timed segments template</button>
               <button type="button" class="btn-secondary" @click=${() => download('allow')}>${icon('share')} Allow list template</button>
+              <button type="button" class="btn-secondary" @click=${() => download('bays')}>${icon('share')} Numbered bays template (positions)</button>
               <button type="button" class="btn-secondary" @click=${() => download('hot')}>${icon('share')} Hot list template</button>
             </div>
+          </section>
+          <section class="card mt-4">
+            <h2 class="section-title">Export</h2>
+            <p class="text-sm text-slate-300">All timed lists as a civicmaps.parking_dataset (JSON) for EnforcementMAPS or another device. Lists imported from a dataset keep their segment and part IDs.</p>
+            <label class="mt-3 block"><span class="field-label">Council or area</span>
+              <input class="field" placeholder="e.g. City of Port Phillip" .value=${municipality} @input=${(e: Event) => (municipality = (e.target as HTMLInputElement).value)} /></label>
+            <button type="button" class="btn-secondary mt-3 w-full" data-testid="export-dataset" @click=${() => void exportDataset()}>${icon('share')} Export timed lists</button>
           </section>
         `)}`;
     },

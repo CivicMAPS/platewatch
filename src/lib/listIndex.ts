@@ -61,6 +61,8 @@ function fields(l: TimedList): Field[] {
   add('cross', 'Part from', l.segment.subFrom);
   add('cross', 'Part to', l.segment.subTo);
   add('segmentid', 'Segment ID', l.roadSegmentId);
+  // Kerb plates that do not follow parking area + bay carry their own number.
+  for (const p of l.bayPoints ?? []) if (p.sign) add('parkingarea', 'Bay sign', p.sign);
   add('suburb', 'Suburb', l.segment.suburb);
   add('name', 'List', l.name);
   add('parkingarea', 'Parking area', l.payment?.parkingArea);

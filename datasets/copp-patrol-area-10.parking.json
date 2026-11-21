@@ -1,0 +1,685 @@
+{
+  "schema": "civicmaps.parking_dataset",
+  "schema_version": "1.0.0",
+  "dataset": {
+    "id": "city-of-port-phillip-patrol-area-10",
+    "title": "City of Port Phillip Parking Enforcement Patrol Area 10 - Working Street Segment and Restriction Dataset",
+    "status": "draft",
+    "generated_at": null,
+    "municipality": {
+      "name": "City of Port Phillip",
+      "state": "VIC",
+      "country": "AU",
+      "timezone": "Australia/Melbourne"
+    },
+    "sources": [
+      {
+        "id": "user-supplied-parking-enforcement-patrol-area-10-map",
+        "name": "User supplied Parking Enforcement Patrol Area 10 map",
+        "publisher": null,
+        "url": null,
+        "format": null,
+        "reference_date": "December 2018",
+        "data_used": [
+          "patrol area number 10",
+          "depicted patrol-area boundary",
+          "visible street names",
+          "visible intersections",
+          "approximate road network"
+        ],
+        "limitations": [
+          "schematic small-scale map",
+          "no parking-restriction legend",
+          "no signed days or times",
+          "no kerb-side controls",
+          "no sign or asset identifiers",
+          "no authoritative segment geometries",
+          "minor streets and labels may be obscured"
+        ]
+      },
+      {
+        "id": "city-of-port-phillip-parking-machines",
+        "name": "City of Port Phillip Parking Machines",
+        "publisher": "City of Port Phillip",
+        "url": "https://data.gov.au/data/dataset/9304b79f-866f-40a1-afea-53ccded06ecd/resource/2d715933-43fc-47fa-8a6c-92422e8ab81d/download/city-of-port-phillip-parking-machines.geojson",
+        "format": "GeoJSON",
+        "reference_date": "2017-11-29",
+        "data_used": [
+          "public source confirmed",
+          "machine identifier field SerNo",
+          "machine point coordinates available"
+        ],
+        "limitations": [
+          "machine locations do not encode signed restriction type, days or times",
+          "dataset states motorists must observe displayed signs",
+          "no direct street-segment relationship"
+        ]
+      },
+      {
+        "id": "city-of-port-phillip-accessible-parking",
+        "name": "City of Port Phillip Accessible Parking",
+        "publisher": "City of Port Phillip",
+        "url": "https://data.gov.au/data/dataset/874498ce-a720-43c3-b7d5-0a750653ffa2/resource/2ae71d07-8def-469d-976c-24193b968288/download/city-of-port-phillip-accessible-parking.geojson",
+        "format": "GeoJSON",
+        "reference_date": "2018-02-28",
+        "data_used": [
+          "public source confirmed",
+          "accessible-parking point locations available"
+        ],
+        "limitations": [
+          "point inventory only",
+          "does not provide a complete kerb-restriction network",
+          "does not establish all signed days, times or exceptions"
+        ]
+      },
+      {
+        "id": "vicmap-transport-road-line",
+        "name": "Vicmap Transport - Road Line",
+        "publisher": "Victorian Department of Transport and Planning",
+        "url": "https://discover.data.vic.gov.au/dataset/vicmap-transport-road-line",
+        "format": "WFS and downloadable spatial formats",
+        "reference_date": null,
+        "data_used": [
+          "authoritative statewide road-network source identified",
+          "road names, classes, direction, locality and unique feature identifiers available"
+        ],
+        "limitations": [
+          "road centreline geometry is not kerb geometry",
+          "does not contain City of Port Phillip parking restrictions or patrol-area assignments"
+        ]
+      }
+    ],
+    "notes": [
+      "Parking Enforcement Patrol Area 10, centred on South Melbourne between the Normanby Road corridor, Ferrars Street, Dorcas Street and the Kings Way/Boundary Street corridor",
+      "The PDF depicts an operational parking enforcement patrol area, not a residential parking permit area.",
+      "Missing authoritative fields: authoritative Area 10 boundary geometry, road-side-specific kerb geometry, restriction type, applicable days, applicable start and end times, permit or vehicle exceptions, sign or parking-asset identifiers, effective dates"
+    ]
+  },
+  "conventions": {
+    "bay_sign_format": null,
+    "paystay_zone_pattern": "^3388\\d+$",
+    "notes": [
+      "PayStay zone numbers begin 3388, then the assigned segment number, then four digits for the side of the road."
+    ]
+  },
+  "patrol_zones": [
+    {
+      "id": "10",
+      "number": "10",
+      "name": null,
+      "kind": "patrol_area"
+    }
+  ],
+  "defaults": {
+    "patrol_zone": "10",
+    "sides": [
+      {
+        "side": "both",
+        "parts": [
+          {
+            "restrictions_status": "pending_field_capture",
+            "restrictions": []
+          }
+        ]
+      }
+    ],
+    "data_quality": {
+      "status": "pending_field_capture",
+      "source": "user_supplied_area_10_pdf",
+      "notes": "interpreted_from visible map intersections; requires GIS validation; not shown and not inferred from map symbology"
+    },
+    "geometry": null
+  },
+  "segments": [
+    {
+      "id": "normanby-rd-boundary-st-montague-st",
+      "road": {
+        "name": "Normanby Road"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "normanby-rd-montague-st-ferrars-st",
+      "road": {
+        "name": "Normanby Road"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "munro-st-boundary-st-kings-way",
+      "road": {
+        "name": "Munro Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Kings Way"
+      }
+    },
+    {
+      "id": "woodgate-st-boundary-st-kings-way",
+      "road": {
+        "name": "Woodgate Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Kings Way"
+      }
+    },
+    {
+      "id": "gladstone-st-boundary-st-montague-st",
+      "road": {
+        "name": "Gladstone Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "gladstone-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Gladstone Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "buckhurst-st-boundary-st-montague-st",
+      "road": {
+        "name": "Buckhurst Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "buckhurst-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Buckhurst Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "thistlethwaite-st-boundary-st-montague-st",
+      "road": {
+        "name": "Thistlethwaite Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "thistlethwaite-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Thistlethwaite Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "city-rd-boundary-st-montague-st",
+      "road": {
+        "name": "City Road"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "city-rd-montague-st-ferrars-st",
+      "road": {
+        "name": "City Road"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "york-st-boundary-st-montague-st",
+      "road": {
+        "name": "York Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "york-st-montague-st-ferrars-st",
+      "road": {
+        "name": "York Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "coventry-st-boundary-st-montague-st",
+      "road": {
+        "name": "Coventry Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "coventry-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Coventry Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "dorcas-st-kings-way-boundary-st",
+      "road": {
+        "name": "Dorcas Street"
+      },
+      "between": {
+        "from": "Kings Way",
+        "to": "Boundary Street"
+      }
+    },
+    {
+      "id": "dorcas-st-boundary-st-montague-st",
+      "road": {
+        "name": "Dorcas Street"
+      },
+      "between": {
+        "from": "Boundary Street",
+        "to": "Montague Street"
+      }
+    },
+    {
+      "id": "dorcas-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Dorcas Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "boundary-st-normanby-rd-gladstone-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Gladstone Street"
+      }
+    },
+    {
+      "id": "boundary-st-gladstone-st-buckhurst-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "Gladstone Street",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "boundary-st-buckhurst-st-thistlethwaite-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "Buckhurst Street",
+        "to": "Thistlethwaite Street"
+      }
+    },
+    {
+      "id": "boundary-st-thistlethwaite-st-city-rd",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "Thistlethwaite Street",
+        "to": "City Road"
+      }
+    },
+    {
+      "id": "boundary-st-city-rd-york-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "City Road",
+        "to": "York Street"
+      }
+    },
+    {
+      "id": "boundary-st-york-st-coventry-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Coventry Street"
+      }
+    },
+    {
+      "id": "boundary-st-coventry-st-dorcas-st",
+      "road": {
+        "name": "Boundary Street"
+      },
+      "between": {
+        "from": "Coventry Street",
+        "to": "Dorcas Street"
+      }
+    },
+    {
+      "id": "montague-st-normanby-rd-gladstone-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Gladstone Street"
+      }
+    },
+    {
+      "id": "montague-st-gladstone-st-buckhurst-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "Gladstone Street",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "montague-st-buckhurst-st-thistlethwaite-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "Buckhurst Street",
+        "to": "Thistlethwaite Street"
+      }
+    },
+    {
+      "id": "montague-st-thistlethwaite-st-city-rd",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "Thistlethwaite Street",
+        "to": "City Road"
+      }
+    },
+    {
+      "id": "montague-st-city-rd-york-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "City Road",
+        "to": "York Street"
+      }
+    },
+    {
+      "id": "montague-st-york-st-coventry-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Coventry Street"
+      }
+    },
+    {
+      "id": "montague-st-coventry-st-dorcas-st",
+      "road": {
+        "name": "Montague Street"
+      },
+      "between": {
+        "from": "Coventry Street",
+        "to": "Dorcas Street"
+      }
+    },
+    {
+      "id": "ferrars-st-normanby-rd-city-rd",
+      "road": {
+        "name": "Ferrars Street"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "City Road"
+      }
+    },
+    {
+      "id": "ferrars-st-city-rd-york-st",
+      "road": {
+        "name": "Ferrars Street"
+      },
+      "between": {
+        "from": "City Road",
+        "to": "York Street"
+      }
+    },
+    {
+      "id": "ferrars-st-york-st-coventry-st",
+      "road": {
+        "name": "Ferrars Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Coventry Street"
+      }
+    },
+    {
+      "id": "ferrars-st-coventry-st-dorcas-st",
+      "road": {
+        "name": "Ferrars Street"
+      },
+      "between": {
+        "from": "Coventry Street",
+        "to": "Dorcas Street"
+      }
+    },
+    {
+      "id": "ingles-st-gladstone-st-buckhurst-st",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "Gladstone Street",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "ingles-st-buckhurst-st-thistlethwaite-st",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "Buckhurst Street",
+        "to": "Thistlethwaite Street"
+      }
+    },
+    {
+      "id": "ingles-st-thistlethwaite-st-city-rd",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "Thistlethwaite Street",
+        "to": "City Road"
+      }
+    },
+    {
+      "id": "ingles-st-city-rd-york-st",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "City Road",
+        "to": "York Street"
+      }
+    },
+    {
+      "id": "ingles-st-york-st-coventry-st",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Coventry Street"
+      }
+    },
+    {
+      "id": "ingles-st-coventry-st-dorcas-st",
+      "road": {
+        "name": "Ingles Street"
+      },
+      "between": {
+        "from": "Coventry Street",
+        "to": "Dorcas Street"
+      }
+    },
+    {
+      "id": "raglan-st-kings-way-boundary-st",
+      "road": {
+        "name": "Raglan Street"
+      },
+      "between": {
+        "from": "Kings Way",
+        "to": "Boundary Street"
+      }
+    },
+    {
+      "id": "crockford-st-kings-way-boundary-st",
+      "road": {
+        "name": "Crockford Street"
+      },
+      "between": {
+        "from": "Kings Way",
+        "to": "Boundary Street"
+      }
+    },
+    {
+      "id": "garton-st-bay-st-boundary-st",
+      "road": {
+        "name": "Garton Street"
+      },
+      "between": {
+        "from": "Bay Street",
+        "to": "Boundary Street"
+      }
+    },
+    {
+      "id": "bay-st-raglan-st-garton-st",
+      "road": {
+        "name": "Bay Street"
+      },
+      "between": {
+        "from": "Raglan Street",
+        "to": "Garton Street"
+      }
+    },
+    {
+      "id": "brady-st-garton-st-boundary-st",
+      "road": {
+        "name": "Brady Street"
+      },
+      "between": {
+        "from": "Garton Street",
+        "to": "Boundary Street"
+      }
+    },
+    {
+      "id": "kerr-st-normanby-rd-buckhurst-st",
+      "road": {
+        "name": "Kerr Street"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "meaden-st-normanby-rd-buckhurst-st",
+      "road": {
+        "name": "Meaden Street"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "railway-pl-normanby-rd-buckhurst-st",
+      "road": {
+        "name": "Railway Place"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "ferrars-pl-normanby-rd-buckhurst-st",
+      "road": {
+        "name": "Ferrars Place"
+      },
+      "between": {
+        "from": "Normanby Road",
+        "to": "Buckhurst Street"
+      }
+    },
+    {
+      "id": "eville-st-montague-st-ferrars-st",
+      "road": {
+        "name": "Eville Street"
+      },
+      "between": {
+        "from": "Montague Street",
+        "to": "Ferrars Street"
+      }
+    },
+    {
+      "id": "morris-st-york-st-dorcas-st",
+      "road": {
+        "name": "Morris Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Dorcas Street"
+      }
+    },
+    {
+      "id": "coote-st-york-st-dorcas-st",
+      "road": {
+        "name": "Coote Street"
+      },
+      "between": {
+        "from": "York Street",
+        "to": "Dorcas Street"
+      }
+    }
+  ]
+}

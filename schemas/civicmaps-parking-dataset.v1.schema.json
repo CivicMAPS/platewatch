@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civicmaps.au/schemas/civicmaps-parking-dataset.v1.schema.json",
+  "title": "civicmaps.parking_dataset v1",
+  "description": "Normalised street segment and parking data for a council area, shared by PlateWatch and EnforcementMAPS. Segment → sides → parts → payment, permit area, restrictions and bays. Unknown values are null, never guessed. See docs/PARKING-DATA-SCHEMA.md.",
+  "type": "object",
+  "required": ["schema", "schema_version", "dataset", "segments"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "civicmaps.parking_dataset" },
+    "schema_version": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "dataset": { "$ref": "#/$defs/datasetInfo" },
+    "conventions": { "$ref": "#/$defs/conventions" },
+    "patrol_zones": { "type": "array", "items": { "$ref": "#/$defs/patrolZone" } },
+    "permit_areas": { "type": "array", "items": { "$ref": "#/$defs/permitArea" } },
+    "defaults": { "$ref": "#/$defs/segmentDefaults" },
+    "segments": { "type": "array", "items": { "$ref": "#/$defs/segment" } }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "date": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "hhmm": { "type": ["string", "null"], "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$|^24:00$" },
+    "latLng": {
+      "type": "object",
+      "description": "WGS84 position.",
+      "required": ["lat", "lng"],
+      "additionalProperties": false,
+      "properties": { "lat": { "type": "number", "minimum": -90, "maximum": 90 }, "lng": { "type": "number", "minimum": -180, "maximum": 180 } }
+    },
+    "dataQuality": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["verified", "field_checked", "unverified", "inferred", "pending_field_capture"] },
+        "source": { "$ref": "#/$defs/nullableString" },
+        "confidence": { "enum": ["high", "medium", "low", null] },
+        "last_verified": { "$ref": "#/$defs/date" },
+        "notes": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "publisher": { "$ref": "#/$defs/nullableString" },
+        "url": { "$ref": "#/$defs/nullableString" },
+        "format": { "$ref": "#/$defs/nullableString" },
+        "reference_date": { "$ref": "#/$defs/nullableString" },
+        "data_used": { "type": "array", "items": { "type": "string" } },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "datasetInfo": {
+      "type": "object",
+      "required": ["id", "title", "status", "municipality"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "description": "Stable identifier; part of every list's external ID." },
+        "title": { "type": "string" },
+        "status": { "enum": ["draft", "in_review", "enforcement_ready", "superseded"] },
+        "generated_at": { "type": ["string", "null"] },
+        "municipality": {
+          "type": "object",
+          "required": ["name", "timezone"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "code": { "$ref": "#/$defs/nullableString" },
+            "state": { "$ref": "#/$defs/nullableString" },
+            "country": { "$ref": "#/$defs/nullableString" },
+            "timezone": { "type": "string", "description": "IANA zone in which restriction times apply, e.g. Australia/Melbourne." }
+          }
+        },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/source" } },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bay_sign_format": { "type": ["string", "null"], "description": "How kerb bay plates are numbered: {parking_area}, {easypark_area} and {bay} placeholders, e.g. \"{parking_area}{bay}\" (City of Melbourne: area 645 + bay 58 = 64558). Null when the council has no numbered bay plates." },
+        "paystay_zone_pattern": { "$ref": "#/$defs/nullableString" },
+        "easypark_area_pattern": { "$ref": "#/$defs/nullableString" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "patrolZone": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "number": { "$ref": "#/$defs/nullableString", "description": "Internal patrol zone / enforcement area number, e.g. \"10\"." },
+        "name": { "$ref": "#/$defs/nullableString", "description": "Operational name used day to day, e.g. \"Flagstaff\"." },
+        "kind": { "enum": ["patrol_area", "enforcement_zone", "precinct"] },
+        "geometry": { "type": ["object", "null"] }
+      }
+    },
+    "permitArea": {
+      "type": "object",
+      "required": ["id", "code"],
+      "additionalProperties": false,
+      "properties": { "id": { "type": "string" }, "code": { "type": "string" }, "name": { "$ref": "#/$defs/nullableString" } }
+    },
+    "bound": {
+      "type": "object",
+      "description": "One end of a part: an intersection, the segment end, a bay, an address, a point or a boundary.",
+      "required": ["kind", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["intersection", "segment_end", "bay", "address", "point", "boundary"] },
+        "label": { "type": "string", "minLength": 1 },
+        "location": { "oneOf": [{ "$ref": "#/$defs/latLng" }, { "type": "null" }] }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parking_area": { "$ref": "#/$defs/nullableString", "description": "Council parking area number (one per segment), e.g. City of Melbourne \"645\"." },
+        "easypark_areas": { "type": "array", "items": { "type": "string" } },
+        "paystay_zones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["zone"],
+            "additionalProperties": false,
+            "properties": { "zone": { "type": "string", "minLength": 1 }, "meter_id": { "$ref": "#/$defs/nullableString" } }
+          }
+        },
+        "meters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": { "id": { "type": "string" }, "location": { "oneOf": [{ "$ref": "#/$defs/latLng" }, { "type": "null" }] } }
+          }
+        }
+      }
+    },
+    "restriction": {
+      "type": "object",
+      "required": ["control", "days"],
+      "additionalProperties": false,
+      "properties": {
+        "control": { "enum": ["time_limit", "metered", "ticket", "loading_zone", "permit_zone", "no_stopping", "no_parking", "clearway", "bus_zone", "taxi_zone", "accessible", "works_zone", "other"] },
+        "sign_code": { "$ref": "#/$defs/nullableString", "description": "As printed: 2P, 1/2P, P15, LZ 30." },
+        "limit_minutes": { "type": ["integer", "null"], "minimum": 1, "maximum": 1440 },
+        "days": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } },
+        "all_day": { "type": "boolean" },
+        "start": { "$ref": "#/$defs/hhmm" },
+        "end": { "$ref": "#/$defs/hhmm" },
+        "public_holidays": { "enum": ["applies", "excluded", null] },
+        "exceptions": { "type": "array", "items": { "type": "string" } },
+        "exempt_permit_areas": { "type": "array", "items": { "type": "string" } },
+        "grace_minutes": { "type": ["integer", "null"], "minimum": 0, "maximum": 120 },
+        "source_sign_id": { "$ref": "#/$defs/nullableString" },
+        "effective_from": { "$ref": "#/$defs/date" },
+        "effective_to": { "$ref": "#/$defs/date" },
+        "data_quality": { "$ref": "#/$defs/dataQuality" }
+      },
+      "allOf": [
+        { "if": { "properties": { "all_day": { "const": true } }, "required": ["all_day"] }, "else": { "required": ["start", "end"], "properties": { "start": { "type": "string" }, "end": { "type": "string" } } } },
+        { "if": { "properties": { "control": { "enum": ["time_limit", "metered", "ticket"] } } }, "then": { "required": ["limit_minutes"], "properties": { "limit_minutes": { "type": "integer" } } } }
+      ]
+    },
+    "bay": {
+      "type": "object",
+      "required": ["number"],
+      "additionalProperties": false,
+      "properties": {
+        "number": { "type": "integer", "minimum": 0 },
+        "sign_number": { "$ref": "#/$defs/nullableString", "description": "Kerb plate number, when not given by conventions.bay_sign_format." },
+        "location": { "oneOf": [{ "$ref": "#/$defs/latLng" }, { "type": "null" }] },
+        "kind": { "enum": ["standard", "accessible", "loading", "motorcycle", "ev", "other"] },
+        "data_quality": { "$ref": "#/$defs/dataQuality" },
+        "notes": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "part": {
+      "type": "object",
+      "description": "The whole side (no from/to) or the stretch of it between two bounds where the signs change.",
+      "required": ["restrictions_status", "restrictions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "from": { "oneOf": [{ "$ref": "#/$defs/bound" }, { "type": "null" }] },
+        "to": { "oneOf": [{ "$ref": "#/$defs/bound" }, { "type": "null" }] },
+        "permit_area": { "$ref": "#/$defs/nullableString" },
+        "payment": { "$ref": "#/$defs/payment" },
+        "restrictions_status": { "enum": ["supplied", "pending_field_capture", "no_parking_spaces"] },
+        "restrictions": { "type": "array", "items": { "$ref": "#/$defs/restriction" } },
+        "bays": { "type": "array", "items": { "$ref": "#/$defs/bay" } },
+        "data_quality": { "$ref": "#/$defs/dataQuality" },
+        "notes": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "side": {
+      "type": "object",
+      "required": ["side", "parts"],
+      "additionalProperties": false,
+      "properties": {
+        "side": { "enum": ["both", "north", "south", "east", "west", "odd", "even"] },
+        "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/part" } }
+      },
+      "if": { "properties": { "parts": { "minItems": 2 } } },
+      "then": { "properties": { "parts": { "items": { "required": ["id"] } } } }
+    },
+    "geometry": {
+      "type": ["object", "null"],
+      "required": ["type", "coordinates"],
+      "properties": { "type": { "enum": ["LineString", "MultiLineString"] }, "coordinates": { "type": "array" } }
+    },
+    "segmentCommon": {
+      "type": "object",
+      "properties": {
+        "road_segment_id": { "$ref": "#/$defs/nullableString", "description": "Council road segment / corridor ID, e.g. City of Melbourne 20055." },
+        "patrol_zone": { "$ref": "#/$defs/nullableString", "description": "patrol_zones[].id" },
+        "geometry": { "$ref": "#/$defs/geometry" },
+        "sides": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/side" } },
+        "data_quality": { "$ref": "#/$defs/dataQuality" },
+        "notes": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "segmentDefaults": {
+      "description": "Values applied to every segment unless the segment gives its own (objects merge, arrays replace).",
+      "allOf": [{ "$ref": "#/$defs/segmentCommon" }],
+      "unevaluatedProperties": false
+    },
+    "segment": {
+      "description": "One road between two cross streets or boundaries. sides may come from defaults.",
+      "allOf": [{ "$ref": "#/$defs/segmentCommon" }],
+      "type": "object",
+      "required": ["id", "road", "between"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "road": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "locality": { "$ref": "#/$defs/nullableString" },
+            "external_ids": { "type": "object", "additionalProperties": { "type": "string" }, "description": "e.g. { \"vicmap_ufi\": \"…\" }" }
+          }
+        },
+        "between": {
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

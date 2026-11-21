@@ -124,6 +124,17 @@ export function parseBackup(text: string): {
       for (const k of ['subFrom', 'subTo'] as const) if (typeof seg[k] !== 'string') delete seg[k];
       if (Array.isArray(l.bays)) l.bays = (l.bays as unknown[]).filter((b): b is number => typeof b === 'number' && Number.isInteger(b) && b >= 0);
       else delete l.bays;
+      if (typeof l.externalId !== 'string') delete l.externalId;
+      if (Array.isArray(l.bayPoints))
+        l.bayPoints = (l.bayPoints as unknown[]).filter(
+          (p) => isObj(p) && Number.isInteger(p.bay) && typeof p.lat === 'number' && typeof p.lng === 'number' && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180,
+        );
+      else delete l.bayPoints;
+      if (Array.isArray(l.untimedControls))
+        l.untimedControls = (l.untimedControls as unknown[]).filter(
+          (u) => isObj(u) && typeof u.control === 'string' && typeof u.label === 'string' && Array.isArray(u.days) && typeof u.allDay === 'boolean',
+        );
+      else delete l.untimedControls;
     }
     lists.push(l as unknown as PlateList);
   }

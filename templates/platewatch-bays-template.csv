@@ -1,0 +1,4 @@
+dataset_id,segment_id,part_id,road,between_from,between_to,side,part_from,part_to,bay,lat,lng,sign_number
+com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,
+com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,
+com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,

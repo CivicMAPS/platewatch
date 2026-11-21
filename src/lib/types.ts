@@ -89,6 +89,27 @@ export interface PaymentAreas {
   payStay: { zone: string; meter: string }[];
 }
 
+export interface BayPoint {
+  bay: number;
+  lat: number;
+  lng: number;
+  /** Kerb plate number, when the council does not number plates as parking area + bay. */
+  sign?: string;
+}
+
+/** A signed control without a time allowance; kept for reference and export, not timed. */
+export interface UntimedControl {
+  /** civicmaps.parking_dataset control: no_stopping, no_parking, permit_zone, loading_zone… */
+  control: 'time_limit' | 'metered' | 'ticket' | 'loading_zone' | 'permit_zone' | 'no_stopping' | 'no_parking' | 'clearway' | 'bus_zone' | 'taxi_zone' | 'accessible' | 'works_zone' | 'other';
+  /** As shown, e.g. "No stopping", "Loading zone (no time limit given)". */
+  label: string;
+  days: Weekday[];
+  allDay: boolean;
+  startTime: string;
+  endTime: string;
+  description: string;
+}
+
 export interface TimedList extends BaseList {
   payment?: PaymentAreas;
   type: 'timed';
@@ -102,6 +123,15 @@ export interface TimedList extends BaseList {
   roadSegmentId?: string;
   /** Bay numbers in this list; with the parking area they make each bay's kerb sign (645 + 58). */
   bays?: number[];
+  /** Bay positions (WGS84) where known, with the kerb plate number when it is not area + bay. */
+  bayPoints?: BayPoint[];
+  /** Signs on this stretch with no time allowance (No Stopping, No Parking, Permit Zone…). */
+  untimedControls?: UntimedControl[];
+  /**
+   * Where the list came from in a civicmaps.parking_dataset: "dataset/segment/side[/part]".
+   * Re-imports match on it before street names; exports keep the IDs.
+   */
+  externalId?: string;
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */

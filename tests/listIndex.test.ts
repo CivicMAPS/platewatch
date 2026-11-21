@@ -102,6 +102,10 @@ describe('searchTimedLists', () => {
     // Bay 58 is listed for the first; the second lists its bays without 58; the third does not list bays.
     expect(ids).toEqual(['bays-58-72', 'no-bays']);
   });
+  it('finds a bay by its own plate number when it does not follow area + bay', () => {
+    const odd = seg('odd-plates', 'Bay Street', 'Graham Street', 'Ross Street', { bays: [3], bayPoints: [{ bay: 3, lat: -37.84, lng: 144.94, sign: 'PM-0003' }] });
+    expect(searchTimedLists([...lists, odd], 'PM-0003').map((r) => r.list.id)).toEqual(['odd-plates']);
+  });
   it('matches sub-segment bounds such as an address', () => {
     const part = seg('part', 'Little Bourke Street', 'Swanston Street', 'Russell Street');
     part.segment = { ...part.segment, subFrom: 'Russell Street', subTo: '234 Little Bourke Street' };

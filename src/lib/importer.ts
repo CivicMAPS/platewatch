@@ -13,8 +13,9 @@
  * Everything here is pure; src/ui/views/importView.ts reads the files and saves the plan.
  */
 import { uid } from './db';
+import { convertAreaDataset, datasetToDrafts, isAreaDataset, validateDataset, DATASET_SCHEMA, type ParkingDataset } from './parkingDataset';
 import { normalisePlate, plateKey } from './plate';
-import { minutesFromCode, summariseDays } from './restriction';
+import { minutesFromCode } from './restriction';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -31,6 +32,7 @@ import {
   type StreetSide,
   type TimedList,
   type TimedRestriction,
+  type UntimedControl,
   type Weekday,
 } from './types';
 
@@ -56,7 +58,15 @@ export interface HotDraft {
   list: Draftable<HotList>;
   source: string;
 }
-export type ImportDraft = TimedDraft | AllowDraft | HotDraft;
+/** Numbered bays (with positions) for a timed list, from the bays CSV. */
+export interface BaysDraft {
+  kind: 'bays';
+  target: { segment: StreetSegment; externalId?: string };
+  bays: number[];
+  points: { bay: number; lat: number; lng: number; sign?: string }[];
+  source: string;
+}
+export type ImportDraft = TimedDraft | AllowDraft | HotDraft | BaysDraft;
 
 export interface ImportIssue {
   file: string;
@@ -69,11 +79,14 @@ export type ImportKind =
   | 'timed-csv'
   | 'allow-csv'
   | 'hot-csv'
+  | 'bays-csv'
   | 'civicmaps-kerbside'
   | 'civicmaps-road-segment'
   | 'civicmaps-survey'
   | 'civicmaps-parking-areas'
   | 'civicmaps-mixed'
+  | 'civicmaps-dataset'
+  | 'area-dataset'
   | 'unknown';
 
 export interface ImportResult {
@@ -96,13 +109,22 @@ export const CSV_TEMPLATES = {
   timed: {
     fileName: 'platewatch-timed-segments-template.csv',
     header:
-      'patrol_zone,patrol_zone_name,street,from_street,to_street,side,suburb,sub_from,sub_to,rpa,parking_area,easypark_areas,paystay_zones,bays,sign,minutes,days,start,end,grace,road_segment_id,list_name,notes',
+      'dataset_id,segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
     example: [
-      '9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,7,,,338851200002,,2P,,Mon-Fri,08:00,18:00,0,,,',
-      '9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,7,,,338851200002,,2P,,Sat,08:00,12:30,0,,,',
-      '14,Flagstaff,Little Bourke Street,Swanston Street,Elizabeth Street,south,Melbourne,Bay 58,Bay 72,,645,7514,,58-59;61-65;67-72,LZ30,,Mon-Fri,07:00,16:00,,20055,,Commercial vehicles only',
-      '14,Flagstaff,Little Bourke Street,Swanston Street,Elizabeth Street,south,Melbourne,Bay 58,Bay 72,,645,7514,,58-59;61-65;67-72,2P Meter,,Sat-Sun,07:00,22:00,,20055,,',
-      '14,Flagstaff,Lonsdale Street,William Street,Queen Street,north,Melbourne,,,,637,7306;7307,,,,,,,,,,,Signs still to be surveyed',
+      'city-of-port-phillip-patrol-area-10,normanby-rd-boundary-st-montague-st,,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
+      'city-of-port-phillip-patrol-area-10,coventry-st-montague-st-ferrars-st,,,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338851200001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – replace with surveyed signs',
+      'city-of-port-phillip-patrol-area-10,coventry-st-montague-st-ferrars-st,,,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338851200001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – replace with surveyed signs',
+      'com-chinatown,com-20055,bay-58-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
+      'com-chinatown,com-20055,bay-58-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
+    ].join('\n'),
+  },
+  bays: {
+    fileName: 'platewatch-bays-template.csv',
+    header: 'dataset_id,segment_id,part_id,road,between_from,between_to,side,part_from,part_to,bay,lat,lng,sign_number',
+    example: [
+      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,',
+      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,',
+      'com-chinatown,com-20055,bay-58-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,',
     ].join('\n'),
   },
   allow: {
@@ -158,18 +180,19 @@ export function parseCsv(text: string): string[][] {
 
 /* ───────────────────────────── Signs, days, times ───────────────────────────── */
 
-export type ParsedSign = { code: string; minutes: number; description: string } | { note: string };
+export type ParsedSign = { code: string; minutes: number; description: string } | { note: string; control: UntimedControl['control'] };
 
-const NOTE_LABELS: Record<string, string> = {
-  no_stopping: 'No stopping',
-  no_stopping_area: 'No stopping',
-  no_parking: 'No parking',
-  clearway: 'Clearway',
-  bus_zone: 'Bus zone',
-  taxi_zone: 'Taxi zone',
-  permit_zone: 'Permit zone',
-  disabled: 'Disabled parking',
-  works_zone: 'Works zone',
+const NOTE_LABELS: Record<string, [string, UntimedControl['control']]> = {
+  no_stopping: ['No stopping', 'no_stopping'],
+  no_stopping_area: ['No stopping', 'no_stopping'],
+  no_parking: ['No parking', 'no_parking'],
+  clearway: ['Clearway', 'clearway'],
+  bus_zone: ['Bus zone', 'bus_zone'],
+  taxi_zone: ['Taxi zone', 'taxi_zone'],
+  permit_zone: ['Permit zone', 'permit_zone'],
+  disabled: ['Disabled parking', 'accessible'],
+  accessible: ['Accessible parking', 'accessible'],
+  works_zone: ['Works zone', 'works_zone'],
 };
 
 const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase());
@@ -188,7 +211,7 @@ export function parseSign(input: string, limit?: string | null): ParsedSign {
   const lz = /^lz_?(\d+)$/.exec(k) ?? /^loading_zone(?:_(\d+)_?(?:m|min|mins|minutes))?$/.exec(k);
   if (lz) {
     const minutes = lz[1] ? Number(lz[1]) : limitMin;
-    return Number.isFinite(minutes) && minutes > 0 ? { code: `LZ${minutes}`, minutes, description: '' } : { note: 'Loading zone (no time limit given)' };
+    return Number.isFinite(minutes) && minutes > 0 ? { code: `LZ${minutes}`, minutes, description: '' } : { note: 'Loading zone (no time limit given)', control: 'loading_zone' };
   }
   // "2P", "2p_meter", "1/2P", "1_2p", "P15", "2P Ticket", "15_min".
   const parts = k.split('_');
@@ -207,12 +230,13 @@ export function parseSign(input: string, limit?: string | null): ParsedSign {
     const minutes = Number(joined ? joined[1] : parts[0]);
     return { code: `${minutes} min`, minutes, description: suffix(separate ? 2 : 1) };
   }
-  if (NOTE_LABELS[k]) return { note: NOTE_LABELS[k] };
-  return { note: titleCase(raw) };
+  const known = NOTE_LABELS[k];
+  if (known) return { note: known[0], control: known[1] };
+  return { note: titleCase(raw), control: 'other' };
 
   function timedSign(code: string, descFrom: number): ParsedSign {
     const minutes = minutesFromCode(code);
-    return minutes ? { code, minutes, description: suffix(descFrom) } : { note: titleCase(raw) };
+    return minutes ? { code, minutes, description: suffix(descFrom) } : { note: titleCase(raw), control: 'other' };
   }
 }
 
@@ -301,9 +325,6 @@ export function formatBays(bays: readonly number[] | undefined, ascii = false): 
   return parts.join(ascii ? ';' : ', ');
 }
 
-function describeRule(label: string, days: Weekday[], t: { allDay: boolean; startTime: string; endTime: string }): string {
-  return `${label} ${summariseDays(days)} ${t.allDay ? 'all times' : `${t.startTime}–${t.endTime}`}`;
-}
 
 /* ───────────────────────────── Segments and names ───────────────────────────── */
 
@@ -372,8 +393,36 @@ function newRestriction(code: string, minutes: number, days: Weekday[], t: { all
 
 type Row = Record<string, string>;
 
+/**
+ * Column names as in civicmaps.parking_dataset, mapped to the names used here (which the first
+ * templates used, so older CSV files keep importing).
+ */
+const COLUMN_ALIASES: Record<string, string> = {
+  road: 'street',
+  road_segment_name: 'street',
+  between_from: 'from_street',
+  between_street_name: 'from_street',
+  between_to: 'to_street',
+  and_street_name: 'to_street',
+  locality: 'suburb',
+  part_from: 'sub_from',
+  part_to: 'sub_to',
+  permit_area: 'rpa',
+  sign_code: 'sign',
+  limit_minutes: 'minutes',
+  grace_minutes: 'grace',
+  latitude: 'lat',
+  longitude: 'lng',
+  bay_number: 'bay',
+  road_side: 'side',
+  enforcement_zone: 'patrol_zone',
+};
+
 function rowsWithHeader(table: string[][]): { header: string[]; rows: { line: number; row: Row }[] } {
-  const header = (table[0] ?? []).map((h) => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const header = (table[0] ?? []).map((h) => {
+    const name = h.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return COLUMN_ALIASES[name] ?? name;
+  });
   const rows = table.slice(1).map((cells, i) => {
     const row: Row = {};
     header.forEach((h, j) => (row[h] = (cells[j] ?? '').trim()));
@@ -384,17 +433,40 @@ function rowsWithHeader(table: string[][]): { header: string[]; rows: { line: nu
 
 const splitList = (s: string) => s.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
 
+/** Controls with no time allowance unless a limit is given. */
+const UNTIMED_CONTROLS = new Set(['permit_zone', 'no_stopping', 'no_parking', 'clearway', 'bus_zone', 'taxi_zone', 'accessible', 'works_zone', 'other']);
+const ALL_CONTROLS = new Set([...UNTIMED_CONTROLS, 'time_limit', 'metered', 'ticket', 'loading_zone']);
+const CONTROL_TEXT: Record<string, string> = {
+  permit_zone: 'Permit zone', no_stopping: 'No stopping', no_parking: 'No parking', clearway: 'Clearway', bus_zone: 'Bus zone', taxi_zone: 'Taxi zone',
+  accessible: 'Accessible parking', works_zone: 'Works zone', other: 'Other', loading_zone: 'Loading zone (no time limit given)',
+};
+
+/** "dataset/segment/side[/part]" when the CSV gives a segment_id, as in civicmaps.parking_dataset. */
+function csvExternalId(row: Row, side: StreetSide): string | undefined {
+  return row.segment_id ? `${row.dataset_id || 'csv'}/${row.segment_id}/${side}${row.part_id ? `/${row.part_id}` : ''}` : undefined;
+}
+
 function timedFromCsv(file: string, table: string[][], out: ImportResult): void {
-  const groups = new Map<string, { draft: TimedDraft; notes: string[]; timed: number; lines: number[] }>();
+  const groups = new Map<string, { draft: TimedDraft; notes: string[]; untimed: UntimedControl[]; timed: number; lines: number[] }>();
   for (const { line, row } of rowsWithHeader(table).rows) {
     const issue = (message: string) => out.issues.push({ file, row: line, message });
     if (!row.street || !row.from_street || !row.to_street) {
-      issue('street, from_street and to_street are required.');
+      issue('road, between_from and between_to are required.');
       continue;
     }
     const side = parseSide(row.side);
     if (!side) {
       issue(`side "${row.side}" is not north, south, east, west, both, odd or even.`);
+      continue;
+    }
+    const status = (row.restrictions_status || '').toLowerCase();
+    if (status && !['supplied', 'pending_field_capture', 'no_parking_spaces'].includes(status)) {
+      issue(`restrictions_status "${row.restrictions_status}" must be supplied, pending_field_capture or no_parking_spaces.`);
+      continue;
+    }
+    const control = (row.control || '').toLowerCase().replace(/[\s-]+/g, '_');
+    if (control && !ALL_CONTROLS.has(control)) {
+      issue(`control "${row.control}" is not one of ${[...ALL_CONTROLS].join(', ')}.`);
       continue;
     }
     let bays: number[] | undefined;
@@ -406,14 +478,28 @@ function timedFromCsv(file: string, table: string[][], out: ImportResult): void 
       }
       bays = b;
     }
-    // A timed sign needs readable days and times; check before the row joins its list.
+    const segment: StreetSegment = {
+      street: row.street,
+      fromStreet: row.from_street,
+      toStreet: row.to_street,
+      side,
+      suburb: row.suburb ?? '',
+      ...(row.sub_from ? { subFrom: row.sub_from } : {}),
+      ...(row.sub_to ? { subTo: row.sub_to } : {}),
+    };
+    if (status === 'no_parking_spaces') {
+      out.skipped.push(`${describeSegment(segment)}: no parking spaces — row ${line}`);
+      continue;
+    }
+
+    // A sign needs readable days and times; check before the row joins its list.
     let restriction: TimedRestriction | null = null;
-    let note: string | null = null;
-    if (row.sign || row.minutes) {
-      const sign = row.sign ? parseSign(row.sign) : { note: '' };
+    let untimed: UntimedControl | null = null;
+    const hasSign = status !== 'pending_field_capture' && Boolean(row.sign || row.minutes || control);
+    if (hasSign) {
       const override = row.minutes ? Number(row.minutes) : NaN;
-      if (row.minutes && !(override >= 1 && override <= 1440)) {
-        issue(`minutes "${row.minutes}" must be between 1 and 1440.`);
+      if (row.minutes && !(Number.isInteger(override) && override >= 1 && override <= 1440)) {
+        issue(`limit_minutes "${row.minutes}" must be a whole number between 1 and 1440.`);
         continue;
       }
       const days = parseDays(row.days ?? '');
@@ -428,24 +514,30 @@ function timedFromCsv(file: string, table: string[][], out: ImportResult): void 
       }
       const grace = row.grace ? Number(row.grace) : 0;
       if (!(grace >= 0 && grace <= 120)) {
-        issue(`grace "${row.grace}" must be between 0 and 120 minutes.`);
+        issue(`grace_minutes "${row.grace}" must be between 0 and 120.`);
         continue;
       }
-      if ('code' in sign) restriction = newRestriction(sign.code, Number.isFinite(override) ? override : sign.minutes, days, times, grace, sign.description);
-      else if (Number.isFinite(override)) restriction = newRestriction(row.sign!.toUpperCase(), override, days, times, grace);
-      else note = describeRule(sign.note, days, times);
+      const parsed: ParsedSign | null = row.sign ? parseSign(row.sign, row.minutes || null) : null;
+      const exceptions = splitList(row.exceptions ?? '').join(' · ');
+      const timedByControl = control && !UNTIMED_CONTROLS.has(control) && (Number.isFinite(override) || (parsed && 'code' in parsed));
+      if ((parsed && 'code' in parsed && !UNTIMED_CONTROLS.has(control)) || timedByControl) {
+        const code = parsed && 'code' in parsed ? parsed.code : row.sign ? row.sign.toUpperCase() : control === 'loading_zone' ? `LZ${override}` : `${override} min`;
+        const minutes = Number.isFinite(override) ? override : (parsed as { minutes: number }).minutes;
+        const kind = control === 'metered' ? 'Meter' : control === 'ticket' ? 'Ticket' : '';
+        const signDesc = parsed && 'code' in parsed ? parsed.description : '';
+        const description = [kind && signDesc.toLowerCase() !== kind.toLowerCase() ? kind : '', signDesc, exceptions].filter(Boolean).join(' · ');
+        restriction = newRestriction(code, minutes, days, times, grace, description);
+      } else if (!control && Number.isFinite(override) && row.sign) {
+        restriction = newRestriction(row.sign.toUpperCase(), override, days, times, grace, exceptions);
+      } else {
+        const c = (control || (parsed && 'control' in parsed ? parsed.control : 'other')) as UntimedControl['control'];
+        const label = parsed && 'note' in parsed ? parsed.note : row.sign || CONTROL_TEXT[c] || 'Other';
+        untimed = { control: c, label, days, ...times, description: exceptions };
+      }
     }
 
-    const segment: StreetSegment = {
-      street: row.street,
-      fromStreet: row.from_street,
-      toStreet: row.to_street,
-      side,
-      suburb: row.suburb ?? '',
-      ...(row.sub_from ? { subFrom: row.sub_from } : {}),
-      ...(row.sub_to ? { subTo: row.sub_to } : {}),
-    };
-    const key = segmentKey(segment);
+    const ext = csvExternalId(row, side);
+    const key = ext ? `ext:${ext}` : segmentKey(segment);
     let g = groups.get(key);
     if (!g) {
       g = {
@@ -453,9 +545,19 @@ function timedFromCsv(file: string, table: string[][], out: ImportResult): void 
           kind: 'timed',
           pending: true,
           source: `${file} row ${line}`,
-          list: { type: 'timed', name: row.list_name || defaultListName(segment), notes: '', segment, restrictions: [], allowListIds: [], payment: { easyPark: [], payStay: [] } },
+          list: {
+            type: 'timed',
+            name: row.list_name || defaultListName(segment),
+            notes: '',
+            segment,
+            restrictions: [],
+            allowListIds: [],
+            payment: { easyPark: [], payStay: [] },
+            ...(ext ? { externalId: ext } : {}),
+          },
         },
         notes: [],
+        untimed: [],
         timed: 0,
         lines: [],
       };
@@ -479,24 +581,70 @@ function timedFromCsv(file: string, table: string[][], out: ImportResult): void 
     }
     if (bays) l.bays = [...new Set([...(l.bays ?? []), ...bays])].sort((x, y) => x - y);
     if (row.notes && !g.notes.includes(row.notes)) g.notes.push(row.notes);
-    if (note) g.notes.push(note);
+    if (untimed) g.untimed.push(untimed);
     if (restriction) {
       l.restrictions.push(restriction);
       g.timed++;
     }
-    if (row.sign || row.minutes) g.draft.pending = false;
+    if (hasSign) g.draft.pending = false;
   }
   for (const g of groups.values()) {
     const l = g.draft.list;
     l.notes = g.notes.join('\n');
     l.payment = cleanPayment(l.payment!);
+    if (g.untimed.length) l.untimedControls = g.untimed;
     // Signs given but none of them timed (e.g. No Stopping only): nothing to time.
     if (!g.draft.pending && !g.timed) {
-      out.skipped.push(`${describeSegment(l.segment)}: no timed parking (${g.notes.join('; ')}) — rows ${g.lines.join(', ')}`);
+      out.skipped.push(`${describeSegment(l.segment)}: no timed parking (${[...new Set(g.untimed.map((u) => u.label))].join('; ')}) — rows ${g.lines.join(', ')}`);
       continue;
     }
     out.drafts.push(g.draft);
   }
+}
+
+/** Bays CSV: one row per numbered bay, with its position and plate number where known. */
+function baysFromCsv(file: string, table: string[][], out: ImportResult): void {
+  const groups = new Map<string, BaysDraft>();
+  for (const { line, row } of rowsWithHeader(table).rows) {
+    const issue = (message: string) => out.issues.push({ file, row: line, message });
+    if (!row.street || !row.from_street || !row.to_street) {
+      issue('road, between_from and between_to are required.');
+      continue;
+    }
+    const side = parseSide(row.side);
+    if (!side) {
+      issue(`side "${row.side}" is not north, south, east, west, both, odd or even.`);
+      continue;
+    }
+    const bay = Number(row.bay);
+    if (!Number.isInteger(bay) || bay < 0) {
+      issue(`bay "${row.bay}" must be a whole number.`);
+      continue;
+    }
+    const lat = row.lat ? Number(row.lat) : NaN;
+    const lng = row.lng ? Number(row.lng) : NaN;
+    if ((row.lat || row.lng) && !(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) {
+      issue(`lat/lng "${row.lat}, ${row.lng}" must be decimal degrees (WGS84), e.g. -37.8125, 144.9649.`);
+      continue;
+    }
+    const segment: StreetSegment = {
+      street: row.street,
+      fromStreet: row.from_street,
+      toStreet: row.to_street,
+      side,
+      suburb: row.suburb ?? '',
+      ...(row.sub_from ? { subFrom: row.sub_from } : {}),
+      ...(row.sub_to ? { subTo: row.sub_to } : {}),
+    };
+    const ext = csvExternalId(row, side);
+    const key = ext ? `ext:${ext}` : segmentKey(segment);
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { kind: 'bays', source: `${file} row ${line}`, target: { segment, ...(ext ? { externalId: ext } : {}) }, bays: [], points: [] }));
+    if (!g.bays.includes(bay)) g.bays.push(bay);
+    if (Number.isFinite(lat)) g.points = [...g.points.filter((p) => p.bay !== bay), { bay, lat, lng, ...(row.sign_number ? { sign: row.sign_number } : {}) }];
+  }
+  for (const g of groups.values()) g.bays.sort((a, b) => a - b);
+  out.drafts.push(...groups.values());
 }
 
 function describeSegment(seg: StreetSegment): string {
@@ -653,6 +801,7 @@ interface SubSegment {
   parkingArea?: string;
   easyPark: string[];
   bays?: number[];
+  bayPoints?: { bay: number; lat: number; lng: number }[];
   signs: RuleSet[];
   /** Explicitly still to be surveyed. */
   pending: boolean;
@@ -671,8 +820,7 @@ function draftFromSub(file: string, s: SubSegment, out: ImportResult): void {
     ...(s.subTo ? { subTo: s.subTo } : {}),
   };
   const restrictions: TimedRestriction[] = [];
-  const notes = [...s.notes];
-  const untimed: string[] = [];
+  const untimed: UntimedControl[] = [];
   for (const set of s.signs) {
     const sign = parseSign(set.type, set.limit);
     const rules = set.rules.length ? set.rules : [{ days: 'all_days', time: 'all_times' }];
@@ -685,15 +833,16 @@ function draftFromSub(file: string, s: SubSegment, out: ImportResult): void {
           continue;
         }
         restrictions.push(newRestriction(sign.code, sign.minutes, days, times, 0, sign.description));
+      } else if (days && times) {
+        untimed.push({ control: sign.control, label: sign.note, days, ...times, description: '' });
       } else {
-        const text = days && times ? describeRule(sign.note, days, times) : `${sign.note} ${r.days} ${r.time}`.trim();
-        notes.push(text);
-        untimed.push(sign.note);
+        // Unreadable times on an untimed sign ("all_other_times"): keep it, as signed, every day.
+        untimed.push({ control: sign.control, label: sign.note, days: days ?? [0, 1, 2, 3, 4, 5, 6], allDay: true, startTime: '00:00', endTime: '24:00', description: `${r.days} ${r.time}`.trim() });
       }
     }
   }
   if (s.signs.length && !restrictions.length) {
-    out.skipped.push(`${describeSegment(segment)}: no timed parking (${[...new Set(untimed)].join('; ')})`);
+    out.skipped.push(`${describeSegment(segment)}: no timed parking (${[...new Set(untimed.map((u) => u.label))].join('; ')})`);
     return;
   }
   const payment = cleanPayment({ ...(s.parkingArea ? { parkingArea: s.parkingArea } : {}), easyPark: s.easyPark, payStay: [] });
@@ -704,10 +853,12 @@ function draftFromSub(file: string, s: SubSegment, out: ImportResult): void {
     list: {
       type: 'timed',
       name: defaultListName(segment),
-      notes: notes.join('\n'),
+      notes: s.notes.join('\n'),
       segment,
       restrictions,
       allowListIds: [],
+      ...(untimed.length ? { untimedControls: untimed } : {}),
+      ...(s.bayPoints?.length ? { bayPoints: s.bayPoints } : {}),
       ...(s.zoneName ? { patrolZoneName: zoneTitle(s.zoneName) } : {}),
       ...(s.roadSegmentId ? { roadSegmentId: s.roadSegmentId } : {}),
       ...(payment ? { payment } : {}),
@@ -737,7 +888,11 @@ function fromKerbside(file: string, d: Json, out: ImportResult): void {
         out.skipped.push(`${describeSegment({ ...base, suburb: '' })}: no parking spaces`);
         continue;
       }
-      const bays = arr(sub.bays).filter(isObj).map((b) => Number(b.bay)).filter((n) => Number.isFinite(n));
+      const bayObjs = arr(sub.bays).filter(isObj);
+      const bays = bayObjs.map((b) => Number(b.bay)).filter((n) => Number.isFinite(n));
+      const bayPoints = bayObjs
+        .filter((b) => Number.isFinite(Number(b.bay)) && isObj(b.location) && typeof b.location.latitude === 'number' && typeof b.location.longitude === 'number')
+        .map((b) => ({ bay: Number(b.bay), lat: (b.location as Json).latitude as number, lng: (b.location as Json).longitude as number }));
       draftFromSub(file, {
         ...base,
         zoneName: str(d.patrol_zone) || undefined,
@@ -745,6 +900,7 @@ function fromKerbside(file: string, d: Json, out: ImportResult): void {
         parkingArea: str(sub.parking_area) || undefined,
         easyPark: easyParkAreas(sub.easypark_area),
         bays: [...new Set(bays)].sort((x, y) => x - y),
+        bayPoints,
         signs: ruleSets(sub.parking_rules),
         pending: /pending/.test(str(sub.parking_rules_status)),
         notes: str(sub.notes) && !/^Bay allocation inferred/.test(str(sub.notes)) ? [str(sub.notes)] : [],
@@ -859,11 +1015,33 @@ function fromParkingAreas(file: string, d: Json, out: ImportResult): void {
 }
 
 function jsonKind(d: Json): ImportKind {
+  if (d.schema === DATASET_SCHEMA) return 'civicmaps-dataset';
+  if (isAreaDataset(d)) return 'area-dataset';
   if (str(d.schema).startsWith('civicmaps.kerbside_parking_segment') || (Array.isArray(d.sides) && 'on_street' in d)) return 'civicmaps-kerbside';
   if (Array.isArray(d.segments) && 'street' in d) return 'civicmaps-road-segment';
   if (Array.isArray(d.sides) && 'street' in d) return 'civicmaps-survey';
   if ('area' in d && (Array.isArray(d.parking_zones) || Array.isArray(d.records) || Array.isArray(d.numeric_records))) return 'civicmaps-parking-areas';
   return 'unknown';
+}
+
+/** civicmaps.parking_dataset: validated first; a dataset with errors is not imported at all. */
+function fromDataset(file: string, d: ParkingDataset, out: ImportResult): void {
+  const errors = validateDataset(d);
+  if (errors.length) {
+    for (const e of errors.slice(0, 200)) out.issues.push({ file, message: `${e.path || 'dataset'}: ${e.message}` });
+    if (errors.length > 200) out.issues.push({ file, message: `…and ${errors.length - 200} more problems.` });
+    return;
+  }
+  const { drafts, skipped } = datasetToDrafts(d);
+  out.skipped.push(...skipped);
+  for (const x of drafts) out.drafts.push({ kind: 'timed', list: x.list, pending: x.pending, source: file });
+}
+
+/** Earlier "street_segments + record_defaults" area datasets, converted to civicmaps.parking_dataset. */
+function fromAreaDataset(file: string, d: Json, out: ImportResult): void {
+  const { dataset, warnings } = convertAreaDataset(d);
+  for (const w of warnings) out.issues.push({ file, message: w });
+  fromDataset(file, dataset, out);
 }
 
 /* ───────────────────────────── Entry point ───────────────────────────── */
@@ -885,7 +1063,9 @@ export function parseImportFile(text: string, file: string): ImportResult {
     for (const d of docs) {
       const kind = jsonKind(d);
       kinds.add(kind);
-      if (kind === 'civicmaps-kerbside') fromKerbside(file, d, out);
+      if (kind === 'civicmaps-dataset') fromDataset(file, d as unknown as ParkingDataset, out);
+      else if (kind === 'area-dataset') fromAreaDataset(file, d, out);
+      else if (kind === 'civicmaps-kerbside') fromKerbside(file, d, out);
       else if (kind === 'civicmaps-road-segment') fromRoadSegments(file, d, out);
       else if (kind === 'civicmaps-survey') fromSurvey(file, d, out);
       else if (kind === 'civicmaps-parking-areas') fromParkingAreas(file, d, out);
@@ -893,13 +1073,16 @@ export function parseImportFile(text: string, file: string): ImportResult {
     kinds.delete('unknown');
     out.kind = kinds.size === 1 ? [...kinds][0]! : kinds.size > 1 ? 'civicmaps-mixed' : 'unknown';
     if (out.kind === 'unknown') {
-      out.issues.push({ file, message: 'Not a recognised file: expected a PlateWatch CSV template or a CivicMAPS-preview kerbside, road-segment, field-survey or parking-area-zone JSON file.' });
+      out.issues.push({ file, message: 'Not a recognised file: expected a civicmaps.parking_dataset, an area dataset (street_segments), a PlateWatch CSV template, or a CivicMAPS-preview kerbside, road-segment, field-survey or parking-area-zone JSON file.' });
     }
     return out;
   }
   const table = parseCsv(trimmed);
   const { header } = rowsWithHeader(table);
-  if (header.includes('street') && header.includes('from_street')) {
+  if (header.includes('bay') && header.includes('street')) {
+    out.kind = 'bays-csv';
+    baysFromCsv(file, table, out);
+  } else if (header.includes('street') && header.includes('from_street')) {
     out.kind = 'timed-csv';
     timedFromCsv(file, table, out);
   } else if (header.includes('plate') && header.includes('risk_level')) {
@@ -923,6 +1106,8 @@ export interface ImportPlan {
   updated: PlateList[];
   /** Matching lists left as they were (updating turned off). */
   unchanged: number;
+  /** Bays CSV rows whose segment has no timed list on the device or in the import. */
+  unmatchedBays: string[];
   /** Timed lists with no restrictions yet, among created. */
   placeholders: number;
 }
@@ -934,32 +1119,63 @@ export interface ImportPlan {
  * and a placeholder never wipes restrictions already entered.
  */
 export function planImport(drafts: readonly ImportDraft[], existing: readonly PlateList[], opts: { updateExisting: boolean }, now = Date.now()): ImportPlan {
-  const byKey = new Map<string, PlateList>();
-  for (const l of existing) byKey.set(l.type === 'timed' ? `timed:${segmentKey(l.segment)}` : `${l.type}:${l.name.trim().toLowerCase()}`, l);
-  const created = new Map<string, PlateList>();
-  const updated = new Map<string, PlateList>();
-  let unchanged = 0;
+  // A timed list is found by its dataset external ID first, then by its segment.
+  const keysOf = (l: { type: PlateList['type']; name: string; segment?: StreetSegment; externalId?: string }): string[] =>
+    l.type === 'timed' ? [...(l.externalId ? [`ext:${l.externalId}`] : []), `timed:${segmentKey(l.segment!)}`] : [`${l.type}:${l.name.trim().toLowerCase()}`];
+  const index = new Map<string, PlateList>();
+  for (const l of existing) for (const k of keysOf(l)) if (!index.has(k)) index.set(k, l);
+  const changed = new Map<string, { list: PlateList; isNew: boolean }>();
+  const leftAlone = new Set<string>();
+
+  const unmatchedBays: string[] = [];
 
   for (const d of drafts) {
-    const key = d.kind === 'timed' ? `timed:${segmentKey(d.list.segment)}` : `${d.kind}:${d.list.name.trim().toLowerCase()}`;
-    const target = created.get(key) ?? updated.get(key) ?? byKey.get(key);
-    if (!target) {
-      created.set(key, { ...structuredClone(d.list), id: uid(), createdAt: now, updatedAt: now } as PlateList);
+    const keys = d.kind === 'bays' ? keysOf({ type: 'timed', name: '', ...d.target }) : keysOf(d.list as PlateList);
+    const found = keys.map((k) => index.get(k)).find(Boolean);
+    const target = found ? changed.get(found.id)?.list ?? found : undefined;
+    if (d.kind === 'bays') {
+      // Bays attach to a timed list already on the device or in this import; they never create one.
+      if (!target || target.type !== 'timed') {
+        unmatchedBays.push(`${describeSegment(d.target.segment)}: no timed list for bays ${formatBays(d.bays)} (${d.source})`);
+        continue;
+      }
+      const isNewTarget = changed.get(target.id)?.isNew ?? false;
+      if (!isNewTarget && !opts.updateExisting) {
+        leftAlone.add(target.id);
+        continue;
+      }
+      const points = new Map((target.bayPoints ?? []).map((p) => [p.bay, p]));
+      for (const p of d.points) points.set(p.bay, p);
+      const merged: TimedList = {
+        ...target,
+        bays: [...new Set([...(target.bays ?? []), ...d.bays])].sort((a, b) => a - b),
+        ...(points.size ? { bayPoints: [...points.values()].sort((a, b) => a.bay - b.bay) } : {}),
+        updatedAt: now,
+      };
+      changed.set(merged.id, { list: merged, isNew: isNewTarget });
+      for (const k of keysOf(merged)) index.set(k, merged);
       continue;
     }
-    const isNew = created.has(key);
-    if (!isNew && !opts.updateExisting) {
-      if (!updated.has(key)) unchanged++;
-      continue;
+    let next: PlateList;
+    let isNew = true;
+    if (!target) next = { ...structuredClone(d.list), id: uid(), createdAt: now, updatedAt: now } as PlateList;
+    else {
+      isNew = changed.get(target.id)?.isNew ?? false;
+      if (!isNew && !opts.updateExisting) {
+        leftAlone.add(target.id);
+        continue;
+      }
+      next = mergeInto(target, d, now);
     }
-    const merged = mergeInto(target, d, now);
-    (isNew ? created : updated).set(key, merged);
+    changed.set(next.id, { list: next, isNew });
+    for (const k of [...keys, ...keysOf(next)]) index.set(k, next);
   }
-  const createdLists = [...created.values()];
+  const createdLists = [...changed.values()].filter((c) => c.isNew).map((c) => c.list);
   return {
     created: createdLists,
-    updated: [...updated.values()],
-    unchanged,
+    updated: [...changed.values()].filter((c) => !c.isNew).map((c) => c.list),
+    unchanged: leftAlone.size,
+    unmatchedBays,
     placeholders: createdLists.filter((l) => l.type === 'timed' && !l.restrictions.length).length,
   };
 }
@@ -974,6 +1190,9 @@ function mergeInto(target: PlateList, d: ImportDraft, now: number): PlateList {
       ...(l.rpa ? { rpa: l.rpa } : {}),
       ...(l.roadSegmentId ? { roadSegmentId: l.roadSegmentId } : {}),
       ...(l.bays?.length ? { bays: l.bays } : {}),
+      ...(l.bayPoints?.length ? { bayPoints: l.bayPoints } : {}),
+      ...(l.externalId ? { externalId: l.externalId } : {}),
+      ...(l.untimedControls?.length ? { untimedControls: structuredClone(l.untimedControls) } : {}),
       ...(l.payment ? { payment: l.payment } : {}),
       segment: { ...target.segment, ...(l.segment.suburb ? { suburb: l.segment.suburb } : {}) },
       restrictions: d.pending ? target.restrictions : structuredClone(l.restrictions),

@@ -9,12 +9,17 @@ import {
   parseSign,
   planImport,
   segmentKey,
+  type AllowDraft,
+  type HotDraft,
   type TimedDraft,
 } from '../src/lib/importer';
-import type { AllowList, HotList, TimedList } from '../src/lib/types';
+import type { AllowList, TimedList } from '../src/lib/types';
 import { timed } from './fixtures';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/civicmaps-preview/${name}`, import.meta.url), 'utf8');
+/** The first template's columns: older CSV files must keep importing. */
+const LEGACY_TIMED_HEADER =
+  'patrol_zone,patrol_zone_name,street,from_street,to_street,side,suburb,sub_from,sub_to,rpa,parking_area,easypark_areas,paystay_zones,bays,sign,minutes,days,start,end,grace,road_segment_id,list_name,notes';
 const timedDrafts = (text: string, name: string) => parseImportFile(text, name).drafts.filter((d): d is TimedDraft => d.kind === 'timed');
 
 describe('parseCsv', () => {
@@ -51,16 +56,17 @@ describe('parseSign', () => {
     expect(parseSign('Loading Zone 15 min')).toMatchObject({ code: 'LZ15', minutes: 15 });
   });
   it('keeps signs without a time allowance as notes', () => {
-    expect(parseSign('no_stopping')).toEqual({ note: 'No stopping' });
-    expect(parseSign('No Parking')).toEqual({ note: 'No parking' });
-    expect(parseSign('loading_zone')).toEqual({ note: 'Loading zone (no time limit given)' });
+    expect(parseSign('no_stopping')).toEqual({ note: 'No stopping', control: 'no_stopping' });
+    expect(parseSign('No Parking')).toEqual({ note: 'No parking', control: 'no_parking' });
+    expect(parseSign('loading_zone')).toEqual({ note: 'Loading zone (no time limit given)', control: 'loading_zone' });
+    expect(parseSign('Permit Zone')).toEqual({ note: 'Permit zone', control: 'permit_zone' });
   });
 });
 
 describe('timed CSV template', () => {
   it('groups rows into one list per side (or sub-segment) with one restriction per row', () => {
     const csv = [
-      CSV_TEMPLATES.timed.header,
+      LEGACY_TIMED_HEADER,
       '9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,,,,338851200002,,2P,,Mon-Fri,08:00,18:00,,,',
       '9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,,,,338851200002,,2P,,Sat,08:00,12:30,,,',
       '9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,north,South Melbourne,,,,,,338851200001,,No Stopping,,Mon-Sun,,,,,',
@@ -90,28 +96,83 @@ describe('timed CSV template', () => {
 
   it('reports rows with unreadable days or times and missing streets', () => {
     const csv = [
-      CSV_TEMPLATES.timed.header,
+      LEGACY_TIMED_HEADER,
       ',,Bay Street,Graham Street,Ross Street,north,,,,,,,,,2P,,Someday,08:00,18:00,,,',
       ',,,Graham Street,Ross Street,north,,,,,,,,,2P,,Mon-Fri,08:00,18:00,,,',
     ].join('\n');
     const r = parseImportFile(csv, 'bad.csv');
     expect(r.issues.map((i) => i.row)).toEqual([2, 3]);
     expect(r.issues[0]!.message).toMatch(/days/i);
-    expect(r.issues[1]!.message).toMatch(/street/i);
+    expect(r.issues[1]!.message).toMatch(/road|street/i);
   });
 
   it('treats 00:00–24:00 and blank times as all day', () => {
-    const csv = [CSV_TEMPLATES.timed.header, ',,Bay Street,Graham Street,Ross Street,both,,,,,,,,,P15,,Mon-Sun,00:00,24:00,,,'].join('\n');
+    const csv = [LEGACY_TIMED_HEADER, ',,Bay Street,Graham Street,Ross Street,both,,,,,,,,,P15,,Mon-Sun,00:00,24:00,,,'].join('\n');
     const [d] = timedDrafts(csv, 'x.csv');
     expect(d!.list.restrictions[0]).toMatchObject({ allDay: true, days: [0, 1, 2, 3, 4, 5, 6] });
   });
 
   it('ships templates whose example rows import cleanly', () => {
-    for (const kind of ['timed', 'allow', 'hot'] as const) {
+    for (const kind of ['timed', 'bays', 'allow', 'hot'] as const) {
       const r = parseImportFile(CSV_TEMPLATES[kind].header + '\n' + CSV_TEMPLATES[kind].example, `${kind}.csv`);
       expect(r.issues, kind).toEqual([]);
       expect(r.drafts.length, kind).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('timed CSV with civicmaps.parking_dataset columns', () => {
+  const row = (v: Record<string, string>) => CSV_TEMPLATES.timed.header.split(',').map((h) => v[h] ?? '').join(',');
+  const base = { dataset_id: 'copp-10', segment_id: 'coventry-st-montague-st-ferrars-st', patrol_zone: '10', road: 'Coventry Street', locality: 'South Melbourne', between_from: 'Montague Street', between_to: 'Ferrars Street', side: 'north', restrictions_status: 'supplied' };
+
+  it('reads control, sign code, allowance, exceptions and grace; keeps the dataset external ID', () => {
+    const csv = [
+      CSV_TEMPLATES.timed.header,
+      row({ ...base, permit_area: '7', paystay_zones: '338851200001', control: 'ticket', sign_code: '2P', limit_minutes: '120', days: 'Mon-Fri', start: '08:00', end: '18:00', exceptions: 'Permit Zone 7 excepted', grace_minutes: '5' }),
+      row({ ...base, control: 'no_stopping', days: 'Mon-Fri', start: '07:00', end: '09:00' }),
+    ].join('\n');
+    const [d] = timedDrafts(csv, 'x.csv');
+    expect(d!.list).toMatchObject({ externalId: 'copp-10/coventry-st-montague-st-ferrars-st/north', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
+    expect(d!.list.restrictions[0]).toMatchObject({ code: '2P', limitMinutes: 120, graceMinutes: 5, description: 'Ticket · Permit Zone 7 excepted' });
+    expect(d!.list.untimedControls).toEqual([{ control: 'no_stopping', label: 'No stopping', days: [1, 2, 3, 4, 5], allDay: false, startTime: '07:00', endTime: '09:00', description: '' }]);
+  });
+
+  it('honours restrictions_status: pending is a placeholder, no_parking_spaces is left out', () => {
+    const csv = [CSV_TEMPLATES.timed.header, row({ ...base, restrictions_status: 'pending_field_capture' }), row({ ...base, side: 'south', restrictions_status: 'no_parking_spaces' })].join('\n');
+    const r = parseImportFile(csv, 'x.csv');
+    expect(r.drafts).toHaveLength(1);
+    expect((r.drafts[0] as TimedDraft).pending).toBe(true);
+    expect(r.skipped[0]).toMatch(/south side: no parking spaces/);
+  });
+
+  it('rejects an unknown control or status, and a fractional allowance', () => {
+    const csv = [CSV_TEMPLATES.timed.header, row({ ...base, control: 'parking_maybe', days: 'Mon' }), row({ ...base, restrictions_status: 'done' }), row({ ...base, control: 'time_limit', limit_minutes: '90.5', days: 'Mon' })].join('\n');
+    expect(parseImportFile(csv, 'x.csv').issues.map((i) => i.row)).toEqual([2, 3, 4]);
+  });
+});
+
+describe('bays CSV', () => {
+  it('adds bay numbers, positions and plate numbers to the matching timed list (by segment ID or by street)', () => {
+    const timedCsv = CSV_TEMPLATES.timed.header + '\n' + CSV_TEMPLATES.timed.example;
+    const baysCsv = [CSV_TEMPLATES.bays.header, CSV_TEMPLATES.bays.example, ',,,Little Bourke Street,Elizabeth Street,Swanston Street,south,Bay 58,Bay 72,62,-37.81282,144.96426,64562X'].join('\n');
+    const drafts = [...parseImportFile(timedCsv, 't.csv').drafts, ...parseImportFile(baysCsv, 'b.csv').drafts];
+    const plan = planImport(drafts, [], { updateExisting: true });
+    expect(plan.unmatchedBays).toEqual([]);
+    const part = plan.created.find((l) => l.type === 'timed' && l.segment.subFrom === 'Bay 58') as TimedList;
+    expect(part.bays).toEqual([58, 59, 61, 62]);
+    expect(part.bayPoints).toEqual([
+      { bay: 58, lat: -37.8127332, lng: 144.9645599 },
+      { bay: 59, lat: -37.8127544, lng: 144.9644881 },
+      { bay: 61, lat: -37.8128019, lng: 144.9643276 },
+      { bay: 62, lat: -37.81282, lng: 144.96426, sign: '64562X' },
+    ]);
+  });
+
+  it('reports bays for a segment that has no timed list, and bad coordinates', () => {
+    const csv = [CSV_TEMPLATES.bays.header, ',,,Nowhere Street,A Street,B Street,north,,,1,-37.8,144.9,', ',,,Nowhere Street,A Street,B Street,north,,,2,-137.8,144.9,'].join('\n');
+    const r = parseImportFile(csv, 'b.csv');
+    expect(r.issues.map((i) => i.row)).toEqual([3]);
+    expect(planImport(r.drafts, [], { updateExisting: true }).unmatchedBays[0]).toMatch(/Nowhere Street.*bays 1/);
   });
 });
 
@@ -122,7 +183,7 @@ describe('allow and hot list CSV templates', () => {
     expect(r.kind).toBe('allow-csv');
     const [d] = r.drafts;
     expect(d!.kind === 'allow' && d!.list.name).toBe('RPA 12 residents');
-    const entries = (d!.list as AllowList).entries;
+    const entries = (d as AllowDraft).list.entries;
     expect(entries.map((e) => [e.plate, e.key, e.permitNo, e.validFrom, e.validTo])).toEqual([
       ['1AB2CD', '1AB2CD', 'P-1001', '2026-07-01', '2027-06-30'],
       ['XYZ789', 'XYZ789', '', '2026-07-01', ''],
@@ -133,7 +194,7 @@ describe('allow and hot list CSV templates', () => {
     const csv = [CSV_TEMPLATES.hot.header, 'Officer safety,ABC123,high,Aggressive; weapon_sighted,Toyota,Hilux,Ute,White,Seen near market'].join('\n');
     const r = parseImportFile(csv, 'hot.csv');
     expect(r.kind).toBe('hot-csv');
-    const e = (r.drafts[0]!.list as HotList).entries[0]!;
+    const e = (r.drafts[0] as HotDraft).list.entries[0]!;
     expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], make: 'Toyota', colour: 'White' });
   });
 });
@@ -152,7 +213,10 @@ describe('CivicMAPS-preview JSON', () => {
     });
     expect(bays.list.bays).toContain(58);
     expect(bays.list.restrictions.map((x) => x.code)).toEqual(['2P']);
-    expect(bays.list.notes).toMatch(/Loading zone \(no time limit given\) Mon–Fri 07:00–16:00/);
+    expect(bays.list.untimedControls).toEqual([
+      { control: 'loading_zone', label: 'Loading zone (no time limit given)', days: [1, 2, 3, 4, 5], allDay: false, startTime: '07:00', endTime: '16:00', description: '' },
+    ]);
+    expect(bays.list.bayPoints?.find((b) => b.bay === 58)).toMatchObject({ lat: expect.closeTo(-37.81, 1), lng: expect.closeTo(144.96, 1) });
     expect(bays.pending).toBe(false);
     // Bay 72 → Elizabeth St has no rules yet: imported as a placeholder.
     expect(lists.find((d) => d.list.segment.subFrom === 'Bay 72')!.pending).toBe(true);
@@ -221,7 +285,7 @@ describe('planImport', () => {
       segment: { street: 'Smith Street', fromStreet: 'Johnston St', toStreet: 'Gertrude St', side: 'both', suburb: 'Fitzroy' },
     });
     const csv = [
-      CSV_TEMPLATES.timed.header,
+      LEGACY_TIMED_HEADER,
       '3,North,smith street,Gertrude St,Johnston St,both,Fitzroy,,,,,,,,,,,,,,,',
       '3,North,Brunswick Street,Johnston St,Gertrude St,both,Fitzroy,,,,,,,,1P,,Mon-Fri,09:00,17:00,,,',
     ].join('\n');
@@ -255,5 +319,37 @@ describe('planImport', () => {
     expect(segmentKey({ street: 'Smith Street', fromStreet: 'Johnston St', toStreet: 'Gertrude Street', side: 'both', suburb: '' })).toBe(
       segmentKey({ street: 'smith st', fromStreet: 'Gertrude St', toStreet: 'Johnston Street', side: 'both', suburb: 'Fitzroy' }),
     );
+  });
+});
+
+describe('normalised and area datasets through the importer', () => {
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+
+  it('imports a civicmaps.parking_dataset and reports invalid ones by path without importing them', () => {
+    const r = parseImportFile(read('datasets/examples/example-two-councils.parking.json'), 'example.parking.json');
+    expect(r.kind).toBe('civicmaps-dataset');
+    expect(r.issues).toEqual([]);
+    expect(r.drafts.length).toBe(4);
+    const bad = JSON.parse(read('datasets/examples/example-two-councils.parking.json'));
+    bad.segments[1].sides[0].parts[0].restrictions[0].days = ['funday'];
+    const rb = parseImportFile(JSON.stringify(bad), 'bad.json');
+    expect(rb.drafts).toEqual([]);
+    expect(rb.issues[0]!.message).toMatch(/^segments\[1\]\.sides\[0\]\.parts\[0\]\.restrictions\[0\]\.days/);
+  });
+
+  it('imports the Area 10 source file as it is (converted on the way in)', () => {
+    const r = parseImportFile(read('tests/fixtures/copp-area-10-source.json'), 'Area 10.json');
+    expect(r.kind).toBe('area-dataset');
+    expect(r.issues).toEqual([]);
+    expect(r.drafts).toHaveLength(55);
+  });
+
+  it('re-importing a dataset matches lists by external ID, even after the street was renamed on the device', () => {
+    const text = read('datasets/copp-patrol-area-10.parking.json');
+    const first = planImport(parseImportFile(text, 'a.json').drafts, [], { updateExisting: true });
+    const onDevice = first.created.map((l) => (l.type === 'timed' && l.segment.street === 'Normanby Road' ? { ...l, segment: { ...l.segment, street: 'Normanby Rd (renamed)' } } : l));
+    const second = planImport(parseImportFile(text, 'a.json').drafts, onDevice, { updateExisting: true });
+    expect(second.created).toEqual([]);
+    expect(second.updated).toHaveLength(55);
   });
 });

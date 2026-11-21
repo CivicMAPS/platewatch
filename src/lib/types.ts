@@ -72,15 +72,24 @@ export interface TimedRestriction {
 }
 
 export interface PaymentAreas {
+  /**
+   * Parking area number (e.g. City of Melbourne): one per road segment, used to pay at the meter
+   * or in EasyPark. A bay's kerb sign is this number followed by the bay number (637 + 58 = 63758).
+   */
+  parkingArea?: string;
+  /** EasyPark area numbers; a segment can have several (e.g. one side changes restriction mid-day). */
   easyPark: string[];
+  /** PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side. */
   payStay: { zone: string; meter: string }[];
 }
 
 export interface TimedList extends BaseList {
   payment?: PaymentAreas;
   type: 'timed';
-  /** Parking enforcement area / patrol zone, e.g. "1". Home groups and filters lists by it. */
+  /** Internal patrol zone / enforcement area number, e.g. "9". Home groups and filters lists by it. */
   patrolZone?: string;
+  /** Operational name of the patrol zone used day to day, e.g. "Flagstaff". */
+  patrolZoneName?: string;
   /** Residential permit area, e.g. "12". */
   rpa?: string;
   segment: StreetSegment;

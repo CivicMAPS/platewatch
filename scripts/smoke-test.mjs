@@ -193,22 +193,38 @@ async function main() {
   // Timed list: in force at all times so the test is time-of-day independent.
   await page.goto(`${ORIGIN}/#/new/timed`);
   await type('#name', 'Smith St 2P');
+  await type('#patrolZone', '9');
+  await type('#patrolZoneName', 'South Melbourne Market');
   await type('#street', 'Smith Street');
   await type('#from', 'Johnston Street');
   await type('#to', 'Gertrude Street');
   for (const d of ['Sat', 'Sun']) await click(d);
   await click('Applies at all times on these days');
   await click('Zone 12 residents');
+  await type('#parkingArea', '637');
   await page.click('#payStay');
-  await type('#payStayzone-0', '00042');
   await click('Save list');
-  await page.waitForFunction(() => document.body.innerText.includes('Meter ID is required when a PayStay ParkingZone is set.'));
-  await type('#payStaymeter-0', '007');
+  await page.waitForFunction(() => document.body.innerText.includes('PayStay ParkingZone is required.'));
+  // Port Phillip PayStay: a zone number only, no meter ID.
+  await type('#payStayzone-0', '338851200001');
   await shot('timed-form');
   await click('Save list');
   await waitText('Tracked vehicles (0)');
   log('timed list saved (segment, between streets, restriction, linked allow list)');
   const timedUrl = page.url();
+
+  // Home: grouped by patrol zone, found by a bay kerb sign (parking area 637 + bay 58) and by PayStay number.
+  await page.goto(`${ORIGIN}/#/`);
+  await waitText('Patrol zone 9 · South Melbourne Market');
+  await type('[data-testid=list-search]', '63758');
+  await waitText('63758 = area 637 · bay 58');
+  await page.$eval('[data-testid=list-search]', (el) => { el.value = ''; });
+  await type('[data-testid=list-search]', '5120');
+  await waitText('PayStay zone 338851200001');
+  await shot('home-search');
+  log('home: zone grouping, bay-sign and PayStay search');
+  await page.goto(timedUrl);
+  await waitText('Tracked vehicles (0)');
 
   // Scan 1
   await click('Scan number plate');

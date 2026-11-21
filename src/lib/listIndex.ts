@@ -1,7 +1,7 @@
 /**
  * Finding timed lists in the field: fuzzy search over the identifiers an officer has to hand
- * (patrol zone, RPA, road segment, EasyPark area, PayStay zone, meter ID), and grouping by
- * patrol zone, then road segment name.
+ * (patrol zone number or name, RPA, road segment, parking area, bay sign, EasyPark area, PayStay
+ * zone, meter ID), and grouping by patrol zone, then road segment name.
  */
 import type { TimedList } from './types';
 
@@ -21,7 +21,10 @@ export interface SearchResult {
 }
 
 type Field = FieldMatch & { kind: FieldKind };
-type FieldKind = 'zone' | 'rpa' | 'street' | 'cross' | 'suburb' | 'name' | 'easypark' | 'paystay' | 'meter';
+type FieldKind = 'zone' | 'rpa' | 'street' | 'cross' | 'suburb' | 'name' | 'parkingarea' | 'easypark' | 'paystay' | 'meter';
+
+/** Fields whose numbers start a bay's kerb sign: parking area 637 + bay 58 = sign 63758. */
+const BAY_SIGN_KINDS = new Set<FieldKind>(['parkingarea', 'easypark']);
 
 /** Words that say which field the following words refer to ("rpa 12", "meter 4521"). */
 const FIELD_WORDS: Record<string, FieldKind[]> = {
@@ -30,6 +33,9 @@ const FIELD_WORDS: Record<string, FieldKind[]> = {
   pez: ['zone'],
   rpa: ['rpa'],
   permit: ['rpa'],
+  area: ['parkingarea', 'easypark'],
+  parking: ['parkingarea'],
+  bay: ['parkingarea', 'easypark'],
   meter: ['meter'],
   easypark: ['easypark'],
   paystay: ['paystay', 'meter'],
@@ -46,12 +52,14 @@ function fields(l: TimedList): Field[] {
     if (value?.trim()) f.push({ kind, label, value: value.trim() });
   };
   add('zone', 'Patrol zone', l.patrolZone);
+  add('zone', 'Zone name', l.patrolZoneName);
   add('rpa', 'RPA', l.rpa);
   add('street', 'Road segment', l.segment.street);
   add('cross', 'Between', l.segment.fromStreet);
   add('cross', 'And', l.segment.toStreet);
   add('suburb', 'Suburb', l.segment.suburb);
   add('name', 'List', l.name);
+  add('parkingarea', 'Parking area', l.payment?.parkingArea);
   for (const a of l.payment?.easyPark ?? []) add('easypark', 'EasyPark area', a);
   for (const p of l.payment?.payStay ?? []) {
     add('paystay', 'PayStay zone', p.zone);
@@ -89,6 +97,18 @@ function tokenScore(t: string, value: string): number {
 }
 
 /**
+ * A bay's kerb sign is its parking area (or EasyPark area) number followed by a bay number of one
+ * to three digits. Longer area numbers score higher, so area 637 beats area 63 for sign 63758.
+ */
+function baySign(t: string, f: Field): (FieldMatch & { s: number }) | null {
+  const area = norm(f.value);
+  if (!BAY_SIGN_KINDS.has(f.kind) || !/^\d+$/.test(t) || !/^\d+$/.test(area)) return null;
+  const bay = t.slice(area.length);
+  if (!t.startsWith(area) || bay.length < 1 || bay.length > 3) return null;
+  return { label: 'Bay sign', value: `${t} = area ${area} · bay ${bay}`, s: Math.min(95, 85 + area.length) };
+}
+
+/**
  * Lists matching every word of the query, best first. Field words narrow the search ("rpa 12"
  * looks at RPAs only); every other word must match some field.
  */
@@ -100,6 +120,8 @@ export function searchTimedLists(lists: readonly TimedList[], query: string): Se
   // Only field words ("zone"): treat them as ordinary words.
   const tokens = terms.length ? terms : raw;
   const allowed = terms.length && hinted.length ? new Set(hinted.flatMap((t) => FIELD_WORDS[t]!)) : null;
+  // "area 637" means the parking area itself; a plain number or "bay …" may be a kerb sign.
+  const bayLookup = !allowed || hinted.includes('bay');
 
   const out: SearchResult[] = [];
   for (const list of lists) {
@@ -112,6 +134,8 @@ export function searchTimedLists(lists: readonly TimedList[], query: string): Se
       for (const f of fs) {
         const s = tokenScore(t, f.value);
         if (s > (best?.s ?? 0)) best = { label: f.label, value: f.value, s };
+        const sign = bayLookup && s < 100 ? baySign(t, f) : null;
+        if (sign && sign.s > (best?.s ?? 0)) best = sign;
       }
       if (!best) {
         all = false;
@@ -134,18 +158,36 @@ export interface StreetGroup {
 }
 export interface ZoneGroup {
   zone: string;
+  /** Operational name of the zone (e.g. "Flagstaff"), from the first list in it that has one. */
+  name?: string;
   streets: StreetGroup[];
+}
+
+/** Grouping key: the zone number, or the zone name when a list has only a name. */
+export function zoneKey(l: TimedList): string {
+  return l.patrolZone?.trim() || l.patrolZoneName?.trim() || NO_ZONE;
 }
 
 /** Patrol zones in natural order (1, 2, 10), for the zone filter. */
 export function patrolZones(lists: readonly TimedList[]): string[] {
-  return [...new Set(lists.map((l) => l.patrolZone?.trim() ?? '').filter(Boolean))].sort(compareText);
+  return [...new Set(lists.map(zoneKey).filter(Boolean))].sort(compareText);
 }
 
-/** "1" → "Patrol zone 1"; a named zone is shown as entered. */
-export function zoneLabel(zone: string): string {
+/** Operational name for each zone key, from the first list that has one. */
+export function zoneNames(lists: readonly TimedList[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const l of lists) {
+    const name = l.patrolZoneName?.trim();
+    if (name && !names.has(zoneKey(l))) names.set(zoneKey(l), name);
+  }
+  return names;
+}
+
+/** "9" → "Patrol zone 9", "9" + "South Melbourne Market" → "Patrol zone 9 · South Melbourne Market". */
+export function zoneLabel(zone: string, name?: string): string {
   if (zone === NO_ZONE) return 'No patrol zone';
-  return /^\d+[a-z]?$/i.test(zone) ? `Patrol zone ${zone}` : zone;
+  const base = /^\d+[a-z]?$/i.test(zone) ? `Patrol zone ${zone}` : zone;
+  return name && name !== zone ? `${base} · ${name}` : base;
 }
 
 /**
@@ -154,8 +196,9 @@ export function zoneLabel(zone: string): string {
  */
 export function groupByZone(lists: readonly TimedList[]): ZoneGroup[] {
   const zones = new Map<string, Map<string, TimedList[]>>();
+  const names = zoneNames(lists);
   for (const l of lists) {
-    const zone = l.patrolZone?.trim() ?? NO_ZONE;
+    const zone = zoneKey(l);
     const streetKey = l.segment.street.trim();
     const streets = zones.get(zone) ?? new Map<string, TimedList[]>();
     zones.set(zone, streets);
@@ -167,6 +210,7 @@ export function groupByZone(lists: readonly TimedList[]): ZoneGroup[] {
     .sort(([a], [b]) => (a === NO_ZONE ? 1 : b === NO_ZONE ? -1 : compareText(a, b)))
     .map(([zone, streets]) => ({
       zone,
+      ...(names.has(zone) ? { name: names.get(zone) } : {}),
       streets: [...streets.entries()]
         .sort(([a], [b]) => compareText(a, b))
         .map(([street, ls]) => ({

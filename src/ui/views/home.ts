@@ -1,7 +1,7 @@
 import { paymentLines } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { countDismissed, getAllObservations, getLists } from '../../lib/db';
-import { groupByZone, NO_ZONE, patrolZones, searchTimedLists, zoneLabel, type FieldMatch } from '../../lib/listIndex';
+import { groupByZone, NO_ZONE, patrolZones, searchTimedLists, zoneKey, zoneLabel, zoneNames, type FieldMatch } from '../../lib/listIndex';
 import { nextRestrictionStart, restrictionInForce } from '../../lib/restriction';
 import { formatUntil } from '../../lib/time';
 import type { ListType, Observation, PlateList, StreetSide, TimedList } from '../../lib/types';
@@ -56,7 +56,7 @@ export function homeView(_p: Record<string, string>, app: App): View {
 
   const timedRow = (l: TimedList, now: number, matches: FieldMatch[]): TemplateResult => {
     const c = counts(l, now);
-    const ids = [l.rpa ? `RPA ${l.rpa}` : '', ...paymentLines(l.payment).map((p) => p.replace('AreaNumber ', '').replace('ParkingZone ', ''))].filter(Boolean);
+    const ids = [l.rpa ? `RPA ${l.rpa}` : '', ...paymentLines(l.payment).map((p) => p.replace('Parking area', 'Area').replace('AreaNumber ', '').replace('ParkingZone ', ''))].filter(Boolean);
     return html`<li class="flex items-center gap-2 py-2" data-testid="timed-row">
       <button type="button" class="min-w-0 flex-1 text-left" @click=${() => app.navigate(`/list/${l.id}`)}>
         <p class="truncate text-sm font-semibold">${l.segment.fromStreet} – ${l.segment.toStreet} <span class="font-normal text-slate-400">· ${SIDE_SHORT[l.segment.side] ?? l.segment.side}</span></p>
@@ -76,11 +76,12 @@ export function homeView(_p: Record<string, string>, app: App): View {
     const timed = lists.filter((l): l is TimedList => l.type === 'timed');
     if (!timed.length) return nothing;
     const zones = patrolZones(timed);
-    const hasUnzoned = timed.some((l) => !l.patrolZone?.trim());
+    const names = zoneNames(timed);
+    const hasUnzoned = timed.some((l) => zoneKey(l) === NO_ZONE);
     let zone = zoneFilter();
     // A remembered zone that no longer exists shows everything.
     if (zone !== null && !(zone === NO_ZONE ? hasUnzoned : zones.includes(zone))) zone = null;
-    const inZone = zone === null ? timed : timed.filter((l) => (l.patrolZone?.trim() ?? NO_ZONE) === zone);
+    const inZone = zone === null ? timed : timed.filter((l) => zoneKey(l) === zone);
     const results = searchTimedLists(inZone, query);
     const matchesById = new Map(results.map((r) => [r.list.id, r.matches]));
     const groups = groupByZone(results.map((r) => r.list));
@@ -92,19 +93,19 @@ export function homeView(_p: Record<string, string>, app: App): View {
       ${zones.length
         ? html`<div class="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1" role="group" aria-label="Patrol zone">
             ${chip(null, 'All zones', timed.length)}
-            ${zones.map((z) => chip(z, zoneLabel(z).replace(/^Patrol zone/, 'Zone'), timed.filter((l) => l.patrolZone?.trim() === z).length))}
-            ${hasUnzoned ? chip(NO_ZONE, 'No zone', timed.filter((l) => !l.patrolZone?.trim()).length) : nothing}
+            ${zones.map((z) => chip(z, zoneLabel(z, names.get(z)).replace(/^Patrol zone/, 'Zone'), timed.filter((l) => zoneKey(l) === z).length))}
+            ${hasUnzoned ? chip(NO_ZONE, 'No zone', timed.filter((l) => zoneKey(l) === NO_ZONE).length) : nothing}
           </div>`
         : nothing}
       ${!groups.length
-        ? html`<p class="card text-sm text-slate-400" data-testid="no-results">No timed list matches “${query}”${zone !== null ? html` in ${zoneLabel(zone)} · <button type="button" class="text-brand-300 underline" @click=${() => setZone(null)}>search all zones</button>` : nothing}.</p>`
+        ? html`<p class="card text-sm text-slate-400" data-testid="no-results">No timed list matches “${query}”${zone !== null ? html` in ${zoneLabel(zone, names.get(zone))} · <button type="button" class="text-brand-300 underline" @click=${() => setZone(null)}>search all zones</button>` : nothing}.</p>`
         : groups.map((g) => {
             const zoneLists = g.streets.flatMap((st) => st.lists);
             const overdue = zoneLists.reduce((n, l) => n + counts(l, now).overdue, 0);
             return html`<section class="card mb-3 py-2" data-testid="zone-group">
-              <div class="flex items-baseline justify-between border-b border-ink-700 pb-2">
-                <h3 class="font-bold">${zoneLabel(g.zone)}</h3>
-                <p class="text-xs text-slate-400">${zoneLists.length} segment${zoneLists.length === 1 ? '' : 's'}${overdue ? html` · <span class="text-red-300">${overdue} overdue</span>` : nothing}</p>
+              <div class="flex items-baseline justify-between gap-2 border-b border-ink-700 pb-2">
+                <h3 class="min-w-0 truncate font-bold">${zoneLabel(g.zone, g.name)}</h3>
+                <p class="flex-none text-xs text-slate-400">${zoneLists.length} segment${zoneLists.length === 1 ? '' : 's'}${overdue ? html` · <span class="text-red-300">${overdue} overdue</span>` : nothing}</p>
               </div>
               ${g.streets.map(
                 (st) => html`<div class="pt-2" data-testid="street-group">

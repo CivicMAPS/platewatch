@@ -81,7 +81,8 @@ export function sanitisePayment(v: unknown): PaymentAreas | undefined {
   const payStay = (Array.isArray(v.payStay) ? v.payStay : [])
     .filter((p): p is Record<string, unknown> => isObj(p) && typeof p.zone === 'string' && p.zone.trim() !== '')
     .map((p) => ({ zone: str(p.zone), meter: str(p.meter) }));
-  return { easyPark, payStay };
+  const parkingArea = typeof v.parkingArea === 'string' && v.parkingArea.trim() ? v.parkingArea.trim() : undefined;
+  return parkingArea ? { parkingArea, easyPark, payStay } : { easyPark, payStay };
 }
 
 /** Validate and sanitise lists from an untrusted file. Throws with a readable message. */
@@ -118,7 +119,7 @@ export function parseBackup(text: string): {
       if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
       l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
       l.payment = sanitisePayment(l.payment);
-      for (const k of ['patrolZone', 'rpa'] as const) if (typeof l[k] !== 'string') delete l[k];
+      for (const k of ['patrolZone', 'patrolZoneName', 'rpa'] as const) if (typeof l[k] !== 'string') delete l[k];
     }
     lists.push(l as unknown as PlateList);
   }

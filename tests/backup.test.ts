@@ -14,6 +14,13 @@ describe('backup import', () => {
     expect(list?.type === 'timed' && list.payment).toEqual({ easyPark: [], payStay: [{ zone: '00042', meter: '' }] });
   });
 
+  it('keeps a parking area number and drops a malformed one', () => {
+    const [ok] = parseBackup(file([{ ...timed(), payment: { parkingArea: '637', easyPark: [], payStay: [] } }])).lists;
+    expect(ok?.type === 'timed' && ok.payment?.parkingArea).toBe('637');
+    const [bad] = parseBackup(file([{ ...timed(), payment: { parkingArea: 637, easyPark: [], payStay: [] } }])).lists;
+    expect(bad?.type === 'timed' && bad.payment).toEqual({ easyPark: [], payStay: [] });
+  });
+
   it('keeps valid paid-parking data', () => {
     const payment = { easyPark: ['010'], payStay: [{ zone: '020', meter: '03' }] };
     const [list] = parseBackup(file([{ ...timed(), payment }])).lists;
@@ -61,8 +68,8 @@ describe('backup: patrol zone, RPA and dismissed captures', () => {
   });
 
   it('keeps patrol zone and RPA text, drops anything else', () => {
-    const [ok] = parseBackup(file([{ ...timed(), patrolZone: '1', rpa: '12' }])).lists;
-    expect(ok?.type === 'timed' && [ok.patrolZone, ok.rpa]).toEqual(['1', '12']);
+    const [ok] = parseBackup(file([{ ...timed(), patrolZone: '14', patrolZoneName: 'Flagstaff', rpa: '12' }])).lists;
+    expect(ok?.type === 'timed' && [ok.patrolZone, ok.patrolZoneName, ok.rpa]).toEqual(['14', 'Flagstaff', '12']);
     const [bad] = parseBackup(file([{ ...timed(), patrolZone: 7, rpa: { x: 1 } }])).lists;
     expect(bad?.type === 'timed' && [bad.patrolZone, bad.rpa]).toEqual([undefined, undefined]);
   });

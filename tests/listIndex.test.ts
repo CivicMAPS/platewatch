@@ -24,6 +24,11 @@ const lists = [
   seg('fitzroy', 'Fitzroy Street', 'Grey Street', 'Park Street', { patrolZone: '10', payment: { easyPark: [], payStay: [{ zone: '00099', meter: '7788' }] } }),
   seg('chapel', 'Chapel Street', 'Dandenong Road', 'Inkerman Street', { patrolZone: '2' }),
   seg('loose', 'Bay Street', 'Graham Street', 'Ross Street'),
+  // City of Melbourne: zone number with an operational name, one parking area number per segment.
+  seg('lonsdale', 'Lonsdale Street', 'William Street', 'Queen Street', { patrolZone: '14', patrolZoneName: 'Flagstaff', payment: { parkingArea: '637', easyPark: [], payStay: [] } }),
+  seg('latrobe', 'La Trobe Street', 'King Street', 'William Street', { patrolZone: '14', patrolZoneName: 'Flagstaff', payment: { parkingArea: '63', easyPark: [], payStay: [] } }),
+  // City of Port Phillip: PayStay numbers are 3388 + assigned segment number + four digits for the side.
+  seg('market', 'Coventry Street', 'Cecil Street', 'Market Street', { patrolZone: '9', patrolZoneName: 'South Melbourne Market', payment: { easyPark: [], payStay: [{ zone: '338851200001', meter: '' }, { zone: '338851200002', meter: '' }] } }),
 ];
 
 const ids = (q: string) => searchTimedLists(lists, q).map((r) => r.list.id);
@@ -55,6 +60,27 @@ describe('searchTimedLists', () => {
     expect(ids('york')[0]).toMatch(/^york/);
     expect(searchTimedLists(lists, '1')[0]?.matches[0]?.label).toBe('Patrol zone');
   });
+  it('finds a patrol zone by its operational name', () => {
+    expect(ids('flagstaff')).toEqual(expect.arrayContaining(['lonsdale', 'latrobe']));
+    expect(ids('flagstaff')).toHaveLength(2);
+    expect(ids('south melbourne market')).toEqual(['market']);
+  });
+  it('finds a segment by parking area number', () => {
+    expect(ids('area 637')).toEqual(['lonsdale']);
+  });
+  it('finds the segment from a bay sign number: parking area + bay (63758 → area 637, bay 58)', () => {
+    const [best, next] = searchTimedLists(lists, '63758');
+    expect(best?.list.id).toBe('lonsdale');
+    expect(best?.matches[0]).toEqual({ label: 'Bay sign', value: '63758 = area 637 · bay 58' });
+    // A shorter area that also prefixes the sign ranks below the longer one.
+    expect(next?.list.id).toBe('latrobe');
+    expect(ids('bay 63758')[0]).toBe('lonsdale');
+  });
+  it('finds a Port Phillip PayStay zone by its assigned segment number or the full number', () => {
+    expect(ids('5120')).toEqual(['market']);
+    expect(ids('338851200002')).toEqual(['market']);
+    expect(searchTimedLists(lists, '338851200002')[0]?.matches[0]).toEqual({ label: 'PayStay zone', value: '338851200002' });
+  });
   it('matches nothing for unrelated text', () => {
     expect(ids('qqqq')).toEqual([]);
   });
@@ -63,15 +89,17 @@ describe('searchTimedLists', () => {
 describe('groupByZone', () => {
   it('groups by patrol zone (natural order, no zone last), then by road segment name', () => {
     const groups = groupByZone(lists);
-    expect(groups.map((g) => g.zone)).toEqual(['1', '2', '10', NO_ZONE]);
+    expect(groups.map((g) => g.zone)).toEqual(['1', '2', '9', '10', '14', NO_ZONE]);
+    expect(groups.find((g) => g.zone === '14')?.name).toBe('Flagstaff');
     const zone1 = groups[0]!;
     expect(zone1.streets.map((s) => s.street)).toEqual(['Coventry Street', 'York Street']);
     // Segments of one road are ordered by their first cross street.
     expect(zone1.streets[1]!.lists.map((l) => l.id)).toEqual(['york-west', 'york']);
   });
   it('lists the zones for the filter and labels them', () => {
-    expect(patrolZones(lists)).toEqual(['1', '2', '10']);
+    expect(patrolZones(lists)).toEqual(['1', '2', '9', '10', '14']);
     expect(zoneLabel('1')).toBe('Patrol zone 1');
+    expect(zoneLabel('14', 'Flagstaff')).toBe('Patrol zone 14 · Flagstaff');
     expect(zoneLabel('North')).toBe('North');
     expect(zoneLabel(NO_ZONE)).toBe('No patrol zone');
   });

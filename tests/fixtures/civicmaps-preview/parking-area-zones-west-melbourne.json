@@ -1,0 +1,278 @@
+{
+  "area": "West Melbourne",
+  "parking_zones": [
+    {
+      "parking_area_number": 117,
+      "onstreet": "Rosslyn Street",
+      "streetfrom": "Railway Place",
+      "streetto": "Adderley Street",
+      "segment_id": "21490",
+      "road_section": "Rosslyn Street between Railway Place and Adderley Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 128,
+      "onstreet": "Batman Street",
+      "streetfrom": "Adderley Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21494",
+      "road_section": "Batman Street between Adderley Street and Spencer Street",
+      "meter_count": 5
+    },
+    {
+      "parking_area_number": 144,
+      "onstreet": "Railway Place",
+      "streetfrom": "Hawke Street",
+      "streetto": "Abbotsford Street",
+      "segment_id": "21547",
+      "road_section": "Railway Place between Hawke Street and Abbotsford Street",
+      "meter_count": 8,
+      "all_segments": [
+        {
+          "segment_id": "21547",
+          "road_section": "Railway Place between Hawke Street and Abbotsford Street"
+        },
+        {
+          "segment_id": "21543",
+          "road_section": "Railway Place between Stanley Street and Roden Street"
+        },
+        {
+          "segment_id": "21549",
+          "road_section": "Railway Place between Abbotsford Street and Adderley Street"
+        },
+        {
+          "segment_id": "21541",
+          "road_section": "Railway Place between Rosslyn Street and Stanley Street"
+        }
+      ]
+    },
+    {
+      "parking_area_number": 230,
+      "onstreet": "Dudley Street",
+      "streetfrom": "Adderley Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21483",
+      "road_section": "Dudley Street between Adderley Street and Spencer Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 232,
+      "onstreet": "Batman Street",
+      "streetfrom": "Spencer Street",
+      "streetto": "King Street",
+      "segment_id": "21516",
+      "road_section": "Batman Street between Spencer Street and King Street",
+      "meter_count": 5
+    },
+    {
+      "parking_area_number": 238,
+      "onstreet": "Jeffcott Street",
+      "streetfrom": "Spencer Street",
+      "streetto": "King Street",
+      "segment_id": "21514",
+      "road_section": "Jeffcott Street between Spencer Street and King Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 335,
+      "onstreet": "Stanley Street",
+      "streetfrom": "King Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21429",
+      "road_section": "Stanley Street between King Street and Spencer Street",
+      "meter_count": 5
+    },
+    {
+      "parking_area_number": 336,
+      "onstreet": "Stanley Street",
+      "streetfrom": "Adderley Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21475",
+      "road_section": "Stanley Street between Adderley Street and Spencer Street",
+      "meter_count": 6
+    },
+    {
+      "parking_area_number": 337,
+      "onstreet": "Rosslyn Street",
+      "streetfrom": "Adderley Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21479",
+      "road_section": "Rosslyn Street between Adderley Street and Spencer Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 339,
+      "onstreet": "Rosslyn Street",
+      "streetfrom": "King Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21421",
+      "road_section": "Rosslyn Street between King Street and Spencer Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 350,
+      "onstreet": "Stanley Street",
+      "streetfrom": "Railway Place",
+      "streetto": "Adderley Street",
+      "segment_id": "21473",
+      "road_section": "Stanley Street between Railway Place and Adderley Street",
+      "meter_count": 4
+    },
+    {
+      "parking_area_number": 358,
+      "onstreet": "Spencer Street",
+      "streetfrom": "Rosslyn Street",
+      "streetto": "Stanley Street",
+      "segment_id": "21423",
+      "road_section": "Spencer Street between Rosslyn Street and Stanley Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 359,
+      "onstreet": "Spencer Street",
+      "streetfrom": "Dudley Street",
+      "streetto": "Rosslyn Street",
+      "segment_id": "21417",
+      "road_section": "Spencer Street between Dudley Street and Rosslyn Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 377,
+      "onstreet": "Adderley Street",
+      "streetfrom": "La Trobe Street",
+      "streetto": "Jeffcott Street",
+      "segment_id": "21504",
+      "road_section": "Adderley Street between La Trobe Street and Jeffcott Street",
+      "meter_count": 8,
+      "all_segments": [
+        {
+          "segment_id": "21503",
+          "road_section": "Adderley Street between Jeffcott Street and Batman Street"
+        },
+        {
+          "segment_id": "21504",
+          "road_section": "Adderley Street between La Trobe Street and Jeffcott Street"
+        }
+      ]
+    },
+    {
+      "parking_area_number": 378,
+      "onstreet": "Jeffcott Street",
+      "streetfrom": "Adderley Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21501",
+      "road_section": "Jeffcott Street between Adderley Street and Spencer Street",
+      "meter_count": 3
+    },
+    {
+      "parking_area_number": 379,
+      "onstreet": "King Street",
+      "streetfrom": "Stanley Street",
+      "streetto": "Roden Street",
+      "segment_id": "21375",
+      "road_section": "King Street between Stanley Street and Roden Street",
+      "meter_count": 5,
+      "all_segments": [
+        {
+          "segment_id": "21375",
+          "road_section": "King Street between Stanley Street and Roden Street"
+        },
+        {
+          "segment_id": "21427",
+          "road_section": "King Street between Rosslyn Street and Stanley Street"
+        }
+      ]
+    },
+    {
+      "parking_area_number": 381,
+      "onstreet": "King Street",
+      "streetfrom": "Dudley Street",
+      "streetto": "Walsh Street",
+      "segment_id": "21410",
+      "road_section": "King Street between Dudley Street and Walsh Street",
+      "meter_count": 3,
+      "all_segments": [
+        {
+          "segment_id": "21410",
+          "road_section": "King Street between Dudley Street and Walsh Street"
+        },
+        {
+          "segment_id": "22663",
+          "road_section": "King Street between Walsh Street and Rosslyn Street"
+        }
+      ]
+    },
+    {
+      "parking_area_number": 382,
+      "onstreet": "Adderley Street",
+      "streetfrom": "Rosslyn Street",
+      "streetto": "Stanley Street",
+      "segment_id": "21477",
+      "road_section": "Adderley Street between Rosslyn Street and Stanley Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 574,
+      "onstreet": "King Street",
+      "streetfrom": "La Trobe Street",
+      "streetto": "Jeffcott Street",
+      "segment_id": "21507",
+      "road_section": "King Street between La Trobe Street and Jeffcott Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 575,
+      "onstreet": "King Street",
+      "streetfrom": "Jeffcott Street",
+      "streetto": "Batman Street",
+      "segment_id": "21515",
+      "road_section": "King Street between Jeffcott Street and Batman Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 576,
+      "onstreet": "King Street",
+      "streetfrom": "Batman Street",
+      "streetto": "Dudley Street",
+      "segment_id": "21518",
+      "road_section": "King Street between Batman Street and Dudley Street",
+      "meter_count": 1
+    },
+    {
+      "parking_area_number": 586,
+      "onstreet": "Spencer Street",
+      "streetfrom": "La Trobe Street",
+      "streetto": "Jeffcott Street",
+      "segment_id": "21506",
+      "road_section": "Spencer Street between La Trobe Street and Jeffcott Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 587,
+      "onstreet": "Spencer Street",
+      "streetfrom": "Jeffcott Street",
+      "streetto": "Batman Street",
+      "segment_id": "21499",
+      "road_section": "Spencer Street between Jeffcott Street and Batman Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 588,
+      "onstreet": "Spencer Street",
+      "streetfrom": "Batman Street",
+      "streetto": "Dudley Street",
+      "segment_id": "21486",
+      "road_section": "Spencer Street between Batman Street and Dudley Street",
+      "meter_count": 2
+    },
+    {
+      "parking_area_number": 689,
+      "onstreet": "Dudley Street",
+      "streetfrom": "King Street",
+      "streetto": "Spencer Street",
+      "segment_id": "21413",
+      "road_section": "Dudley Street between King Street and Spencer Street",
+      "meter_count": 2
+    }
+  ]
+}

@@ -359,6 +359,27 @@ async function main() {
   log('evidence JPEG: SHA-256 verified, EXIF GPS + DateTimeOriginal (+offset) embedded');
   await shot('record');
 
+  // Bulk import: the timed-segments template and a CivicMAPS-preview kerbside file together.
+  await page.goto(`${ORIGIN}/#/import`);
+  await waitText('Choose files');
+  const picker = await page.$('[data-testid=import-file]');
+  await picker.uploadFile(
+    join(root, 'templates', 'platewatch-timed-segments-template.csv'),
+    join(root, 'tests', 'fixtures', 'civicmaps-preview', 'kerbside-chinatown-20055.json'),
+  );
+  await waitText('CivicMAPS kerbside segment');
+  // Coventry St (S), Little Bourke St Bay 58–72 (in both files), Lonsdale St (N) and Little Bourke St Bay 72 – Elizabeth St.
+  await waitText('4 timed lists created');
+  await waitText('2 without restrictions yet');
+  await shot('import-plan');
+  await page.click('[data-testid=import-save]');
+  await waitText('Imported: 4 list(s) created');
+  await type('[data-testid=list-search]', '64558');
+  await waitText('64558 = area 645 · bay 58');
+  await page.$eval('[data-testid=list-search]', (el) => { el.value = ''; el.dispatchEvent(new Event('input')); });
+  await waitText('Restrictions to enter');
+  log('bulk import: CSV template + CivicMAPS kerbside JSON → 4 timed lists, found by bay sign');
+
   // Text reader route renders.
   await page.goto(`${ORIGIN}/#/text`);
   await waitText('Convert image text into editable text');

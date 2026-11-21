@@ -12,6 +12,9 @@ export function segmentLabel(l: TimedList): string {
   return `${l.segment.street} — between ${l.segment.fromStreet} & ${l.segment.toStreet}`;
 }
 
+/** Above this many timed lists, "All zones" shows a card per zone instead of every row. */
+const COLLAPSE_OVER = 150;
+
 const SIDE_SHORT: Record<StreetSide, string> = { both: 'both sides', north: 'N side', south: 'S side', east: 'E side', west: 'W side', odd: 'odd nos', even: 'even nos' };
 
 /**
@@ -60,8 +63,11 @@ export function homeView(_p: Record<string, string>, app: App): View {
     return html`<li class="flex items-center gap-2 py-2" data-testid="timed-row">
       <button type="button" class="min-w-0 flex-1 text-left" @click=${() => app.navigate(`/list/${l.id}`)}>
         <p class="truncate text-sm font-semibold">${l.segment.fromStreet} – ${l.segment.toStreet} <span class="font-normal text-slate-400">· ${SIDE_SHORT[l.segment.side] ?? l.segment.side}</span></p>
+        ${l.segment.subFrom ? html`<p class="truncate text-xs text-slate-300">${l.segment.subFrom}${l.segment.subTo ? ` → ${l.segment.subTo}` : ''}</p>` : nothing}
         <div class="mt-1 flex flex-wrap items-center gap-1.5">
-          ${statusChip(l, now)}
+          ${l.restrictions.length
+            ? statusChip(l, now)
+            : html`<span class="chip min-h-0 border-amber-500/50 bg-amber-500/10 py-0.5 text-xs text-amber-200" data-testid="pending-chip">Restrictions to enter</span>`}
           ${c.tracked ? html`<span class="text-xs text-slate-300">${c.tracked} tracked</span>` : nothing}
           ${c.overdue ? html`<span class="chip min-h-0 border-red-500/60 bg-red-500/15 py-0.5 text-xs text-red-200">${c.overdue} overdue</span>` : nothing}
           ${ids.length ? html`<span class="truncate text-xs text-slate-500">${ids.join(' · ')}</span>` : nothing}
@@ -85,6 +91,9 @@ export function homeView(_p: Record<string, string>, app: App): View {
     const results = searchTimedLists(inZone, query);
     const matchesById = new Map(results.map((r) => [r.list.id, r.matches]));
     const groups = groupByZone(results.map((r) => r.list));
+    // After a bulk import there can be thousands of segments: with no zone chosen and no search,
+    // show one summary card per zone and open a zone from there.
+    const summarise = zone === null && !query.trim() && inZone.length > COLLAPSE_OVER;
     const chip = (value: string | null, label: string, n: number) =>
       html`<button type="button" class="chip min-h-10 flex-none whitespace-nowrap ${zone === value ? 'border-brand-400 bg-brand-500/20 text-brand-100' : 'border-ink-600 bg-ink-800 text-slate-300'}"
         aria-pressed=${zone === value} data-testid="zone-chip" @click=${() => setZone(value)}>${label} <span class="text-slate-400">${n}</span></button>`;
@@ -102,6 +111,12 @@ export function homeView(_p: Record<string, string>, app: App): View {
         : groups.map((g) => {
             const zoneLists = g.streets.flatMap((st) => st.lists);
             const overdue = zoneLists.reduce((n, l) => n + counts(l, now).overdue, 0);
+            if (summarise)
+              return html`<button type="button" class="card mb-2 flex w-full items-center justify-between gap-2 py-3 text-left" data-testid="zone-summary" @click=${() => setZone(g.zone)}>
+                <span class="min-w-0"><span class="block truncate font-bold">${zoneLabel(g.zone, g.name)}</span>
+                  <span class="text-xs text-slate-400">${g.streets.length} road${g.streets.length === 1 ? '' : 's'} · ${zoneLists.length} segment${zoneLists.length === 1 ? '' : 's'}</span></span>
+                ${overdue ? html`<span class="chip min-h-0 flex-none border-red-500/60 bg-red-500/15 py-0.5 text-xs text-red-200">${overdue} overdue</span>` : nothing}
+              </button>`;
             return html`<section class="card mb-3 py-2" data-testid="zone-group">
               <div class="flex items-baseline justify-between gap-2 border-b border-ink-700 pb-2">
                 <h3 class="min-w-0 truncate font-bold">${zoneLabel(g.zone, g.name)}</h3>
@@ -163,7 +178,8 @@ export function homeView(_p: Record<string, string>, app: App): View {
               ? emptyState(
                   'No lists yet',
                   'Create a timed, hot or allow list to start scanning number plates.',
-                  html`<button type="button" class="btn-primary" @click=${() => app.navigate('/new')}>${icon('plus')} Create list</button>`,
+                  html`<div class="grid w-full gap-2"><button type="button" class="btn-primary" @click=${() => app.navigate('/new')}>${icon('plus')} Create list</button>
+                    <button type="button" class="btn-secondary" data-testid="empty-import" @click=${() => app.navigate('/import')}>${icon('upload')} Import lists from a file</button></div>`,
                 )
               : html`<div class="sticky top-[calc(env(safe-area-inset-top)+4.25rem)] z-20 -mx-4 mb-3 bg-ink-950/95 px-4 py-2 backdrop-blur">
                     <label class="relative block">
@@ -202,6 +218,10 @@ export function newListTypeView(_p: Record<string, string>, app: App): View {
   return {
     render: () =>
       html`${header({ title: 'Create list', subtitle: 'Select list type', back: () => app.back() })}
-      ${page(html`<ul class="grid gap-3">${option('timed')}${option('hot')}${option('allow')}</ul>`)}`,
+      ${page(html`<ul class="grid gap-3">${option('timed')}${option('hot')}${option('allow')}
+        <li><button type="button" class="card block w-full text-left transition hover:border-brand-500" data-testid="type-import" @click=${() => app.navigate('/import')}>
+          <div class="flex items-center gap-2">${icon('upload')}<span class="text-lg font-bold">Import from file</span></div>
+          <p class="mt-2 text-slate-400">Many segments, permits or hot-list plates at once, from the CSV templates or CivicMAPS data files.</p>
+        </button></li></ul>`)}`,
   };
 }

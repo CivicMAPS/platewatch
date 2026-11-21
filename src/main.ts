@@ -6,6 +6,7 @@ import { warmUpOcr } from './lib/ocr';
 import { App } from './ui/app';
 import { homeView, newListTypeView } from './ui/views/home';
 import { dismissedView } from './ui/views/dismissed';
+import { importView } from './ui/views/importView';
 import { listDetailView } from './ui/views/listDetail';
 import { listFormView } from './ui/views/listForm';
 import { recordView } from './ui/views/record';
@@ -26,6 +27,7 @@ const app = new App(root)
   .route('/record/:id', recordView)
   .route('/text', textReaderView)
   .route('/dismissed', dismissedView)
+  .route('/import', importView)
   .route('/settings', settingsView);
 
 await app.start();

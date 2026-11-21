@@ -1,0 +1,468 @@
+{
+  "schema": "civicmaps.kerbside_parking_segment.v1",
+  "schema_revision": "v1.1-normalised-sub-segments-and-bay-rules",
+  "patrol_zone": "TITLES",
+  "road_segment_id": 21649,
+  "on_street": "A'Beckett Street",
+  "street_from": "Elizabeth Street",
+  "street_to": "Queen Street",
+  "segment": {
+    "between": {
+      "from": "Elizabeth Street",
+      "to": "Queen Street"
+    }
+  },
+  "display": {
+    "compact_lines": ["TITLES", "A'Beckett Street", "btwn Elizabeth + Queen"]
+  },
+  "sides": [
+    {
+      "street_side": "northern",
+      "display_side": "North side",
+      "sub_segments": [
+        {
+          "from": "Elizabeth Street",
+          "to": "Queen Street",
+          "easypark_area": 7306,
+          "parking_area": 678,
+          "parking_rules": [],
+          "parking_rules_status": "pending_field_capture",
+          "bays": [
+            {
+              "bay": 54,
+              "location": {
+                "latitude": -37.8094437,
+                "longitude": 144.9599494
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 55,
+              "location": {
+                "latitude": -37.8094614,
+                "longitude": 144.959888
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 56,
+              "location": {
+                "latitude": -37.8094799,
+                "longitude": 144.9598239
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 57,
+              "location": {
+                "latitude": -37.8094976,
+                "longitude": 144.9597626
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 67,
+              "location": {
+                "latitude": -37.8096757,
+                "longitude": 144.9591464
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 68,
+              "location": {
+                "latitude": -37.8096937,
+                "longitude": 144.959084
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 69,
+              "location": {
+                "latitude": -37.809712,
+                "longitude": 144.9590208
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 70,
+              "location": {
+                "latitude": -37.8097298,
+                "longitude": 144.9589589
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 73,
+              "location": {
+                "latitude": -37.8097865,
+                "longitude": 144.9587626
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 74,
+              "location": {
+                "latitude": -37.8098041,
+                "longitude": 144.9587015
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            },
+            {
+              "bay": 75,
+              "location": {
+                "latitude": -37.8098219,
+                "longitude": 144.95864
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "medium_low",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_medium_low",
+              "notes": "Bay allocation inferred from coordinate sequence. Parking rules not yet supplied."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "street_side": "southern",
+      "display_side": "South side",
+      "sub_segments": [
+        {
+          "from": "Elizabeth Street",
+          "to": "Queen Street",
+          "easypark_area": 7307,
+          "parking_area": 678,
+          "parking_rules": [],
+          "parking_rules_status": "pending_field_capture",
+          "bays": [
+            {
+              "bay": 44,
+              "location": {
+                "latitude": -37.8093745,
+                "longitude": 144.9605993
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_high",
+              "notes": "Bay allocation inferred from coordinate sequence west of supplied bay 49. Parking rules not yet supplied."
+            },
+            {
+              "bay": 45,
+              "location": {
+                "latitude": -37.8093947,
+                "longitude": 144.96053
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_high",
+              "notes": "Bay allocation inferred from coordinate sequence west of supplied bay 49. Parking rules not yet supplied."
+            },
+            {
+              "bay": 46,
+              "location": {
+                "latitude": -37.8094156,
+                "longitude": 144.9604581
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "inferred",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "bay_inferred_high",
+              "notes": "Bay allocation inferred from coordinate sequence west of supplied bay 49. Parking rules not yet supplied."
+            },
+            {
+              "bay": 49,
+              "location": {
+                "latitude": -37.809473,
+                "longitude": 144.9602614
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 57,
+              "location": {
+                "latitude": -37.8096231,
+                "longitude": 144.9597444
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 60,
+              "location": {
+                "latitude": -37.8096855,
+                "longitude": 144.9595295
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 64,
+              "location": {
+                "latitude": -37.80975,
+                "longitude": 144.9593072
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 65,
+              "location": {
+                "latitude": -37.8097678,
+                "longitude": 144.9592459
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 66,
+              "location": {
+                "latitude": -37.8097864,
+                "longitude": 144.9591819
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 67,
+              "location": {
+                "latitude": -37.809805,
+                "longitude": 144.9591179
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 68,
+              "location": {
+                "latitude": -37.8098235,
+                "longitude": 144.959054
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 69,
+              "location": {
+                "latitude": -37.8098421,
+                "longitude": 144.95899
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 70,
+              "location": {
+                "latitude": -37.8098607,
+                "longitude": 144.958926
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 71,
+              "location": {
+                "latitude": -37.8098793,
+                "longitude": 144.958862
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            },
+            {
+              "bay": 72,
+              "location": {
+                "latitude": -37.8098978,
+                "longitude": 144.958798
+              },
+              "parking_rules": [],
+              "parking_rules_status": "pending_field_capture",
+              "data_quality": {
+                "source": "open_data_imported",
+                "confidence": "high",
+                "last_verified": null
+              },
+              "inference_status": "supplied",
+              "notes": "Bay number, parking area, EasyPark area, street side, and coordinate supplied. Parking rules not yet supplied."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

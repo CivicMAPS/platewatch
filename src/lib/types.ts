@@ -47,6 +47,12 @@ export interface StreetSegment {
   toStreet: string;
   side: StreetSide;
   suburb: string;
+  /**
+   * Part of the side, where signs change part way along: from and to a bay ("Bay 58"), an
+   * address ("234 Little Bourke Street") or a cross street. Absent when the list covers the side.
+   */
+  subFrom?: string;
+  subTo?: string;
 }
 
 /** 0 = Sunday … 6 = Saturday (matches Date#getDay). */
@@ -92,6 +98,10 @@ export interface TimedList extends BaseList {
   patrolZoneName?: string;
   /** Residential permit area, e.g. "12". */
   rpa?: string;
+  /** Council road segment ID (e.g. City of Melbourne road corridor 20055). */
+  roadSegmentId?: string;
+  /** Bay numbers in this list; with the parking area they make each bay's kerb sign (645 + 58). */
+  bays?: number[];
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */

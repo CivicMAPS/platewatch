@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { getAllowLists, getList, getTimedLists, putList, uid } from '../../lib/db';
 import { patrolZones, zoneNames } from '../../lib/listIndex';
+import { formatBays, parseBays } from '../../lib/importer';
 import { isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
 import { describeRestriction, minutesFromCode, validateRestriction } from '../../lib/restriction';
 import {
@@ -115,6 +116,8 @@ export function listFormView(params: Record<string, string>, app: App): View {
   /** Patrol zones and RPAs already used, offered as suggestions so the same zone is typed one way. */
   let knownZones: string[] = [];
   let knownZoneNames = new Map<string, string>();
+  /** Bays as typed ("58-72;80"); parsed on save. */
+  let bayDraft: string | null = null;
   let knownRpas: string[] = [];
   let errors: Record<string, string> = {};
   let saving = false;
@@ -179,7 +182,22 @@ export function listFormView(params: Record<string, string>, app: App): View {
           cleaned.payment = rest;
         }
       }
-      for (const k of ['patrolZone', 'patrolZoneName', 'rpa'] as const) {
+      const subFrom = cleaned.segment.subFrom?.trim();
+      const subTo = cleaned.segment.subTo?.trim();
+      const { subFrom: _f, subTo: _t, ...segRest } = cleaned.segment;
+      cleaned.segment = { ...segRest, ...(subFrom ? { subFrom } : {}), ...(subTo ? { subTo } : {}) };
+      if (bayDraft !== null) {
+        const bays = bayDraft.trim() ? parseBays(bayDraft) : [];
+        if (bays === null) {
+          errors = { ...errors, bays: 'Bays must be numbers or ranges, e.g. 58-72;80.' };
+          app.toast('Please fix the highlighted fields.', 'error');
+          app.update();
+          return;
+        }
+        cleaned.bays = bays;
+      }
+      if (!cleaned.bays?.length) delete cleaned.bays;
+      for (const k of ['patrolZone', 'patrolZoneName', 'rpa', 'roadSegmentId'] as const) {
         const v = cleaned[k]?.trim();
         if (v) cleaned[k] = v;
         else delete cleaned[k];
@@ -356,6 +374,16 @@ export function listFormView(params: Record<string, string>, app: App): View {
             </select>
           </div>
           ${text({ id: 'suburb', label: 'Suburb', value: l.segment.suburb, onInput: (v) => seg({ suburb: v }), placeholder: 'Optional' })}
+        </div>
+        <p class="text-xs text-slate-400">Part of the side (optional), where the signs change part way along: from and to a bay, an address or a cross street.</p>
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'subFrom', label: 'Part from', value: l.segment.subFrom ?? '', onInput: (v) => seg({ subFrom: v }), placeholder: 'e.g. Bay 58' })}
+          ${text({ id: 'subTo', label: 'Part to', value: l.segment.subTo ?? '', onInput: (v) => seg({ subTo: v }), placeholder: 'e.g. Bay 72' })}
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'bays', label: 'Bays', value: bayDraft ?? formatBays(l.bays, true), placeholder: 'e.g. 58-72;80', errKey: 'bays',
+            onInput: (v) => { bayDraft = v; } })}
+          ${text({ id: 'roadSegmentId', label: 'Road segment ID', value: l.roadSegmentId ?? '', onInput: (v) => set(() => (l.roadSegmentId = v)), placeholder: 'Optional', maxlength: 24 })}
         </div>
       </section>
 

@@ -14,6 +14,14 @@ describe('backup import', () => {
     expect(list?.type === 'timed' && list.payment).toEqual({ easyPark: [], payStay: [{ zone: '00042', meter: '' }] });
   });
 
+  it('keeps sub-segment bounds, road segment ID and bays, and drops malformed ones', () => {
+    const seg = { street: 'Little Bourke Street', fromStreet: 'Swanston Street', toStreet: 'Elizabeth Street', side: 'south', suburb: '', subFrom: 'Bay 58', subTo: 'Bay 72' };
+    const [ok] = parseBackup(file([{ ...timed(), segment: seg, roadSegmentId: '20055', bays: [58, 59] }])).lists;
+    expect(ok?.type === 'timed' && [ok.segment.subFrom, ok.segment.subTo, ok.roadSegmentId, ok.bays]).toEqual(['Bay 58', 'Bay 72', '20055', [58, 59]]);
+    const [bad] = parseBackup(file([{ ...timed(), segment: { ...seg, subFrom: 5, subTo: null }, roadSegmentId: 20055, bays: ['x', 3] }])).lists;
+    expect(bad?.type === 'timed' && [bad.segment.subFrom, bad.segment.subTo, bad.roadSegmentId, bad.bays]).toEqual([undefined, undefined, undefined, [3]]);
+  });
+
   it('keeps a parking area number and drops a malformed one', () => {
     const [ok] = parseBackup(file([{ ...timed(), payment: { parkingArea: '637', easyPark: [], payStay: [] } }])).lists;
     expect(ok?.type === 'timed' && ok.payment?.parkingArea).toBe('637');

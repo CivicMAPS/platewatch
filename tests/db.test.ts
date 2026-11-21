@@ -11,6 +11,8 @@ import {
   getScansForList,
   purgeScansOlderThan,
   putList,
+  putLists,
+  getLists,
   saveDismissed,
   saveScan,
 } from '../src/lib/db';
@@ -169,5 +171,13 @@ describe('dismissed patrol captures (global list)', () => {
     expect((await getScansForList(list.id)).map((s) => s.id)).toEqual(['s1']);
     await saveDismissed(dismissed('d1', at(2026, 11, 20, 9)));
     expect(await getDismissed()).toHaveLength(1);
+  });
+});
+
+describe('putLists (bulk import)', () => {
+  it('saves many lists in one go', async () => {
+    const many = Array.from({ length: 500 }, (_, i) => timed({ id: `t${i}`, name: `Segment ${i}` }));
+    await putLists(many);
+    expect(await getLists()).toHaveLength(500);
   });
 });

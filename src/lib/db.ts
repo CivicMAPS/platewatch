@@ -101,6 +101,13 @@ export async function putList(list: PlateList): Promise<void> {
   await (await db()).put('lists', { ...list, updatedAt: Date.now() });
 }
 
+/** Save many lists in one transaction (bulk import); keeps each list's own updatedAt. */
+export async function putLists(lists: readonly PlateList[]): Promise<void> {
+  const tx = (await db()).transaction('lists', 'readwrite');
+  for (const l of lists) await tx.store.put(l);
+  await tx.done;
+}
+
 /** Delete a list and everything recorded against it; unlink deleted allow lists. */
 export async function deleteList(id: string): Promise<void> {
   const d = await db();

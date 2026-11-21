@@ -1,5 +1,6 @@
 import { paymentLines } from '../../lib/payment';
 import { zoneLabel } from '../../lib/listIndex';
+import { formatBays } from '../../lib/importer';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import {
   deleteList,
@@ -119,7 +120,10 @@ export function listDetailView(params: Record<string, string>, app: App): View {
     return html`<section class="card mt-4">
         <h2 class="section-title">Segment</h2>
         <p class="font-semibold">${segmentLabel(l)} ${paymentLines(l.payment).map(line => html`<span class="chip">${line}</span>`)}</p>
-        <p class="text-sm text-slate-400">${[l.patrolZone || l.patrolZoneName ? zoneLabel(l.patrolZone?.trim() || l.patrolZoneName!.trim(), l.patrolZoneName?.trim()) : '', l.rpa ? `RPA ${l.rpa}` : '', l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides'].filter(Boolean).join(' · ')}</p>
+        ${l.segment.subFrom ? html`<p class="text-sm text-slate-200">Part of side: ${l.segment.subFrom}${l.segment.subTo ? ` → ${l.segment.subTo}` : ''}</p>` : nothing}
+        <p class="text-sm text-slate-400">${[l.patrolZone || l.patrolZoneName ? zoneLabel(l.patrolZone?.trim() || l.patrolZoneName!.trim(), l.patrolZoneName?.trim()) : '', l.rpa ? `RPA ${l.rpa}` : '', l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides', l.roadSegmentId ? `Segment ID ${l.roadSegmentId}` : ''].filter(Boolean).join(' · ')}</p>
+        ${l.bays?.length ? html`<p class="text-sm text-slate-400">Bays ${formatBays(l.bays)}</p>` : nothing}
+        ${!l.restrictions.length ? html`<p class="mt-2 text-sm text-amber-300" data-testid="pending-note">Imported without restrictions. Add them with Edit before scanning here.</p>` : nothing}
         <ul class="mt-3 grid gap-1 text-sm">
           ${l.restrictions.map(
             (r) => html`<li class="flex items-center gap-2">

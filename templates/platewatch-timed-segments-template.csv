@@ -1,0 +1,6 @@
+patrol_zone,patrol_zone_name,street,from_street,to_street,side,suburb,sub_from,sub_to,rpa,parking_area,easypark_areas,paystay_zones,bays,sign,minutes,days,start,end,grace,road_segment_id,list_name,notes
+9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,7,,,338851200002,,2P,,Mon-Fri,08:00,18:00,0,,,
+9,South Melbourne Market,Coventry Street,Cecil Street,Market Street,south,South Melbourne,,,7,,,338851200002,,2P,,Sat,08:00,12:30,0,,,
+14,Flagstaff,Little Bourke Street,Swanston Street,Elizabeth Street,south,Melbourne,Bay 58,Bay 72,,645,7514,,58-59;61-65;67-72,LZ30,,Mon-Fri,07:00,16:00,,20055,,Commercial vehicles only
+14,Flagstaff,Little Bourke Street,Swanston Street,Elizabeth Street,south,Melbourne,Bay 58,Bay 72,,645,7514,,58-59;61-65;67-72,2P Meter,,Sat-Sun,07:00,22:00,,20055,,
+14,Flagstaff,Lonsdale Street,William Street,Queen Street,north,Melbourne,,,,637,7306;7307,,,,,,,,,,,Signs still to be surveyed

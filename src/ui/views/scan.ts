@@ -859,6 +859,9 @@ export function scanView(params: Record<string, string>, app: App): View {
         return statusCard('ok', 'Permit valid', html`On <strong>${d.hit.list.name}</strong>${e.label ? ` (${e.label})` : ''}${e.permitNo ? ` · permit #${e.permitNo}` : ''}${validity}. Sighting recorded; no time limit applies.`, 'result-exempt');
       }
       case 'timed_not_in_force':
+        // An imported placeholder: the segment exists but its signs are still to be entered.
+        if (list?.type === 'timed' && !list.restrictions.length)
+          return statusCard('warn', 'Restrictions not entered yet', 'This segment was imported without its parking restrictions. Add them under Edit list, then re-scan. No record created.', 'result-not-in-force');
         return statusCard('muted', 'Restriction not in force', d.next ? `Next restriction ${d.next.restriction.code} from ${formatDateTime(d.next.start)}. No record created.` : 'No upcoming restriction found. No record created.', 'result-not-in-force');
       case 'timed_new': {
         const r0 = d.instance.restriction;

@@ -119,7 +119,11 @@ export function parseBackup(text: string): {
       if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
       l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
       l.payment = sanitisePayment(l.payment);
-      for (const k of ['patrolZone', 'patrolZoneName', 'rpa'] as const) if (typeof l[k] !== 'string') delete l[k];
+      for (const k of ['patrolZone', 'patrolZoneName', 'rpa', 'roadSegmentId'] as const) if (typeof l[k] !== 'string') delete l[k];
+      const seg = l.segment as Record<string, unknown>;
+      for (const k of ['subFrom', 'subTo'] as const) if (typeof seg[k] !== 'string') delete seg[k];
+      if (Array.isArray(l.bays)) l.bays = (l.bays as unknown[]).filter((b): b is number => typeof b === 'number' && Number.isInteger(b) && b >= 0);
+      else delete l.bays;
     }
     lists.push(l as unknown as PlateList);
   }

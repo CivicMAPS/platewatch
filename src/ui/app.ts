@@ -201,7 +201,7 @@ export class App {
         <p class="mt-2 whitespace-pre-line">${c.body}</p>
         <div class="mt-5 grid grid-cols-2 gap-3">
           <button type="button" class="btn-secondary" @click=${() => c.resolve(false)}>${c.cancelLabel}</button>
-          <button type="button" class=${c.danger ? 'btn-danger' : 'btn-primary'} @click=${() => c.resolve(true)}>${c.confirmLabel}</button>
+          <button type="button" class=${c.danger ? 'btn-danger' : 'btn-primary'} data-testid="confirm-ok" @click=${() => c.resolve(true)}>${c.confirmLabel}</button>
         </div>
       </div>
     </div>`;

@@ -20,7 +20,7 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Device date/time | Clock read *at the shutter* (before location is awaited): epoch ms, ISO 8601 local with offset, IANA zone. Embedded as **EXIF DateTimeOriginal + OffsetTimeOriginal + SubSecTime**, plus GPS UTC stamp. |
 | Image text → editable text | On-device Tesseract LSTM (no network). Plate mode: guide-box crop, contrast stretch + Otsu binarisation, 3-pass consensus; result is an editable field with alternative candidates. **Text reader** screen converts any photo (signs, permits) to editable text. |
 | Allow list (permits) | Plates (+ holder label, permit no., validity dates, vehicle description, permit area and/or streets), bulk paste and CSV import. On a timed list, a plate holding a permit on any allow list raises the **permit pop-up** with the permit's details and status (applies here / another area or street / expired / not yet valid); the officer chooses *Exempt here* (green "Permit valid", recorded, no clock) or *Not exempt here — continue* (timed as usual). A permit typed but not yet added is saved with the list. |
-| Overstay dismissal and known vehicles | *Dismiss offence alert* on an overstay: Disability permit displayed, Emergency services vehicle, or Permit displayed (physical resident permit). The scan stays in history with the reason. Disability and emergency dismissals tag the plate: from the next day every scan asks the officer to check the vehicle (*Confirmed*: tag kept, no timer; *Dismiss*: tag removed, timer applied). Not offered in statutory restrictions (loading zone, no stopping…). See [docs/PERMITS-AND-EXEMPTIONS.md](docs/PERMITS-AND-EXEMPTIONS.md). |
+| Overstay dismissal and known vehicles | *Dismiss offence alert* on an overstay: Disability permit displayed (re-times the vehicle against **2 × the allowance** in timed and paid + timed spaces; prescribed time in disability-only spaces), Emergency services vehicle, or Permit displayed (physical resident permit). The scan stays in history with the reason. Disability and emergency dismissals tag the plate: from the next day every scan asks the officer to check the vehicle (*Confirmed*: tag kept — emergency no timer, disability timed at 2 ×; *Dismiss*: tag removed, timed as signed). Never applied in statutory (red sign) restrictions. Tags can be removed in Settings → Tagged vehicles (development; CommandMAPS once integrated). See [docs/PERMITS-AND-EXEMPTIONS.md](docs/PERMITS-AND-EXEMPTIONS.md). |
 | Timed list | Patrol zone: the internal enforcement area number (e.g. 9) and its operational name (e.g. Flagstaff); residential permit area (RPA); street segment, between streets, side, suburb; one or more restrictions (sign code → auto allowance, days, hours incl. overnight / all-times, grace); link any saved allow lists. |
 | Finding lists | Home groups timed lists by patrol zone, then road segment name, as compact rows with a scan button, live restriction status and overdue counts. Zone chips show one patrol zone (remembered). Fuzzy search matches patrol zone number or name, RPA, road segment and cross streets (prefix, any word, one typo), parking area number, EasyPark area, PayStay zone (any part, e.g. the assigned segment number inside a Port Phillip `3388…` number) and meter ID, and shows which field matched. A bay's kerb sign number finds its segment: `63758` → parking area 637, bay 58. A leading `rpa`, `meter`, `zone`, `area`, `bay`, `easypark` or `paystay` searches only that field (`rpa 12`). |
 | Hot list | Plate, risks (aggressive, previous assault, spitting, verbal abuse, threats, weapon sighted, flees/evades, other), risk level, make, model, body type, colour, notes. |
@@ -45,15 +45,16 @@ List present → Select list → camera opens → align plate → capture
      └─ Timed list:
           no restriction in force now ............. NOT IN FORCE (nothing saved)
           alert dismissed earlier this period ..... EXEMPT (recorded, no time limit)
-          tagged disability / emergency vehicle ... confirmed today: recorded, no time limit
-                                                    new day: CHECK VEHICLE pop-up
-                                                      Confirmed → recorded, no time limit
+          tagged disability / emergency vehicle ... new day: CHECK VEHICLE pop-up
+                                                      Confirmed → emergency: no time limit
+                                                                  disability: timed at 2 × allowance
                                                       Dismiss   → tag removed, timed below
           permit held for the plate ............... PERMIT pop-up (details + status)
                                                       Exempt here → PERMIT VALID
                                                       continue    → timed below
           match with an active observation ........ show SCAN 1 vs SCAN N + time elapsed
-               elapsed ≥ allowance + grace ........ OVERSTAY → Dismiss offence alert (reason)
+               elapsed ≥ allowance + grace ........ OVERSTAY → Dismiss offence alert (reason;
+                                                    disability re-times at 2 × allowance)
                otherwise .......................... WITHIN ALLOWANCE (time remaining)
           otherwise ............................... create scan record for the segment
                                                     and start the time allowance

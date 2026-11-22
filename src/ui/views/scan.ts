@@ -23,8 +23,8 @@ import {
   saveScan,
   uid,
 } from '../../lib/db';
-import { evaluate, isStatutoryRestriction, newObservation, resighting, timingDecision, type Decision, type HotHit, type PermitHit } from '../../lib/engine';
-import { applyDismissal, confirmFlag, DISMISS_LABEL, DISMISS_REASONS, FLAG_LABEL, FLAG_MESSAGE, PERMIT_STATUS_TEXT } from '../../lib/dismissal';
+import { disabilityDoubles, evaluate, isStatutoryRestriction, newObservation, resighting, timingDecision, type Decision, type HotHit, type PermitHit } from '../../lib/engine';
+import { applyDismissal, confirmFlag, DISABILITY_BLOCKED_TEXT, disabilityBlocked, DISMISS_LABEL, DISMISS_REASONS, FLAG_LABEL, FLAG_MESSAGE, PERMIT_STATUS_TEXT } from '../../lib/dismissal';
 import { feedback, unlockAudio } from '../../lib/feedback';
 import { accuracyTone, formatLatLng, geo, type GeoState } from '../../lib/geo';
 import { cropCanvas, mapCoverRect, padRect } from '../../lib/image';
@@ -465,10 +465,17 @@ export function scanView(params: Record<string, string>, app: App): View {
     };
   };
 
-  const recordNew = async (plate: string, l: TimedList, at: number, instance: NonNullable<ReturnType<typeof restrictionInForce>>, extra: Partial<ScanRecord> = {}) => {
+  const recordNew = async (
+    plate: string,
+    l: TimedList,
+    at: number,
+    instance: NonNullable<ReturnType<typeof restrictionInForce>>,
+    extra: Partial<ScanRecord> = {},
+    concession?: 'disability',
+  ) => {
     const obsId = uid();
     const saved = await makeRecord(plate, l.id, 'recorded', obsId, extra);
-    const obs = newObservation({ id: obsId, list: l, plate, scanId: saved.id, at, instance });
+    const obs = newObservation({ id: obsId, list: l, plate, scanId: saved.id, at, instance, concession });
     await saveScan(saved, obs);
     return saved;
   };
@@ -632,7 +639,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         await saveScan(saved);
         break;
       case 'timed_new':
-        saved = await recordNew(plate, l, at, d.instance, extra);
+        saved = await recordNew(plate, l, at, d.instance, extra, d.concession);
         break;
       case 'timed_resighting':
         ({ saved, comparison } = await recordResighting(plate, d, extra));
@@ -691,7 +698,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       if (r.decision.kind !== 'timed_flag_check') return r;
       const flag = confirmFlag(r.decision.flag, at);
       await putFlag(flag);
-      return continueTiming(r, l, at, { kind: 'timed_flag_exempt', flag });
+      // Emergency: recorded, no timer. Disability: timed against twice the allowance.
+      return continueTiming(r, l, at, r.decision.confirmed, { flagCheck: { kind: flag.kind, result: 'confirmed' } });
     });
 
   /** Known vehicle not confirmed: tag removed, recorded, timer applied. */
@@ -705,13 +713,20 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /** Dismiss the overstay alert with a reason: the scan keeps it; disability / emergency tags the plate. */
   const dismissAlert = (reason: DismissReason) =>
-    decide(async (r) => {
+    decide(async (r, l) => {
       const d = r.decision;
       if (d.kind !== 'timed_resighting' || !d.overstay || !r.saved) return r;
-      const out = applyDismissal({ scan: r.saved, observation: r.comparison?.observation ?? d.observation, reason, at: Date.now() });
+      const obs = r.comparison?.observation ?? d.observation;
+      if (reason === 'disability_permit' && disabilityBlocked(obs, r.saved.meta.capturedAt, l.restrictions.find((x) => x.id === obs.restrictionId)?.description)) return r;
+      const out = applyDismissal({ scan: r.saved, observation: obs, reason, at: Date.now() });
       await dismissOverstay(out);
       dismissOpen = false;
-      return { ...r, saved: out.scan, comparison: r.comparison ? { ...r.comparison, observation: out.observation, current: out.scan } : null, dismissedReason: reason };
+      // Disability: the same sighting re-timed against twice the allowance (no longer an overstay).
+      const decision = reason === 'disability_permit' ? resighting(out.observation, r.saved.meta.capturedAt) : d;
+      const comparison = r.comparison
+        ? { ...r.comparison, observation: out.observation, current: out.scan, ...(reason === 'disability_permit' ? { remainingMs: decision.kind === 'timed_resighting' ? decision.remainingMs : 0, overstay: false } : {}) }
+        : null;
+      return { ...r, decision, saved: out.scan, comparison, dismissedReason: reason };
     });
 
   /** Officer resolved a fuzzy re-sighting candidate. */
@@ -729,7 +744,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         result = { ...result, decision: r, saved, comparison };
         feedback(r.overstay ? 'warn' : 'info', settings());
       } else {
-        const saved = await recordNew(result.plate, l, at, d.instance);
+        const saved = await recordNew(result.plate, l, at, d.instance, {}, d.concession);
         result = { ...result, decision: { kind: 'timed_new', instance: d.instance }, saved };
         feedback('ok', settings());
       }
@@ -1019,7 +1034,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         </div>
       </div>
       <p class="mt-2 text-sm text-neutral-800">
-        <span class="font-plate">${o.restrictionCode}</span> allowance ${formatMinutes(o.limitMinutes)}${o.graceMinutes ? ` + ${formatMinutes(o.graceMinutes)} grace` : ''} ·
+        <span class="font-plate">${o.restrictionCode}</span> allowance ${formatMinutes(o.limitMinutes)}${o.concession ? html` <span data-testid="disability-doubled">(2 × ${formatMinutes(o.concession.baseLimitMinutes)}, disability permit)</span>` : nothing}${o.graceMinutes ? ` + ${formatMinutes(o.graceMinutes)} grace` : ''} ·
         ${c.remainingMs > 0 ? html`<strong>${formatDuration(c.remainingMs)} remaining</strong>` : html`<strong class="text-alert-strong">exceeded by ${formatDuration(-c.remainingMs)}</strong>`}
       </p>
       <div class="mt-4 grid grid-cols-2 gap-3">${evidenceTile('Scan 1', c.first)}${evidenceTile(`Scan ${o.scanCount}`, c.current)}</div>
@@ -1090,8 +1105,15 @@ export function scanView(params: Record<string, string>, app: App): View {
         );
       case 'timed_new': {
         const r0 = d.instance.restriction;
-        const ends = (r.saved?.meta.capturedAt ?? Date.now()) + r0.limitMinutes * 60_000;
-        return statusCard('timing', 'First sighting recorded', html`<span class="font-plate">${r0.code}</span> allowance (${formatMinutes(r0.limitMinutes)}) started. Expires <strong class="font-plate">${formatClock(ends)}</strong>. Re-scan after that time to check for overstay.`, 'result-recorded');
+        const doubled = d.concession === 'disability' && disabilityDoubles(r0.code, r0.description);
+        const limit = doubled ? r0.limitMinutes * 2 : r0.limitMinutes;
+        const ends = (r.saved?.meta.capturedAt ?? Date.now()) + limit * 60_000;
+        return statusCard(
+          'timing',
+          'First sighting recorded',
+          html`<span class="font-plate">${r0.code}</span> allowance (${formatMinutes(limit)}${doubled ? html`, <strong data-testid="disability-doubled">doubled for disability permit</strong>` : nothing}) started. Expires <strong class="font-plate">${formatClock(ends)}</strong>. Re-scan after that time to check for overstay.`,
+          'result-recorded',
+        );
       }
       case 'timed_resighting':
         return r.comparison ? comparisonPanel(r.comparison) : statusCard(d.overstay ? 'overstay' : 'within_allowance', 'Re-sighting', `Elapsed ${formatDuration(d.elapsedMs)}.`, 'result-resighting');
@@ -1178,7 +1200,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     return banner(
       'active',
       `Offence alert dismissed · ${DISMISS_LABEL[reason]}`,
-      `The scan is kept in history with this reason.${flag ? ` The plate is tagged: from tomorrow every scan asks you to check the vehicle (“${FLAG_MESSAGE[flag]}”).` : ''}`,
+      `${reason === 'disability_permit' && result?.comparison ? `Allowance doubled to ${formatMinutes(result.comparison.observation.limitMinutes)}; timing continues (ends ${formatClock(result.comparison.observation.allowanceEndsAt)}). No payment is required while the permit is displayed. ` : ''}The scan is kept in history with this reason.${flag ? ` The plate is tagged: from tomorrow every scan asks you to check the vehicle (“${FLAG_MESSAGE[flag]}”).` : ''}`,
       'alert-dismissed',
     );
   };
@@ -1243,22 +1265,26 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /** "Dismiss offence alert": the reasons an officer can dismiss an overstay after checking the vehicle. */
   const dismissSheet = (r: ResultState) => {
-    const code = r.decision.kind === 'timed_resighting' ? r.decision.observation.restrictionCode : '';
+    const obs = r.comparison?.observation ?? (r.decision.kind === 'timed_resighting' ? r.decision.observation : undefined);
+    const code = obs?.restrictionCode ?? '';
+    const description = list?.type === 'timed' ? (list.restrictions.find((x) => x.id === obs?.restrictionId)?.description ?? '') : '';
     // A disability permit or a displayed resident permit never exempts in a statutory restriction.
-    const statutory = isStatutoryRestriction(code);
+    const statutory = isStatutoryRestriction(code) || isStatutoryRestriction(description);
     const reasons = DISMISS_REASONS.filter((x) => !statutory || x.reason === 'emergency_vehicle');
+    const blocked = obs && r.saved ? disabilityBlocked(obs, r.saved.meta.capturedAt, description) : null;
     return decisionSheet({
       testid: 'dismiss-sheet',
       pill: statusPill('overstay'),
       title: 'Dismiss offence alert',
       onClose: () => { dismissOpen = false; app.update(); },
       body: html`<p>Choose why the vehicle is not committing an offence. The scan stays in history with the reason.</p>
-        ${statutory ? html`<p class="mt-2 text-alert-strong"><span class="font-plate">${code}</span> is a statutory restriction: disability and resident permits do not exempt here.</p>` : nothing}`,
-      actions: html`${reasons.map(
-        (x) => html`<button type="button" class="btn-secondary h-auto flex-col items-start gap-0 text-left" data-testid=${`dismiss-${x.reason}`} @click=${() => void dismissAlert(x.reason)}>
-          <span>${x.label}</span><span class="text-sm font-normal text-neutral-600">${x.hint}</span>
-        </button>`,
-      )}
+        ${statutory ? html`<p class="mt-2 text-alert-strong"><span class="font-plate">${code}</span>${description ? ` (${description})` : ''} is a statutory restriction: disability and resident permits do not exempt here.</p>` : nothing}`,
+      actions: html`${reasons.map((x) => {
+        const off = x.reason === 'disability_permit' && blocked;
+        return html`<button type="button" class="btn-secondary h-auto flex-col items-start gap-0 text-left" data-testid=${`dismiss-${x.reason}`} ?disabled=${!!off} @click=${() => void dismissAlert(x.reason)}>
+          <span>${x.label}</span><span class="text-sm font-normal text-neutral-600">${off ? DISABILITY_BLOCKED_TEXT[blocked] : x.hint}</span>
+        </button>`;
+      })}
         <button type="button" class="btn-ghost" @click=${() => { dismissOpen = false; app.update(); }}>Cancel</button>`,
     });
   };

@@ -9,7 +9,7 @@ import { warmUpOcr } from '../../lib/ocr';
 import { deviceTimeZone, formatStamp } from '../../lib/time';
 import type { App, View } from '../app';
 import { banner, header, icon, page, spinner, statusPill } from '../components';
-import { canImportOnDevice, policyContext } from '../../lib/listPolicy';
+import { canImportOnDevice, canRemoveTagsOnDevice, policyContext } from '../../lib/listPolicy';
 
 
 type PermState = PermissionState | 'unknown';
@@ -261,6 +261,9 @@ export function settingsView(_p: Record<string, string>, app: App): View {
             ${policyContext().mode === 'development'
               ? banner('pending', 'Development build', html`Every list can be imported, created, edited and deleted in PlateWatch. Inside EnforcementMAPS, importing moves to CommandMAPS (team leaders and parking services management, with authorisation); imported lists are read-only on the device; officers create timed lists for the day only.`)
               : banner('pending', 'EnforcementMAPS', html`Lists are imported in CommandMAPS and cannot be edited here. You can create a timed list for today's patrol on segments without paid parking.`)}
+            ${canRemoveTagsOnDevice(policyContext())
+              ? html`<button type="button" class="btn-secondary" data-testid="settings-tags" @click=${() => app.navigate('/tags')}>${icon('shield')} Tagged vehicles</button>`
+              : nothing}
           </section>
 
           <section class="card mt-4 grid gap-3">

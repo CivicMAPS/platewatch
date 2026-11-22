@@ -95,3 +95,22 @@ describe('provenance stamps', () => {
     expect(systemSource('a.csv, b.json', NOW)).toEqual({ origin: 'system', importedFrom: 'a.csv, b.json', importedAt: NOW });
   });
 });
+
+describe('removing known-vehicle tags', () => {
+  it('is possible on the device in development only', async () => {
+    const { canRemoveTagsOnDevice } = await import('../src/lib/listPolicy');
+    expect(canRemoveTagsOnDevice(DEV)).toBe(true);
+    expect(canRemoveTagsOnDevice(EMAPS)).toBe(false);
+    expect(canRemoveTagsOnDevice({ mode: 'enforcementmaps', role: 'supervisor' })).toBe(false);
+  });
+
+  it('in CommandMAPS needs a supervisor or above with parking services branch authority', async () => {
+    const { canRemoveTagsInCommandMaps } = await import('../src/lib/listPolicy');
+    for (const role of ['supervisor', 'team_leader', 'parking_services_manager'] as const) {
+      expect(canRemoveTagsInCommandMaps(role, true)).toBe(true);
+      expect(canRemoveTagsInCommandMaps(role, false)).toBe(false);
+    }
+    expect(canRemoveTagsInCommandMaps('officer', true)).toBe(false);
+    expect(canRemoveTagsInCommandMaps(undefined, true)).toBe(false);
+  });
+});

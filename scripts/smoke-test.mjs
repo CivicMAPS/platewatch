@@ -325,13 +325,18 @@ async function main() {
   await shot('overstay');
 
   // Dismiss the offence alert after checking the vehicle: disability permit displayed. The scan is
-  // kept with the reason, the timing closes, and the plate is tagged for later days.
+  // kept with the reason, the vehicle is re-timed against twice the allowance (2h05m of 4P: not an
+  // overstay), and the plate is tagged for later days.
   await page.click('[data-testid=dismiss-alert]');
   await page.waitForSelector('[data-testid=dismiss-sheet]', { visible: true });
   await shot('dismiss-sheet');
   await page.click('[data-testid=dismiss-disability_permit]');
   await page.waitForSelector('[data-testid=alert-dismissed]', { visible: true });
   await page.waitForSelector('[data-testid=dismiss-sheet]', { hidden: true });
+  await waitText('Allowance doubled to 4h');
+  await page.waitForSelector('[data-testid=comparison][data-tone=pending]');
+  await page.waitForSelector('[data-testid=disability-doubled]');
+  await shot('disability-doubled');
   const rescan = async (plate) => {
     await page.click('[data-testid=next-scan]');
     await page.waitForSelector('[data-testid=shutter]:not([disabled])');
@@ -349,15 +354,17 @@ async function main() {
       const f = tx.objectStore('flags');
       f.getAll().onsuccess = (e) => { for (const x of e.target.result) f.put({ ...x, confirmedDay: '2000-01-01' }); };
       const o = tx.objectStore('observations');
-      o.getAll().onsuccess = (e) => { for (const x of e.target.result) if (x.status === 'dismissed') o.put({ ...x, windowEndsAt: 1 }); };
+      // Yesterday's restriction periods have ended (running and dismissed timings alike).
+      o.getAll().onsuccess = (e) => { for (const x of e.target.result) if (x.status === 'dismissed' || x.status === 'active') o.put({ ...x, windowEndsAt: 1 }); };
       tx.oncomplete = () => res(undefined);
       tx.onerror = () => rej(tx.error);
     };
   }));
-  // Same day: no new alert, recorded without a timer.
+  // Same day: re-sighting timed against 4P, still within allowance.
   await rescan();
-  await page.waitForSelector('[data-testid=result-dismissed-earlier]', { timeout: 20000 });
-  log('overstay alert dismissed (disability permit displayed): scan kept with reason; same-day re-scan exempt');
+  await page.waitForSelector('[data-testid=comparison][data-tone=pending]', { timeout: 20000 });
+  await page.waitForSelector('[data-testid=disability-doubled]');
+  log('overstay dismissed for a disability permit: scan kept with reason; re-timed against 2 × allowance (within 4P)');
 
   await newDay();
   await rescan();
@@ -365,7 +372,17 @@ async function main() {
   await waitText('Previous disability permit vehicle — check vehicle for displayed permit');
   await shot('flag-sheet');
   await page.click('[data-testid=flag-confirm]');
-  await page.waitForSelector('[data-testid=result-flag-confirmed]', { timeout: 20000 });
+  // Disability confirmed: a new sighting timed against twice the allowance.
+  await page.waitForSelector('[data-testid=result-recorded] [data-testid=disability-doubled]', { timeout: 20000 });
+  // End that timing so the next scan is a new sighting again.
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('observations', 'readwrite');
+      const o = tx.objectStore('observations');
+      o.getAll().onsuccess = (ev) => { for (const x of ev.target.result) if (x.status === 'active') o.put({ ...x, status: 'reset' }); };
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
   await newDay();
   await rescan();
   await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
@@ -373,7 +390,7 @@ async function main() {
   await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
   const tags = await page.evaluate(() => new Promise((res) => { indexedDB.open('platewatch').onsuccess = (e) => { e.target.result.transaction('flags').objectStore('flags').count().onsuccess = (c) => res(c.target.result); }; }));
   if (tags !== 0) throw new Error('tag not removed after Dismiss');
-  log('next day: known-vehicle check — Confirmed (no timer, tag kept), then Dismiss (tag removed, timer applied)');
+  log('next day: known-vehicle check — Confirmed (timed against 2 ×, tag kept), then Dismiss (tag removed, timed as signed)');
 
   // Hot list alert while working the timed list (manual correction of OCR text).
   await page.click('[data-testid=next-scan]');
@@ -411,6 +428,25 @@ async function main() {
   }
   await shot('permit-valid');
   log('linked permit plate: permit pop-up (applies here) → Exempt here → green "Permit valid", recorded; again on re-scan');
+
+  // Tagged vehicles (development build): an emergency dismissal tags the plate; the tag is removed
+  // from Settings → Tagged vehicles (CommandMAPS dashboard once integrated).
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('flags', 'readwrite');
+      tx.objectStore('flags').put({ key: 'EMR001', plate: 'EMR001', kind: 'emergency', createdAt: Date.now(), sourceScanId: 'x', confirmedDay: '2000-01-01' });
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
+  await page.goto(`${ORIGIN}/#/settings`);
+  await page.click('[data-testid=settings-tags]');
+  await page.waitForSelector('[data-testid=tag-row]', { visible: true });
+  await shot('tags');
+  await page.click('[data-testid=tag-remove]');
+  await page.waitForSelector('[data-testid=confirm-ok]', { visible: true });
+  await page.click('[data-testid=confirm-ok]');
+  await waitText('No tagged vehicles');
+  log('tagged vehicles: listed and removed in the development build');
 
   // Evidence record: EXIF + integrity.
   await page.goto(timedUrl);

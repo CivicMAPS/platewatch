@@ -29,6 +29,14 @@ is **development**, so a typo can never lock officers out during field testing.
 | Edit / delete an officer list | Yes | Yes, on the day it was created |
 | Officer list after its day | Kept | Hidden from Home; read-only if opened (boundary: local midnight) |
 
+## Plate tags (known disability / emergency vehicles)
+
+| | Development (now) | EnforcementMAPS |
+|---|---|---|
+| Remove a tag | Settings → Tagged vehicles, or Dismiss at a vehicle check | Dismiss at a vehicle check; otherwise CommandMAPS operational dashboard, supervisors and above with parking services branch authority (`canRemoveTagsInCommandMaps`) |
+
+See `docs/PERMITS-AND-EXEMPTIONS.md`.
+
 ## Still open (Sequence 29)
 
 - Expiry boundary: local midnight (implemented) or end of shift.

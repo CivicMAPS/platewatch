@@ -24,8 +24,8 @@ import type { ListOrigin, ListType, PlateList } from './types';
 
 export type DeploymentMode = 'development' | 'enforcementmaps';
 
-/** CivicMAPS roles that matter for lists. */
-export type ListRole = 'officer' | 'team_leader' | 'parking_services_manager';
+/** CivicMAPS roles that matter for lists and plate tags. */
+export type ListRole = 'officer' | 'supervisor' | 'team_leader' | 'parking_services_manager';
 
 export interface PolicyContext {
   mode: DeploymentMode;
@@ -131,4 +131,23 @@ export function officerSource(now = Date.now()): NonNullable<PlateList['source']
 /** Source for a list created or updated by an import. */
 export function systemSource(importedFrom: string, now = Date.now()): NonNullable<PlateList['source']> {
   return { origin: 'system', importedFrom, importedAt: now };
+}
+
+/* ───────────────────────────── Plate tags ───────────────────────────── */
+
+/**
+ * Removing a known-vehicle tag (disability / emergency) other than by "Dismiss" at a vehicle
+ * check. Development: on the device (Settings → Tagged vehicles). EnforcementMAPS: never on the
+ * officer's device — it is done from the CommandMAPS operational dashboard.
+ */
+export function canRemoveTagsOnDevice(ctx: PolicyContext): boolean {
+  return isDevelopment(ctx);
+}
+
+/**
+ * The CommandMAPS rule (owner decision 23/11/2026): supervisors and above who hold assigned
+ * authority within the parking services branch.
+ */
+export function canRemoveTagsInCommandMaps(role: ListRole | undefined, hasParkingServicesAuthority: boolean): boolean {
+  return hasParkingServicesAuthority && (role === 'supervisor' || role === 'team_leader' || role === 'parking_services_manager');
 }

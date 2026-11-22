@@ -395,6 +395,11 @@ export interface Observation {
   scanCount: number;
   /** Set when status is `dismissed`. */
   dismissReason?: DismissReason;
+  /**
+   * Disability permit displayed: the allowance is twice the signed time (timed and paid + timed
+   * spaces). `limitMinutes` / `allowanceEndsAt` hold the doubled values; this keeps the signed one.
+   */
+  concession?: { kind: 'disability'; baseLimitMinutes: number };
 }
 
 export interface Settings {

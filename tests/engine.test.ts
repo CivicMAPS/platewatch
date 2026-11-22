@@ -180,8 +180,16 @@ describe('known vehicles and dismissed alerts', () => {
 describe('isStatutoryRestriction', () => {
   it('recognises loading, bus and taxi zones, no stopping / parking and clearways, not time limits', async () => {
     const { isStatutoryRestriction } = await import('../src/lib/engine');
-    for (const c of ['LZ30', 'LZ 15', 'Loading Zone', 'BZ', 'Bus Zone', 'Taxi Zone', 'NS', 'No Stopping', 'No Parking', 'Clearway', 'Works Zone'])
+    for (const c of ['LZ30', 'LZ 15', 'Loading Zone', 'BZ', 'Bus Zone', 'Taxi Zone', 'NS', 'No Stopping', 'No Parking', 'Clearway', 'Works Zone', 'Police Vehicles Only', 'Except Authorised Vehicles', 'Except authorized vehicles', 'NSEGCV', 'NSEGCV 15', 'No Stopping Except Goods Carrying Vehicles'])
       expect(isStatutoryRestriction(c)).toBe(true);
-    for (const c of ['2P', '1/2P', 'P15', '2P Meter', '4P Ticket', 'P5']) expect(isStatutoryRestriction(c)).toBe(false);
+    for (const c of ['2P', '1/2P', 'P15', '2P Meter', '4P Ticket', 'P5', '2P Permit Zone']) expect(isStatutoryRestriction(c)).toBe(false);
+  });
+});
+
+describe('statutory sign in the restriction description', () => {
+  it('applies no tag or permit when the description is a red sign', () => {
+    const l = timed({ restrictions: [r2P({ code: '2P', description: 'Except authorised vehicles' })] });
+    const flag = { key: 'ABC123', plate: 'ABC123', kind: 'disability' as const, createdAt: 0, sourceScanId: 's', confirmedDay: '2026-11-13' };
+    expect(evaluate({ ...base, list: l, flags: [flag], at: MON_0900, plate: 'ABC123' }).decision.kind).toBe('timed_new');
   });
 });

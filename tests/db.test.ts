@@ -54,6 +54,18 @@ beforeEach(async () => {
 });
 
 describe('db', () => {
+  it('a disability dismissal keeps the timing running against twice the allowance', async () => {
+    const list = timed();
+    await putList(list);
+    const t = at(2026, 11, 16, 9);
+    const obs = newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: t, instance: { restriction: r2P(), start: t, end: t + 9 * 3600_000 } });
+    const s2 = { ...scan('s2', list.id, t + 7_500_000, 'o1'), outcome: 'overstay' as const };
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    await dismissOverstay(applyDismissal({ scan: s2, observation: obs, reason: 'disability_permit', at: t + 7_600_000 }));
+    expect(await getActiveObservations(list.id)).toEqual([expect.objectContaining({ limitMinutes: 240, concession: { kind: 'disability', baseLimitMinutes: 120 } })]);
+    expect(await getFlag('ABC123')).toMatchObject({ kind: 'disability' });
+  });
+
   it('dismissing an overstay keeps the scan with its reason, closes the timing and tags the plate in one go', async () => {
     const list = timed();
     await putList(list);
@@ -62,11 +74,11 @@ describe('db', () => {
     const s2 = scan('s2', list.id, t + 7_500_000, 'o1');
     await saveScan(scan('s1', list.id, t, 'o1'), obs);
     await saveScan({ ...s2, outcome: 'overstay' }, obs);
-    await dismissOverstay(applyDismissal({ scan: { ...s2, outcome: 'overstay' }, observation: obs, reason: 'disability_permit', at: t + 7_600_000 }));
-    expect((await getScan('s2'))?.alertDismissal?.reason).toBe('disability_permit');
-    expect((await getObservations(list.id))[0]).toMatchObject({ status: 'dismissed', dismissReason: 'disability_permit' });
+    await dismissOverstay(applyDismissal({ scan: { ...s2, outcome: 'overstay' }, observation: obs, reason: 'emergency_vehicle', at: t + 7_600_000 }));
+    expect((await getScan('s2'))?.alertDismissal?.reason).toBe('emergency_vehicle');
+    expect((await getObservations(list.id))[0]).toMatchObject({ status: 'dismissed', dismissReason: 'emergency_vehicle' });
     expect(await getActiveObservations(list.id)).toHaveLength(0);
-    expect(await getFlag('ABC123')).toMatchObject({ kind: 'disability', confirmedDay: '2026-11-16' });
+    expect(await getFlag('ABC123')).toMatchObject({ kind: 'emergency', confirmedDay: '2026-11-16' });
     await deleteFlag('ABC123');
     expect(await getFlags()).toEqual([]);
   });

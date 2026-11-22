@@ -24,6 +24,7 @@ import {
 } from '../../lib/types';
 import type { App, View } from '../app';
 import { listPermissions, policyContext } from '../../lib/listPolicy';
+import { DISMISS_LABEL, FLAG_LABEL } from '../../lib/dismissal';
 import { banner, header, icon, LIST_TYPE_META, page, plateBadge, riskPill, statusPill, typeChip, UrlBag, type StatusKind } from '../components';
 import { segmentLabel } from './home';
 
@@ -35,10 +36,22 @@ const OUTCOME_STATUS: Record<ScanRecord['outcome'], { kind: StatusKind; text: st
   overstay: { kind: 'overstay', text: 'Overstay' },
   hot_sighting: { kind: 'hot_sighting', text: 'Hot-list sighting' },
   permit_valid: { kind: 'permit_valid', text: 'Permit valid' },
+  flag_confirmed: { kind: 'permit_valid', text: 'Vehicle confirmed' },
 };
 
-export function outcomeChip(o: ScanRecord['outcome']): TemplateResult {
-  return statusPill(OUTCOME_STATUS[o].kind, OUTCOME_STATUS[o].text);
+/** Outcome pill; a dismissed overstay alert adds a grey "Dismissed · reason" pill (history keeps both). */
+export function outcomeChip(o: ScanRecord['outcome'], scan?: Pick<ScanRecord, 'alertDismissal' | 'flagCheck' | 'exemption'>): TemplateResult {
+  const ex = scan?.exemption;
+  const main =
+    ex?.by === 'dismissed_earlier'
+      ? statusPill('permit_valid', `Exempt · ${DISMISS_LABEL[ex.reason]}`)
+      : statusPill(OUTCOME_STATUS[o].kind, OUTCOME_STATUS[o].text);
+  const dismissal = scan?.alertDismissal;
+  return dismissal
+    ? html`${main}<span data-testid="dismissal-chip">${statusPill('dismissed', `Dismissed · ${DISMISS_LABEL[dismissal.reason]}`)}</span>`
+    : scan?.flagCheck
+      ? html`${main}${statusPill(scan.flagCheck.result === 'confirmed' ? 'reviewed' : 'not_on_list', scan.flagCheck.result === 'confirmed' ? FLAG_LABEL[scan.flagCheck.kind] : 'Tag removed')}`
+      : main;
 }
 
 /** Neutral provenance tag for a system list (WF-S26 26b.1): not a status, so grey with an icon. */
@@ -187,7 +200,7 @@ export function listDetailView(params: Record<string, string>, app: App): View {
               <button type="button" class="flex w-full items-center gap-3 py-2 text-left" @click=${() => app.navigate(`/record/${s.id}`)}>
                 <img src=${urls.get(s.thumb)} alt="" class="h-12 w-16 flex-none rounded-md object-cover" loading="lazy" />
                 <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'sm')}${outcomeChip(s.outcome)}</div>
+                  <div class="flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'sm')}${outcomeChip(s.outcome, s)}</div>
                   <p class="mt-1 text-xs text-neutral-600">${formatDateTime(s.meta.capturedAt)}${s.meta.location ? ` · ±${Math.round(s.meta.location.accuracy)} m` : ' · no GPS'}</p>
                 </div>
               </button>

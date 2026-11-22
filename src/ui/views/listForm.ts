@@ -100,8 +100,12 @@ interface AllowDraft {
   permitNo: string;
   validFrom: string;
   validTo: string;
+  vehicle: string;
+  rpa: string;
+  /** Streets for a street-specific permit, separated by ";". */
+  streets: string;
 }
-const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '' });
+const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '', vehicle: '', rpa: '', streets: '' });
 
 type HotDraft = Omit<HotEntry, 'id' | 'key' | 'addedAt'> & { id: string | null };
 const emptyHotDraft = (): HotDraft => ({
@@ -556,6 +560,12 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       validTo: allowDraft.validTo,
       addedAt: Date.now(),
     };
+    const vehicle = allowDraft.vehicle.trim();
+    const rpa = allowDraft.rpa.trim();
+    const streets = allowDraft.streets.split(';').map((x) => x.trim()).filter(Boolean);
+    if (vehicle) entry.vehicle = vehicle;
+    if (rpa) entry.rpa = rpa;
+    if (streets.length) entry.streets = streets;
     const l = list;
     set(() => {
       l.entries = [entry, ...l.entries];
@@ -613,6 +623,12 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
           ${text({ id: 'allow-from', label: 'Valid from', type: 'date', value: allowDraft.validFrom, onInput: (v) => (allowDraft.validFrom = v) })}
           ${text({ id: 'allow-to', label: 'Valid to', type: 'date', value: allowDraft.validTo, onInput: (v) => (allowDraft.validTo = v) })}
         </div>
+        ${text({ id: 'allow-vehicle', label: 'Vehicle', value: allowDraft.vehicle, onInput: (v) => (allowDraft.vehicle = v), placeholder: 'e.g. White Toyota Corolla' })}
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'allow-rpa', label: 'Permit area (RPA)', value: allowDraft.rpa, onInput: (v) => (allowDraft.rpa = v), placeholder: 'e.g. 12', maxlength: 12 })}
+          ${text({ id: 'allow-streets', label: 'Streets', value: allowDraft.streets, onInput: (v) => (allowDraft.streets = v), placeholder: 'e.g. Smith St; Gore St' })}
+        </div>
+        <p class="-mt-1 text-xs text-neutral-600">Where the permit applies, as the council holds it: an area, a street or both. Blank: it applies wherever this list is linked.</p>
         <button type="submit" class="btn-secondary">${icon('plus')} Add to list</button>
       </form>
       <button type="button" class="btn-ghost text-sm" @click=${() => set(() => (showBulk = !showBulk))}>${showBulk ? 'Hide bulk import' : 'Bulk import (paste)'}</button>
@@ -634,6 +650,7 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
                 ${plateBadge(e.plate, 'sm')}
                 <div class="min-w-0 flex-1 text-sm">
                   <p class="truncate text-neutral-800">${e.label || '—'}${e.permitNo ? html` · <span class="text-neutral-600">#${e.permitNo}</span>` : nothing}</p>
+                  ${e.vehicle || e.rpa || e.streets?.length ? html`<p class="truncate text-xs text-neutral-700">${[e.vehicle, e.rpa ? `RPA ${e.rpa}` : '', e.streets?.join(', ')].filter(Boolean).join(' · ')}</p>` : nothing}
                   ${e.validFrom || e.validTo ? html`<p class="text-xs text-neutral-600">Valid ${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</p>` : nothing}
                 </div>
                 <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>

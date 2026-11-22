@@ -139,3 +139,36 @@ describe('backup: patrol zone, RPA and dismissed captures', () => {
     expect(await getDismissed()).toHaveLength(1);
   });
 });
+
+describe('plate tags in backups', () => {
+  it('restores well-formed tags and drops malformed ones', () => {
+    const raw = JSON.parse(file([]));
+    raw.flags = [
+      { key: 'x', plate: 'abc 123', kind: 'disability', createdAt: 5, sourceScanId: 's1', confirmedDay: '2026-11-16' },
+      { plate: 'BAD1', kind: 'vip' },
+      { plate: 'EMR1', kind: 'emergency', confirmedDay: 'yesterday' },
+    ];
+    const { flags } = parseBackup(JSON.stringify(raw));
+    expect(flags).toEqual([
+      { key: 'ABC123', plate: 'abc 123', kind: 'disability', createdAt: 5, sourceScanId: 's1', confirmedDay: '2026-11-16' },
+      { key: 'EMR1', plate: 'EMR1', kind: 'emergency', createdAt: 0, sourceScanId: '', confirmedDay: '' },
+    ]);
+  });
+
+  it('leaves tags alone when the backup has none', () => {
+    expect(parseBackup(file([])).flags).toBeUndefined();
+  });
+
+  it('keeps permit vehicle, area and streets on allow entries and drops malformed ones', () => {
+    const entries = [
+      { id: 'e1', plate: 'RES1', vehicle: 'White Corolla', rpa: '7', streets: ['Smith St', 3, ''] },
+      { id: 'e2', plate: 'RES2', vehicle: 9, rpa: '', streets: 'Smith St' },
+    ];
+    const [l] = parseBackup(file([{ id: 'a', type: 'allow', name: 'P', notes: '', createdAt: 0, updatedAt: 0, entries }])).lists;
+    const [a, b] = (l as unknown as { entries: Record<string, unknown>[] }).entries;
+    expect(a).toMatchObject({ vehicle: 'White Corolla', rpa: '7', streets: ['Smith St'] });
+    expect(b).not.toHaveProperty('vehicle');
+    expect(b).not.toHaveProperty('rpa');
+    expect(b).not.toHaveProperty('streets');
+  });
+});

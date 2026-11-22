@@ -324,6 +324,57 @@ async function main() {
   log(`overstay alert with both evidence images, elapsed ${elapsed}`);
   await shot('overstay');
 
+  // Dismiss the offence alert after checking the vehicle: disability permit displayed. The scan is
+  // kept with the reason, the timing closes, and the plate is tagged for later days.
+  await page.click('[data-testid=dismiss-alert]');
+  await page.waitForSelector('[data-testid=dismiss-sheet]', { visible: true });
+  await shot('dismiss-sheet');
+  await page.click('[data-testid=dismiss-disability_permit]');
+  await page.waitForSelector('[data-testid=alert-dismissed]', { visible: true });
+  await page.waitForSelector('[data-testid=dismiss-sheet]', { hidden: true });
+  const rescan = async (plate) => {
+    await page.click('[data-testid=next-scan]');
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    if (plate) await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+  };
+  // A later day (no eval: the production CSP forbids it): the tag was last confirmed in the past
+  // and the dismissed timing has ended.
+  const newDay = () => page.evaluate(() => new Promise((res, rej) => {
+    const req = indexedDB.open('platewatch');
+    req.onsuccess = () => {
+      const tx = req.result.transaction(['flags', 'observations'], 'readwrite');
+      const f = tx.objectStore('flags');
+      f.getAll().onsuccess = (e) => { for (const x of e.target.result) f.put({ ...x, confirmedDay: '2000-01-01' }); };
+      const o = tx.objectStore('observations');
+      o.getAll().onsuccess = (e) => { for (const x of e.target.result) if (x.status === 'dismissed') o.put({ ...x, windowEndsAt: 1 }); };
+      tx.oncomplete = () => res(undefined);
+      tx.onerror = () => rej(tx.error);
+    };
+  }));
+  // Same day: no new alert, recorded without a timer.
+  await rescan();
+  await page.waitForSelector('[data-testid=result-dismissed-earlier]', { timeout: 20000 });
+  log('overstay alert dismissed (disability permit displayed): scan kept with reason; same-day re-scan exempt');
+
+  await newDay();
+  await rescan();
+  await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
+  await waitText('Previous disability permit vehicle — check vehicle for displayed permit');
+  await shot('flag-sheet');
+  await page.click('[data-testid=flag-confirm]');
+  await page.waitForSelector('[data-testid=result-flag-confirmed]', { timeout: 20000 });
+  await newDay();
+  await rescan();
+  await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=flag-dismiss]');
+  await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
+  const tags = await page.evaluate(() => new Promise((res) => { indexedDB.open('platewatch').onsuccess = (e) => { e.target.result.transaction('flags').objectStore('flags').count().onsuccess = (c) => res(c.target.result); }; }));
+  if (tags !== 0) throw new Error('tag not removed after Dismiss');
+  log('next day: known-vehicle check — Confirmed (no timer, tag kept), then Dismiss (tag removed, timer applied)');
+
   // Hot list alert while working the timed list (manual correction of OCR text).
   await page.click('[data-testid=next-scan]');
   await page.waitForSelector('[data-testid=shutter]:not([disabled])');
@@ -346,6 +397,11 @@ async function main() {
     await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
     await type('[data-testid=plate-input]', plate);
     await page.click('[data-testid=check]');
+    // The permit pop-up shows the permit details; the officer decides it exempts here.
+    await page.waitForSelector('[data-testid=permit-sheet]', { visible: true, timeout: 20000 });
+    await page.waitForSelector('[data-testid=permit-hit][data-status=ACTIVE_IN_AREA]');
+    if (plate === 'RES002') await shot('permit-sheet');
+    await page.click('[data-testid=permit-exempt]');
     await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
     const permitText = await page.$eval('[data-testid=result-exempt]', (el) => el.textContent);
     const permitClass = await page.$eval('[data-testid=result-exempt]', (el) => el.className);
@@ -354,12 +410,17 @@ async function main() {
     await waitText('Saved · SHA-256');
   }
   await shot('permit-valid');
-  log('linked permit plate: green "Permit valid", sighting recorded, still valid on re-scan (no overstay)');
+  log('linked permit plate: permit pop-up (applies here) → Exempt here → green "Permit valid", recorded; again on re-scan');
 
   // Evidence record: EXIF + integrity.
   await page.goto(timedUrl);
   await waitText('Recent scan records');
   await page.click('main ul li button');
+  // Thumbnails load after the record renders; wait so the layout is stable before clicking.
+  await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+  // No sideways scroll on a phone (a pill row overflowing the card once did this).
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  if (overflow > 0) throw new Error(`record page scrolls sideways by ${overflow}px`);
   await click('Verify image integrity');
   await waitText('Image hash matches');
   const recText = await page.evaluate(() => document.body.innerText);

@@ -1,5 +1,5 @@
 import { patrol, hasPatrol, frameUrlFor, type Sighting } from '../../lib/patrol';
-import { deviceTimeZone, toLocalIso } from '../../lib/time';
+import { deviceTimeZone, localDateString, toLocalIso } from '../../lib/time';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { isPaidBy, paymentFor, paymentLines } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
@@ -7,8 +7,13 @@ import { createRef, ref } from 'lit-html/directives/ref.js';
 import { CameraController, CameraError, fileToCanvas, type CameraCapabilities } from '../../lib/camera';
 import { buildEvidence, captureMeta, type Evidence, type PendingCapture } from '../../lib/capture';
 import {
+  deleteFlag,
+  dismissOverstay,
   expireObservations,
   getActiveObservations,
+  getFlags,
+  getObservations,
+  putFlag,
   getAllowLists,
   getHotLists,
   getList,
@@ -18,7 +23,8 @@ import {
   saveScan,
   uid,
 } from '../../lib/db';
-import { evaluate, newObservation, resighting, type Decision, type HotHit } from '../../lib/engine';
+import { evaluate, isStatutoryRestriction, newObservation, resighting, timingDecision, type Decision, type HotHit, type PermitHit } from '../../lib/engine';
+import { applyDismissal, confirmFlag, DISMISS_LABEL, DISMISS_REASONS, FLAG_LABEL, FLAG_MESSAGE, PERMIT_STATUS_TEXT } from '../../lib/dismissal';
 import { feedback, unlockAudio } from '../../lib/feedback';
 import { accuracyTone, formatLatLng, geo, type GeoState } from '../../lib/geo';
 import { cropCanvas, mapCoverRect, padRect } from '../../lib/image';
@@ -29,7 +35,7 @@ import { formatClock, formatDateTime, formatDuration, formatIsoDate, formatMinut
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
-import type { GeoFix, TimedRestriction } from '../../lib/types';
+import type { DismissReason, GeoFix, TimedRestriction } from '../../lib/types';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -42,6 +48,7 @@ import {
 import type { App, View } from '../app';
 import {
   banner,
+  decisionSheet,
   header,
   icon,
   nearMatchSheet,
@@ -76,6 +83,14 @@ interface ResultState {
   comparison: Comparison | null;
   saved: ScanRecord | null;
   possibleFirsts: Map<string, ScanRecord>;
+  /** Set once the officer dismissed this scan's overstay alert. */
+  dismissedReason?: DismissReason;
+}
+
+/** Replace the timing decision behind any permit / known-vehicle pop-ups. */
+function withTiming(d: Decision, f: (inner: Decision) => Decision): Decision {
+  if (d.kind === 'timed_permit' || d.kind === 'timed_flag_check') return { ...d, then: withTiming(d.then, f) };
+  return f(d);
 }
 
 
@@ -111,6 +126,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   let ocrError = '';
   let plateInput = '';
   let result: ResultState | null = null;
+  /** "Dismiss offence alert" reasons sheet open. */
+  let dismissOpen = false;
   let evidence: Evidence | null = null;
   let clock: number | undefined;
   let unsubGeo: (() => void) | null = null;
@@ -398,6 +415,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     targetListId: string,
     outcome: ScanOutcome,
     observationId: string | null,
+    extra: Partial<ScanRecord> = {},
   ): Promise<ScanRecord> => {
     const ev = await ensureEvidence(plate);
     const p = pending!;
@@ -420,15 +438,17 @@ export function scanView(params: Record<string, string>, app: App): View {
       thumb: ev.thumb,
       sha256: ev.sha256,
       createdAt: Date.now(),
+      ...extra,
     };
   };
 
   const recordResighting = async (
     plate: string,
     d: Extract<Decision, { kind: 'timed_resighting' }>,
+    extra: Partial<ScanRecord> = {},
   ): Promise<{ saved: ScanRecord; comparison: Comparison | null }> => {
     const obs = d.observation;
-    const saved = await makeRecord(plate, obs.listId, d.overstay ? 'overstay' : 'within_allowance', obs.id);
+    const saved = await makeRecord(plate, obs.listId, d.overstay ? 'overstay' : 'within_allowance', obs.id, extra);
     const updated: Observation = {
       ...obs,
       lastScanId: saved.id,
@@ -445,9 +465,9 @@ export function scanView(params: Record<string, string>, app: App): View {
     };
   };
 
-  const recordNew = async (plate: string, l: TimedList, at: number, instance: NonNullable<ReturnType<typeof restrictionInForce>>) => {
+  const recordNew = async (plate: string, l: TimedList, at: number, instance: NonNullable<ReturnType<typeof restrictionInForce>>, extra: Partial<ScanRecord> = {}) => {
     const obsId = uid();
-    const saved = await makeRecord(plate, l.id, 'recorded', obsId);
+    const saved = await makeRecord(plate, l.id, 'recorded', obsId, extra);
     const obs = newObservation({ id: obsId, list: l, plate, scanId: saved.id, at, instance });
     await saveScan(saved, obs);
     return saved;
@@ -518,17 +538,20 @@ export function scanView(params: Record<string, string>, app: App): View {
     try {
       const l = (await getList(listId)) ?? list;
       list = l;
-      const [hotLists, allowLists, observations] = await Promise.all([
+      const [hotLists, allowLists, observations, flags] = await Promise.all([
         getHotLists(),
         getAllowLists(),
-        l.type === 'timed' ? getActiveObservations(l.id) : Promise.resolve([] as Observation[]),
+        // Running timings, and dismissed ones (an alert dismissed earlier this period exempts).
+        l.type === 'timed' ? getObservations(l.id).then((os) => os.filter((o) => o.status === 'active' || o.status === 'dismissed')) : Promise.resolve([] as Observation[]),
+        l.type === 'timed' ? getFlags() : Promise.resolve([]),
       ]);
       // Evaluate against the shutter time, not the moment the officer pressed "Check".
       const at = pending.meta.capturedAt;
-      const res = evaluate({ at, plate, list: l, hotLists, allowLists, observations });
+      const res = evaluate({ at, plate, list: l, hotLists, allowLists, observations, flags });
+      const core = timingDecision(res.decision);
       const candidates = [...hotLists, ...allowLists.filter(a => l.type === 'allow' ? a.id === l.id : l.type === 'timed' && l.allowListIds.includes(a.id))]
         .flatMap(source => source.entries.filter(entry => comparePlates(plate, entry.plate) === 'possible').map(entry => entry.plate + ' · ' + source.name));
-      if (res.decision.kind === 'timed_possible') candidates.push(...res.decision.candidates.map(o => o.plate + ' · ' + l.name));
+      if (core.kind === 'timed_possible') candidates.push(...core.candidates.map(o => o.plate + ' · ' + l.name));
       if (candidates.length && dismissed !== plate) {
         suggestions = [...new Set(candidates)];
         phase = 'confirm';
@@ -537,17 +560,17 @@ export function scanView(params: Record<string, string>, app: App): View {
       }
       if (dismissed === plate) {
         res.hotHits = res.hotHits.filter(h => h.strength === 'exact');
-        if (res.decision.kind === 'timed_possible') res.decision = {kind:'timed_new', instance:res.decision.instance};
+        res.decision = withTiming(res.decision, (x) => (x.kind === 'timed_possible' ? { kind: 'timed_new', instance: x.instance } : x));
         if (res.decision.kind === 'hot_match' && !res.hotHits.some(h => h.list.id === l.id)) res.decision = {kind:'hot_none'};
         if (res.decision.kind === 'allow_none') res.decision.possible = [];
       }
       await expireObservations(res.expireObservationIds, at);
       // Payment to check, and to keep with the evidence: the numbers tied to the restriction in force.
-      if (l.type === 'timed' && l.payment) pending.meta.payment = paymentFor(l.payment, restrictionFor(l, res.decision));
+      if (l.type === 'timed' && l.payment) pending.meta.payment = paymentFor(l.payment, restrictionFor(l, timingDecision(res.decision)));
 
       let saved: ScanRecord | null = null;
       let comparison: Comparison | null = null;
-      const possibleFirsts = new Map<string, ScanRecord>();
+      let possibleFirsts = new Map<string, ScanRecord>();
 
       // Officer-safety evidence: record exact hot-list sightings.
       for (const hit of res.hotHits.filter((h) => h.strength === 'exact')) {
@@ -558,26 +581,18 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       const d = res.decision;
       if (l.type === 'timed') {
-        if (d.kind === 'timed_exempt') {
-          // Evidence that the permit vehicle was seen here; no allowance clock is started.
-          saved = await makeRecord(plate, l.id, 'permit_valid', null);
-          await saveScan(saved);
-        } else if (d.kind === 'timed_new') saved = await recordNew(plate, l, at, d.instance);
-        else if (d.kind === 'timed_resighting') ({ saved, comparison } = await recordResighting(plate, d));
-        else if (d.kind === 'timed_possible') {
-          for (const o of d.candidates) {
-            const s = await getScan(o.firstScanId);
-            if (s) possibleFirsts.set(o.id, s);
-          }
-        }
+        const applied = await applyTimed(plate, l, at, d);
+        if (applied.saved) saved = applied.saved;
+        ({ comparison, possibleFirsts } = applied);
       }
+      dismissOpen = false;
 
       result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts };
       phase = 'result';
       const s = settings();
       if (res.hotHits.length) feedback('alarm', s);
       else if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
-      else if (d.kind === 'timed_possible') feedback('warn', s);
+      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'timed_flag_check') feedback('warn', s);
       else feedback('ok', s);
     } catch (e) {
       console.error(e);
@@ -587,6 +602,117 @@ export function scanView(params: Record<string, string>, app: App): View {
     app.update();
     window.scrollTo(0, 0);
   };
+
+  /**
+   * Record a timed-list decision. Pop-up decisions (permit held, known vehicle) record nothing
+   * until the officer chooses; `extra` carries that choice onto the record.
+   */
+  const applyTimed = async (
+    plate: string,
+    l: TimedList,
+    at: number,
+    d: Decision,
+    extra: Partial<ScanRecord> = {},
+  ): Promise<{ saved: ScanRecord | null; comparison: Comparison | null; possibleFirsts: Map<string, ScanRecord> }> => {
+    let saved: ScanRecord | null = null;
+    let comparison: Comparison | null = null;
+    const possibleFirsts = new Map<string, ScanRecord>();
+    switch (d.kind) {
+      case 'timed_exempt':
+        // Evidence that the permit vehicle was seen here; no allowance clock is started.
+        saved = await makeRecord(plate, l.id, 'permit_valid', null, extra);
+        await saveScan(saved);
+        break;
+      case 'timed_flag_exempt':
+        saved = await makeRecord(plate, l.id, 'flag_confirmed', null, { flagCheck: { kind: d.flag.kind, result: 'confirmed' }, ...extra });
+        await saveScan(saved);
+        break;
+      case 'timed_dismissed':
+        saved = await makeRecord(plate, l.id, 'permit_valid', null, { exemption: { by: 'dismissed_earlier', reason: d.reason }, ...extra });
+        await saveScan(saved);
+        break;
+      case 'timed_new':
+        saved = await recordNew(plate, l, at, d.instance, extra);
+        break;
+      case 'timed_resighting':
+        ({ saved, comparison } = await recordResighting(plate, d, extra));
+        break;
+      case 'timed_possible':
+        for (const o of d.candidates) {
+          const s = await getScan(o.firstScanId);
+          if (s) possibleFirsts.set(o.id, s);
+        }
+        break;
+      default:
+        break;
+    }
+    return { saved, comparison, possibleFirsts };
+  };
+
+  /** Run an officer decision on the result screen, keeping the result if saving fails. */
+  const decide = async (fn: (r: ResultState, l: TimedList, at: number) => Promise<ResultState>) => {
+    if (!result || !list || list.type !== 'timed' || !pending || phase === 'saving') return;
+    const r = result;
+    const l = list;
+    phase = 'saving';
+    app.update();
+    try {
+      result = await fn(r, l, pending.meta.capturedAt);
+      const d = result.decision;
+      const s = settings();
+      if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
+      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'timed_flag_check') feedback('warn', s);
+      else feedback('ok', s);
+    } catch (e) {
+      app.toast(`Save failed: ${(e as Error).message}`, 'error');
+    }
+    phase = 'result';
+    app.update();
+  };
+
+  /** Continue with the timing behind a pop-up (permit not exempting here / known vehicle not confirmed). */
+  const continueTiming = (r: ResultState, l: TimedList, at: number, next: Decision, extra: Partial<ScanRecord> = {}) =>
+    applyTimed(r.plate, l, at, next, extra).then((applied) => ({ ...r, decision: next, ...applied, saved: applied.saved ?? r.saved }));
+
+  /** Permit pop-up: holding this permit here makes the vehicle exempt. */
+  const acceptPermit = (hit: PermitHit) =>
+    decide((r, l, at) => {
+      const next: Decision = { kind: 'timed_exempt', hit };
+      return continueTiming(r, l, at, next, { exemption: { by: 'permit', permitNo: hit.entry.permitNo, listName: hit.list.name, status: hit.status } });
+    });
+
+  /** Permit pop-up: the permit does not exempt here — time the vehicle as usual. */
+  const declinePermit = () =>
+    decide((r, l, at) => (r.decision.kind === 'timed_permit' ? continueTiming(r, l, at, r.decision.then) : Promise.resolve(r)));
+
+  /** Known vehicle confirmed at the vehicle check: tag stays, recorded, no timer. */
+  const confirmKnownVehicle = () =>
+    decide(async (r, l, at) => {
+      if (r.decision.kind !== 'timed_flag_check') return r;
+      const flag = confirmFlag(r.decision.flag, at);
+      await putFlag(flag);
+      return continueTiming(r, l, at, { kind: 'timed_flag_exempt', flag });
+    });
+
+  /** Known vehicle not confirmed: tag removed, recorded, timer applied. */
+  const dismissKnownVehicle = () =>
+    decide(async (r, l, at) => {
+      if (r.decision.kind !== 'timed_flag_check') return r;
+      const { flag, then } = r.decision;
+      await deleteFlag(flag.key);
+      return continueTiming(r, l, at, then, { flagCheck: { kind: flag.kind, result: 'removed' } });
+    });
+
+  /** Dismiss the overstay alert with a reason: the scan keeps it; disability / emergency tags the plate. */
+  const dismissAlert = (reason: DismissReason) =>
+    decide(async (r) => {
+      const d = r.decision;
+      if (d.kind !== 'timed_resighting' || !d.overstay || !r.saved) return r;
+      const out = applyDismissal({ scan: r.saved, observation: r.comparison?.observation ?? d.observation, reason, at: Date.now() });
+      await dismissOverstay(out);
+      dismissOpen = false;
+      return { ...r, saved: out.scan, comparison: r.comparison ? { ...r.comparison, observation: out.observation, current: out.scan } : null, dismissedReason: reason };
+    });
 
   /** Officer resolved a fuzzy re-sighting candidate. */
   const resolvePossible = async (obs: Observation | null) => {
@@ -897,7 +1023,10 @@ export function scanView(params: Record<string, string>, app: App): View {
         ${c.remainingMs > 0 ? html`<strong>${formatDuration(c.remainingMs)} remaining</strong>` : html`<strong class="text-alert-strong">exceeded by ${formatDuration(-c.remainingMs)}</strong>`}
       </p>
       <div class="mt-4 grid grid-cols-2 gap-3">${evidenceTile('Scan 1', c.first)}${evidenceTile(`Scan ${o.scanCount}`, c.current)}</div>
-      <button type="button" class="btn-secondary mt-4 w-full" @click=${resetObservation}>${icon('refresh')} Vehicle moved — restart timing</button>
+      ${c.overstay && !result?.dismissedReason
+        ? html`<button type="button" class="btn-secondary mt-4 w-full" data-testid="dismiss-alert" @click=${() => { dismissOpen = true; app.update(); }}>${icon('x')} Dismiss offence alert</button>`
+        : nothing}
+      ${result?.dismissedReason ? nothing : html`<button type="button" class="btn-secondary mt-3 w-full" @click=${resetObservation}>${icon('refresh')} Vehicle moved — restart timing</button>`}
     </section>`;
   };
 
@@ -923,11 +1052,26 @@ export function scanView(params: Record<string, string>, app: App): View {
               <dt class="text-neutral-600">List</dt><dd class="font-semibold">${d.hit.list.name}</dd>
               ${e.label ? html`<dt class="text-neutral-600">Label</dt><dd>${e.label}</dd>` : nothing}
               ${e.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${e.permitNo}</dd>` : nothing}
+              ${e.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd>${e.vehicle}</dd>` : nothing}
               ${e.validFrom || e.validTo ? html`<dt class="text-neutral-600">Valid</dt><dd>${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</dd>` : nothing}
             </dl>`,
           'result-exempt',
         );
       }
+      case 'timed_permit':
+        return statusCard('verify', 'Permit on record', 'Check the permit details and decide whether it exempts the vehicle here.', 'result-permit', 'Permit held');
+      case 'timed_flag_check':
+        return statusCard('verify', FLAG_MESSAGE[d.flag.kind], 'Check the vehicle, then confirm or dismiss.', 'result-flag-check', FLAG_LABEL[d.flag.kind]);
+      case 'timed_flag_exempt':
+        return statusCard('permit_valid', 'Known vehicle confirmed', `${FLAG_LABEL[d.flag.kind]}. Scan recorded; no timer applied.`, 'result-flag-confirmed', 'Vehicle confirmed');
+      case 'timed_dismissed':
+        return statusCard(
+          'permit_valid',
+          'Alert dismissed earlier today',
+          html`${DISMISS_LABEL[d.reason]}${d.observation.closedAt ? html` at <span class="font-plate">${formatClock(d.observation.closedAt)}</span>` : nothing}, this restriction period. Scan recorded; no timer applied.`,
+          'result-dismissed-earlier',
+          'Exempt',
+        );
       case 'timed_not_in_force':
         // An imported placeholder: the segment exists but its signs are still to be entered (WF-S26 26a.8, WF-S27 27e).
         if (list?.type === 'timed' && !list.restrictions.length)
@@ -1011,8 +1155,9 @@ export function scanView(params: Record<string, string>, app: App): View {
       <div class="mx-auto max-w-xl px-4 pt-4 pb-32">
       <div class="grid gap-4">
         ${r.hotHits.length ? hotAlert(r.hotHits) : nothing}
+        ${r.dismissedReason ? dismissedBanner(r.dismissedReason) : nothing}
         ${decisionPanel(r)}
-        ${paymentCard(r)}
+        ${r.dismissedReason ? nothing : paymentCard(r)}
         ${r.saved
           ? html`<p class="text-center text-xs text-neutral-600">Saved · SHA-256 <span class="font-plate">${r.saved.sha256.slice(0, 16)}…</span> · <a class="link" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}
@@ -1022,7 +1167,100 @@ export function scanView(params: Record<string, string>, app: App): View {
           ${icon('camera', 'h-6 w-6', 1.75)} Next scan
         </button>
       </div>
+      ${r.decision.kind === 'timed_flag_check' ? flagSheet(r.decision) : nothing}
+      ${r.decision.kind === 'timed_permit' ? permitSheet(r.decision) : nothing}
+      ${dismissOpen ? dismissSheet(r) : nothing}
     </div>`;
+  };
+
+  const dismissedBanner = (reason: DismissReason) => {
+    const flag = DISMISS_REASONS.find((x) => x.reason === reason)?.flag;
+    return banner(
+      'active',
+      `Offence alert dismissed · ${DISMISS_LABEL[reason]}`,
+      `The scan is kept in history with this reason.${flag ? ` The plate is tagged: from tomorrow every scan asks you to check the vehicle (“${FLAG_MESSAGE[flag]}”).` : ''}`,
+      'alert-dismissed',
+    );
+  };
+
+  /** Pill for a permit's status: green when it applies here, amber to check, grey when not valid. */
+  const permitPill = (h: PermitHit) =>
+    h.status === 'ACTIVE_IN_AREA'
+      ? statusPill('permit_valid', PERMIT_STATUS_TEXT[h.status])
+      : h.status === 'ACTIVE_NOT_IN_AREA' || h.status === 'ACTIVE_SCOPE_UNKNOWN'
+        ? statusPill('verify', PERMIT_STATUS_TEXT[h.status])
+        : statusPill('not_valid', PERMIT_STATUS_TEXT[h.status]);
+
+  /** Permit pop-up: the permit details the council holds; the officer decides (as on the systems in use today). */
+  const permitSheet = (d: Extract<Decision, { kind: 'timed_permit' }>) => {
+    const active = d.hits.filter((h) => h.status.startsWith('ACTIVE'));
+    const anyInArea = d.hits.some((h) => h.status === 'ACTIVE_IN_AREA');
+    return decisionSheet({
+      testid: 'permit-sheet',
+      pill: statusPill('verify', d.hits.length === 1 ? 'Permit on record' : `${d.hits.length} permits on record`),
+      title: `${result?.plate ?? ''} holds a permit`,
+      body: html`<p>Exempt only if holding this permit at this location makes the vehicle exempt. If not, continue and the vehicle is timed as usual.</p>
+        <ul class="mt-3 grid gap-3">
+          ${d.hits.map(
+            (h) => html`<li class="rounded-md border border-neutral-200 bg-surface-sunken p-3" data-testid="permit-hit" data-status=${h.status}>
+              <div class="flex flex-wrap items-center gap-2">${plateBadge(h.entry.plate, 'sm')}${permitPill(h)}</div>
+              <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                ${h.entry.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${h.entry.vehicle}</dd>` : nothing}
+                ${h.entry.rpa ? html`<dt class="text-neutral-600">Area</dt><dd>RPA <span class="font-plate">${h.entry.rpa}</span>${list?.type === 'timed' && list.rpa ? html` <span class="text-neutral-600">(here: ${list.rpa})</span>` : nothing}</dd>` : nothing}
+                ${h.entry.streets?.length ? html`<dt class="text-neutral-600">Streets</dt><dd>${h.entry.streets.join(', ')}</dd>` : nothing}
+                ${h.entry.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${h.entry.permitNo}</dd>` : nothing}
+                ${h.entry.label ? html`<dt class="text-neutral-600">Holder</dt><dd>${h.entry.label}</dd>` : nothing}
+                <dt class="text-neutral-600">Valid</dt><dd>${h.entry.validFrom ? formatIsoDate(h.entry.validFrom) : 'any time'} to ${h.entry.validTo ? formatIsoDate(h.entry.validTo) : 'no end date'}</dd>
+                <dt class="text-neutral-600">List</dt><dd>${h.list.name}${h.linked ? ' · linked to this segment' : ''}</dd>
+              </dl>
+              ${h.status.startsWith('ACTIVE')
+                ? html`<button type="button" class=${`${h.status === 'ACTIVE_IN_AREA' ? 'btn-primary' : 'btn-secondary'} mt-3 w-full`} data-testid="permit-exempt" @click=${() => void acceptPermit(h)}>${icon('check')} Exempt here${h.entry.permitNo ? ` — permit #${h.entry.permitNo}` : ''}</button>`
+                : nothing}
+            </li>`,
+          )}
+        </ul>`,
+      actions: html`<button type="button" class=${anyInArea ? 'btn-secondary' : 'btn-primary'} data-testid="permit-continue" @click=${() => void declinePermit()}>
+        ${active.length ? 'Not exempt here — continue' : 'Permit not valid — continue'}</button>`,
+    });
+  };
+
+  /** Known vehicle (tagged after a disability / emergency dismissal) scanned on a new day. */
+  const flagSheet = (d: Extract<Decision, { kind: 'timed_flag_check' }>) =>
+    decisionSheet({
+      testid: 'flag-sheet',
+      pill: statusPill('verify', FLAG_LABEL[d.flag.kind]),
+      title: FLAG_MESSAGE[d.flag.kind],
+      body: html`<p>Tagged ${formatIsoDate(localDateString(d.flag.createdAt))} when an overstay alert was dismissed (${FLAG_LABEL[d.flag.kind].toLowerCase()}).</p>`,
+      actions: html`<button type="button" class="btn-primary flex-col gap-0" data-testid="flag-confirm" @click=${() => void confirmKnownVehicle()}>
+          <span class="flex items-center gap-2">${icon('check')} Confirmed</span>
+          <span class="text-sm font-normal text-white/80">${d.flag.kind === 'disability' ? 'Permit displayed' : 'Authorised vehicle'} · tag kept · no timer</span>
+        </button>
+        <button type="button" class="btn-secondary flex-col gap-0" data-testid="flag-dismiss" @click=${() => void dismissKnownVehicle()}>
+          <span>Dismiss</span>
+          <span class="text-sm font-normal text-neutral-600">Not confirmed at vehicle check · tag removed · timer applied</span>
+        </button>`,
+    });
+
+  /** "Dismiss offence alert": the reasons an officer can dismiss an overstay after checking the vehicle. */
+  const dismissSheet = (r: ResultState) => {
+    const code = r.decision.kind === 'timed_resighting' ? r.decision.observation.restrictionCode : '';
+    // A disability permit or a displayed resident permit never exempts in a statutory restriction.
+    const statutory = isStatutoryRestriction(code);
+    const reasons = DISMISS_REASONS.filter((x) => !statutory || x.reason === 'emergency_vehicle');
+    return decisionSheet({
+      testid: 'dismiss-sheet',
+      pill: statusPill('overstay'),
+      title: 'Dismiss offence alert',
+      onClose: () => { dismissOpen = false; app.update(); },
+      body: html`<p>Choose why the vehicle is not committing an offence. The scan stays in history with the reason.</p>
+        ${statutory ? html`<p class="mt-2 text-alert-strong"><span class="font-plate">${code}</span> is a statutory restriction: disability and resident permits do not exempt here.</p>` : nothing}`,
+      actions: html`${reasons.map(
+        (x) => html`<button type="button" class="btn-secondary h-auto flex-col items-start gap-0 text-left" data-testid=${`dismiss-${x.reason}`} @click=${() => void dismissAlert(x.reason)}>
+          <span>${x.label}</span><span class="text-sm font-normal text-neutral-600">${x.hint}</span>
+        </button>`,
+      )}
+        <button type="button" class="btn-ghost" @click=${() => { dismissOpen = false; app.update(); }}>Cancel</button>`,
+    });
   };
 
   const noCameraPanel = (): TemplateResult => html`${header({ title: list?.name ?? 'Scan', subtitle: 'Live camera unavailable', back: () => app.navigate(`/list/${listId}`) })}

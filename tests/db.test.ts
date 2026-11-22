@@ -15,7 +15,14 @@ import {
   getLists,
   saveDismissed,
   saveScan,
+  dismissOverstay,
+  getFlag,
+  getFlags,
+  deleteFlag,
+  getObservations,
+  getScan,
 } from '../src/lib/db';
+import { applyDismissal } from '../src/lib/dismissal';
 import { newObservation } from '../src/lib/engine';
 import type { DismissedCapture, ScanRecord } from '../src/lib/types';
 import { allow, at, r2P, timed } from './fixtures';
@@ -47,6 +54,23 @@ beforeEach(async () => {
 });
 
 describe('db', () => {
+  it('dismissing an overstay keeps the scan with its reason, closes the timing and tags the plate in one go', async () => {
+    const list = timed();
+    await putList(list);
+    const t = at(2026, 11, 16, 9);
+    const obs = newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: t, instance: { restriction: r2P(), start: t, end: t + 9 * 3600_000 } });
+    const s2 = scan('s2', list.id, t + 7_500_000, 'o1');
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    await saveScan({ ...s2, outcome: 'overstay' }, obs);
+    await dismissOverstay(applyDismissal({ scan: { ...s2, outcome: 'overstay' }, observation: obs, reason: 'disability_permit', at: t + 7_600_000 }));
+    expect((await getScan('s2'))?.alertDismissal?.reason).toBe('disability_permit');
+    expect((await getObservations(list.id))[0]).toMatchObject({ status: 'dismissed', dismissReason: 'disability_permit' });
+    expect(await getActiveObservations(list.id)).toHaveLength(0);
+    expect(await getFlag('ABC123')).toMatchObject({ kind: 'disability', confirmedDay: '2026-11-16' });
+    await deleteFlag('ABC123');
+    expect(await getFlags()).toEqual([]);
+  });
+
   it('persists a scan and its observation atomically', async () => {
     const list = timed();
     await putList(list);

@@ -48,6 +48,12 @@ export interface AllowEntry {
   validFrom: string;
   validTo: string;
   addedAt: number;
+  /** Vehicle description held with the permit, e.g. "White Toyota Corolla". */
+  vehicle?: string;
+  /** Residential parking area the permit applies to, as the issuing council holds it (e.g. "12"). */
+  rpa?: string;
+  /** Streets a street-specific resident permit applies to. */
+  streets?: string[];
 }
 
 export interface AllowList extends BaseList {
@@ -278,10 +284,17 @@ export type ScanOutcome =
   | 'within_allowance' // re-sighting, still inside allowance
   | 'overstay' // re-sighting, allowance (+grace) exceeded
   | 'hot_sighting' // hot list match evidence
-  | 'permit_valid'; // on a linked allow list, valid at capture — sighting recorded, no allowance clock
+  | 'permit_valid' // officer confirmed a permit exempts the vehicle here — sighting recorded, no allowance clock
+  | 'flag_confirmed'; // known disability / emergency vehicle confirmed on check — recorded, no allowance clock
 
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
+  /** Overstay alert dismissed by the officer after checking the vehicle. */
+  alertDismissal?: { reason: DismissReason; at: number };
+  /** Known-vehicle check on this scan: confirmed (tag kept) or not confirmed (tag removed). */
+  flagCheck?: { kind: PlateFlagKind; result: 'confirmed' | 'removed' };
+  /** Why the scan started no clock: the permit the officer accepted, or an earlier dismissal. */
+  exemption?: { by: 'permit'; permitNo: string; listName: string; status: string } | { by: 'dismissed_earlier'; reason: DismissReason };
   amendmentResult?: string;
   amendmentMatches?: string[];
   id: string;
@@ -330,7 +343,30 @@ export interface DismissedCapture {
   createdAt: number;
 }
 
-export type ObservationStatus = 'active' | 'expired' | 'reset';
+/** `dismissed`: an overstay alert the officer dismissed with a reason (see DismissReason). */
+export type ObservationStatus = 'active' | 'expired' | 'reset' | 'dismissed';
+
+/** Why an officer dismissed an overstay alert after checking the vehicle. */
+export type DismissReason = 'disability_permit' | 'emergency_vehicle' | 'permit_displayed';
+
+/** A plate tagged after a disability-permit or emergency-services dismissal. */
+export type PlateFlagKind = 'disability' | 'emergency';
+
+/**
+ * Plate record tag: from the next day on, every scan of this plate on a timed list asks the
+ * officer to check the vehicle (Confirmed keeps the tag, no timer; Dismiss removes it, timer runs).
+ */
+export interface PlateFlag {
+  /** plateKey(plate). */
+  key: string;
+  plate: string;
+  kind: PlateFlagKind;
+  createdAt: number;
+  /** Scan whose dismissal created the tag. */
+  sourceScanId: string;
+  /** Local day ("YYYY-MM-DD") the vehicle was last confirmed; scans that day need no check. */
+  confirmedDay: string;
+}
 
 /**
  * An observation is the "chalk" for one vehicle in one timed segment: it
@@ -357,6 +393,8 @@ export interface Observation {
   overstayFlaggedAt: number | null;
   closedAt: number | null;
   scanCount: number;
+  /** Set when status is `dismissed`. */
+  dismissReason?: DismissReason;
 }
 
 export interface Settings {

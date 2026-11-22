@@ -109,6 +109,9 @@ found are listed on the Import screen.
 | `label` | | `Resident` | |
 | `permit_no` | | `P-1001` | |
 | `valid_from`, `valid_to` | | `2026-07-01` or `01/07/2026` | Inclusive; blank = no limit. |
+| `vehicle` | | `White Toyota Corolla` | Vehicle description held with the permit; shown in the permit pop-up. |
+| `rpa` | | `7` | Residential parking area the permit applies to. |
+| `streets` | | `Gladstone St;Smith St` | Street-specific permits; separate streets with `;`. An area, a street or both may be given: either one matching the segment shows the permit as applying here. |
 
 Link an allow list to timed lists from each timed list's *Edit* screen.
 

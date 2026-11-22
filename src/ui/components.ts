@@ -240,6 +240,33 @@ export function nearMatchSheet(opts: {
   </div>`;
 }
 
+/**
+ * Bottom sheet for a decision the officer must make before the scan is recorded (permit details,
+ * known-vehicle check, dismissing an overstay alert). Same frame as the near-match sheet.
+ */
+export function decisionSheet(opts: {
+  testid: string;
+  pill: TemplateResult;
+  title: string;
+  body: TemplateResult;
+  actions: TemplateResult;
+  onClose?: () => void;
+}): TemplateResult {
+  return html`<div class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="${opts.testid}-title" data-testid=${opts.testid}>
+    <section class="max-h-[90vh] w-full max-w-md overflow-auto rounded-t-xl border border-neutral-200 bg-surface p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-xl sm:rounded-xl sm:pb-4">
+      <div class="flex items-start gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">${opts.pill}</div>
+          <h2 id="${opts.testid}-title" class="mt-2 text-lg font-bold text-neutral-900">${opts.title}</h2>
+        </div>
+        ${opts.onClose ? html`<button type="button" class="btn-ghost min-h-11 px-2" aria-label="Close" @click=${opts.onClose}>${icon('x')}</button>` : nothing}
+      </div>
+      <div class="mt-2 text-sm text-neutral-800">${opts.body}</div>
+      <div class="mt-4 grid gap-3">${opts.actions}</div>
+    </section>
+  </div>`;
+}
+
 /* ─────────────────────────── Layout ─────────────────────────── */
 
 /** App header: Civic Navy chrome (design system §5). Flat — no blur on operational screens. */

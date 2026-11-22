@@ -21,7 +21,11 @@ export async function correctRecord(id: string, input: string, expectedPlate: st
   const eligible = histories.filter(o => o.plate === plate && o.windowEndsAt > at && (!o.closedAt || o.closedAt > at));
   const result = evaluate({at, plate, list, hotLists: lists.filter(l => l.type === 'hot'),
     allowLists: lists.filter(l => l.type === 'allow'), observations: eligible.filter(o => o.startedAt <= at).map(o => ({...o,status:'active'}))});
-  const decision = result.decision;
+  // A permit pop-up cannot be asked again here: a permit applying here keeps the record exempt;
+  // otherwise the timing behind it applies.
+  let decision = result.decision;
+  while (decision.kind === 'timed_permit' || decision.kind === 'timed_flag_check')
+    decision = decision.kind === 'timed_permit' && decision.hits[0]?.status === 'ACTIVE_IN_AREA' ? { kind: 'timed_exempt', hit: decision.hits[0] } : decision.then;
   let target: Observation | undefined;
   if (decision.kind === 'timed_resighting') target = histories.find(o => o.id === decision.observation.id);
   if ((decision.kind === 'timed_new' || decision.kind === 'timed_possible') && list.type === 'timed') {

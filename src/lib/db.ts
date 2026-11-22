@@ -5,6 +5,7 @@ import {
   type DismissedCapture,
   type HotList,
   type Observation,
+  type PlateFlag,
   type PlateList,
   type ScanRecord,
   type Settings,
@@ -12,7 +13,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -29,6 +30,8 @@ interface PlateWatchDB extends DBSchema {
   kv: { key: string; value: unknown };
   /** Version 2: patrol captures dismissed at review (one global list). */
   dismissed: { key: string; value: DismissedCapture; indexes: { 'by-created': number } };
+  /** Version 3: plate record tags (known disability / emergency vehicles), keyed by plate key. */
+  flags: { key: string; value: PlateFlag };
 }
 
 let dbPromise: Promise<IDBPDatabase<PlateWatchDB>> | null = null;
@@ -50,6 +53,9 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
       }
       if (oldVersion < 2) {
         database.createObjectStore('dismissed', { keyPath: 'id' }).createIndex('by-created', 'createdAt');
+      }
+      if (oldVersion < 3) {
+        database.createObjectStore('flags', { keyPath: 'key' });
       }
     },
     blocked() {
@@ -257,6 +263,36 @@ export async function saveSettings(s: Settings): Promise<void> {
   await (await db()).put('kv', s, 'settings');
 }
 
+/* ───────────────────────────── Plate flags ───────────────────────────── */
+
+export async function getFlags(): Promise<PlateFlag[]> {
+  return (await db()).getAll('flags');
+}
+
+export async function getFlag(key: string): Promise<PlateFlag | undefined> {
+  return (await db()).get('flags', key);
+}
+
+export async function putFlag(f: PlateFlag): Promise<void> {
+  await (await db()).put('flags', f);
+}
+
+export async function deleteFlag(key: string): Promise<void> {
+  await (await db()).delete('flags', key);
+}
+
+/**
+ * Overstay alert dismissed after a vehicle check: the scan keeps the reason, the timing closes as
+ * dismissed, and a disability / emergency dismissal tags the plate — all in one transaction.
+ */
+export async function dismissOverstay(args: { scan: ScanRecord; observation: Observation; flag?: PlateFlag }): Promise<void> {
+  const tx = (await db()).transaction(['scans', 'observations', 'flags'], 'readwrite');
+  await tx.objectStore('scans').put(args.scan);
+  await tx.objectStore('observations').put(args.observation);
+  if (args.flag) await tx.objectStore('flags').put(args.flag);
+  await tx.done;
+}
+
 /* ───────────────────────────── Backup ───────────────────────────── */
 
 export async function replaceAll(data: {
@@ -265,10 +301,16 @@ export async function replaceAll(data: {
   scans: ScanRecord[];
   /** Only when the backup includes the Dismissed list; otherwise dismissed captures are untouched. */
   dismissed?: DismissedCapture[];
+  /** Only when the backup includes plate tags; otherwise tags on the device are untouched. */
+  flags?: PlateFlag[];
   merge: boolean;
 }): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed'], 'readwrite');
+  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed', 'flags'], 'readwrite');
+  if (data.flags) {
+    if (!data.merge) await tx.objectStore('flags').clear();
+    for (const f of data.flags) await tx.objectStore('flags').put(f);
+  }
   if (!data.merge) {
     await tx.objectStore('lists').clear();
     await tx.objectStore('scans').clear();

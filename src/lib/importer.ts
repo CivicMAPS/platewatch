@@ -132,8 +132,12 @@ export const CSV_TEMPLATES = {
   },
   allow: {
     fileName: 'platewatch-allow-list-template.csv',
-    header: 'list_name,plate,label,permit_no,valid_from,valid_to',
-    example: ['RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30', 'RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026'].join('\n'),
+    header: 'list_name,plate,label,permit_no,valid_from,valid_to,vehicle,rpa,streets',
+    example: [
+      'RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30,White Toyota Corolla,7,',
+      'RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026,Blue Mazda 3,7,',
+      'Street permits,STR001,Resident,S-310,2026-07-01,2027-06-30,Silver Kia Cerato,,Gladstone St;Smith St',
+    ].join('\n'),
   },
   hot: {
     fileName: 'platewatch-hot-list-template.csv',
@@ -713,6 +717,13 @@ function allowFromCsv(file: string, table: string[][], out: ImportResult): void 
       continue;
     }
     const entry: AllowEntry = { id: uid(), plate, key: plateKey(plate), label: row.label ?? '', permitNo: row.permit_no ?? '', validFrom, validTo, addedAt: Date.now() };
+    // Permit details the council holds: vehicle description, residential area and/or streets.
+    const vehicle = (row.vehicle ?? '').trim();
+    const rpa = (row.rpa ?? '').trim();
+    const streets = (row.streets ?? '').split(/[;|]/).map((x) => x.trim()).filter(Boolean);
+    if (vehicle) entry.vehicle = vehicle;
+    if (rpa) entry.rpa = rpa;
+    if (streets.length) entry.streets = streets;
     const entries = lists.get(row.list_name).list.entries;
     const i = entries.findIndex((e) => e.key === entry.key);
     if (i >= 0) entries[i] = { ...entry, id: entries[i]!.id };

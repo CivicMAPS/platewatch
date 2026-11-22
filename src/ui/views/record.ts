@@ -15,6 +15,7 @@ import type { Observation, PlateList, ScanRecord } from '../../lib/types';
 import type { App, View } from '../app';
 import { banner, header, icon, nearMatchSheet, page, plateBadge, statusPill, UrlBag } from '../components';
 import { outcomeChip } from './listDetail';
+import { DISMISS_LABEL } from '../../lib/dismissal';
 
 /** Timing status; "overdue" matches OVERDUE on the list once allowance + grace has run out. */
 function timingLine(o: Observation): TemplateResult {
@@ -25,6 +26,8 @@ function timingLine(o: Observation): TemplateResult {
     const endedAt = o.allowanceEndsAt + o.graceMinutes * 60_000;
     return html`<p class="text-sm text-neutral-700">${statusPill('overdue')} ${started} · allowance ended <span class="font-plate">${formatClock(endedAt)}</span> (${formatDuration(now - endedAt)} ago). Re-scan the vehicle to record an overstay.</p>`;
   }
+  if (state === 'dismissed')
+    return html`<p class="text-sm text-neutral-700">${statusPill('dismissed', 'Alert dismissed')} ${started}${o.dismissReason ? ` · ${DISMISS_LABEL[o.dismissReason]}` : ''}</p>`;
   const pill = state === 'running' ? statusPill('timing', 'Active') : statusPill('not_in_force', state);
   return html`<p class="text-sm text-neutral-700">${pill} ${started} · allowance ends <span class="font-plate">${formatClock(o.allowanceEndsAt)}</span></p>`;
 }
@@ -171,7 +174,7 @@ export function recordView(params: Record<string, string>, app: App): View {
         })}
         ${page(html`
           <a href=${urls.get(s.image)} target="_blank" rel="noopener"><img src=${urls.get(s.image)} alt="Evidence image" class="w-full rounded-md border border-neutral-200 bg-black" /></a>
-          <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
+          <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome, s)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
           ${draft === null
             ? html`<button type="button" class="btn-secondary mt-3 w-full" @click=${() => { draft = s.plate; draftError = ''; app.update(); }}>${icon('edit')} Edit plate</button>`
             : html`<form class="card mt-3" @submit=${async (event: Event) => { event.preventDefault(); await saveDraft(); }}>
@@ -213,11 +216,11 @@ export function recordView(params: Record<string, string>, app: App): View {
                     (t, i) => html`<li>
                       <a href="#/record/${t.id}" class="flex items-center gap-3 rounded-md p-2 ${t.id === s.id ? 'bg-surface-sunken' : ''}">
                         <img src=${urls.get(t.thumb)} alt="" class="h-12 w-16 rounded-md object-cover" />
-                        <div class="flex-1 text-sm">
+                        <div class="min-w-0 flex-1 text-sm">
                           <p class="font-semibold">Scan ${i + 1} · <span class="font-plate">${formatClock(t.meta.capturedAt)}</span></p>
                           <p class="text-xs text-neutral-600">${i === 0 ? 'First sighting' : `+${formatDuration(t.meta.capturedAt - observation!.startedAt)} after scan 1`}</p>
+                          <div class="mt-1 flex flex-wrap gap-1">${outcomeChip(t.outcome, t)}</div>
                         </div>
-                        ${outcomeChip(t.outcome)}
                       </a>
                     </li>`,
                   )}

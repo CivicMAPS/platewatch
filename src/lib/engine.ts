@@ -2,21 +2,14 @@
  * Pure decision engine. Given a confirmed plate, the list being worked and the
  * current state, decide what happens. No I/O — fully unit tested.
  *
- * Timed list workflow (per the specification):
- *   1. Plate on a linked allow list (valid that day)      → permit valid: no alert and no
- *      allowance clock, but the sighting is recorded as evidence. Checked before any
- *      running clock, so a vehicle with a valid permit is never an overstay.
- *   2. No restriction in force right now                  → not in force, no record
- *   3. Active observation (same restriction period) found → re-sighting: show scan 1 vs
- *      scan 2 with time elapsed; OVERSTAY when elapsed ≥ allowance + grace
- *   4. Otherwise                                          → create scan record and start
- *      the allowance clock for this segment
+ * Timed list workflow: see decideTimed(). Permits, known-vehicle tags and earlier dismissals are
+ * shown to the officer, who decides; nothing here issues or waives an offence on its own.
  * Hot lists are always checked (officer safety), whichever list is selected.
  */
 import { comparePlates, plateKey, type MatchStrength } from './plate';
 import { restrictionInForce, nextRestrictionStart, type RestrictionInstance } from './restriction';
 import { localDateString } from './time';
-import type { AllowEntry, AllowList, HotEntry, HotList, Observation, PlateList, TimedList } from './types';
+import type { AllowEntry, AllowList, DismissReason, HotEntry, HotList, Observation, PlateFlag, PlateList, TimedList } from './types';
 
 export interface HotHit {
   list: HotList;
@@ -29,8 +22,33 @@ export interface AllowHit {
   entry: AllowEntry;
 }
 
+/**
+ * A permit held for the plate, with the reason it does or does not exempt here
+ * (CIVICMAPS-PARK-ARCH-001 §5). The officer decides; the status only informs.
+ */
+export type PermitStatus =
+  | 'ACTIVE_IN_AREA' // valid today and its area or street is this segment's (or on a list linked to it)
+  | 'ACTIVE_NOT_IN_AREA' // valid today, but for another area / street
+  | 'ACTIVE_SCOPE_UNKNOWN' // valid today; no area or street held and its list is not linked here
+  | 'NOT_ACTIVE_EXPIRED'
+  | 'NOT_YET_ACTIVE';
+
+export interface PermitHit extends AllowHit {
+  status: PermitStatus;
+  /** Linked to this segment through the timed list's allow lists. */
+  linked: boolean;
+}
+
 export type Decision =
   | { kind: 'timed_exempt'; hit: AllowHit }
+  /** Permit(s) held for the plate: show the details; the officer accepts (exempt) or continues with `then`. */
+  | { kind: 'timed_permit'; hits: PermitHit[]; then: Decision }
+  /** Tagged disability / emergency vehicle on a new day: Confirmed (no timer) or Dismiss (tag removed, `then`). */
+  | { kind: 'timed_flag_check'; flag: PlateFlag; then: Decision }
+  /** Tagged vehicle already confirmed today: recorded without a timer. */
+  | { kind: 'timed_flag_exempt'; flag: PlateFlag }
+  /** An overstay alert for this plate was dismissed earlier in this restriction period. */
+  | { kind: 'timed_dismissed'; observation: Observation; reason: DismissReason }
   | { kind: 'timed_not_in_force'; next: RestrictionInstance | null }
   | { kind: 'timed_new'; instance: RestrictionInstance }
   | {
@@ -54,6 +72,8 @@ export interface EngineInput {
   allowLists: readonly AllowList[];
   /** Observations for `list` (timed lists only); any status. */
   observations: readonly Observation[];
+  /** Plate record tags (disability / emergency vehicles). */
+  flags?: readonly PlateFlag[];
 }
 
 export interface EngineResult {
@@ -109,12 +129,83 @@ export function resighting(observation: Observation, at: number): Extract<Decisi
   };
 }
 
+/**
+ * Statutory restrictions — loading, bus and taxi zones, no stopping / parking, clearways, works
+ * zones. A disability permit, a displayed resident permit or a known-vehicle tag never exempts
+ * here, so those options are not offered.
+ */
+export function isStatutoryRestriction(code: string): boolean {
+  return /^\s*(LZ|L\/Z|LOADING|BZ|BUS|TZ|TAXI|NS\b|NP\b|NO\s*(STOP|PARK)|CW\b|CLEARWAY|WORKS|MC\b)/i.test(code);
+}
+
+const areaKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(com|copp|[a-z]{2,5})?rpa/, '');
+const STREET_TYPES = /\b(street|st|road|rd|avenue|ave|place|pl|lane|ln|parade|pde|drive|dr|crescent|cres|terrace|tce|boulevard|blvd|highway|hwy|way|close|cl|court|ct)\b\.?/g;
+const streetKey = (v: string) => v.toLowerCase().replace(STREET_TYPES, '').replace(/[^a-z0-9]/g, '');
+
+/** Every permit held for the plate on any allow list (exact plate only), with its status here. */
+export function findPermits(plate: string, list: TimedList, allowLists: readonly AllowList[], at: number): PermitHit[] {
+  const key = plateKey(plate);
+  const today = localDateString(at);
+  const hits: PermitHit[] = [];
+  for (const a of allowLists) {
+    const linked = list.allowListIds.includes(a.id);
+    for (const entry of a.entries) {
+      if (plateKey(entry.plate) !== key) continue;
+      let status: PermitStatus;
+      if (entry.validFrom && today < entry.validFrom) status = 'NOT_YET_ACTIVE';
+      else if (entry.validTo && today > entry.validTo) status = 'NOT_ACTIVE_EXPIRED';
+      else {
+        const streets = (entry.streets ?? []).map(streetKey).filter(Boolean);
+        const hasScope = !!entry.rpa?.trim() || streets.length > 0;
+        // A permit for an area, a street or both: either one matching makes it in area.
+        const inArea = !!entry.rpa?.trim() && !!list.rpa?.trim() && areaKey(entry.rpa) === areaKey(list.rpa);
+        const onStreet = streets.includes(streetKey(list.segment.street));
+        status = inArea || onStreet ? 'ACTIVE_IN_AREA' : hasScope ? 'ACTIVE_NOT_IN_AREA' : linked ? 'ACTIVE_IN_AREA' : 'ACTIVE_SCOPE_UNKNOWN';
+      }
+      hits.push({ list: a, entry, status, linked });
+    }
+  }
+  const rank: Record<PermitStatus, number> = { ACTIVE_IN_AREA: 0, ACTIVE_SCOPE_UNKNOWN: 1, ACTIVE_NOT_IN_AREA: 2, NOT_YET_ACTIVE: 3, NOT_ACTIVE_EXPIRED: 4 };
+  return hits.sort((a, b) => rank[a.status] - rank[b.status]);
+}
+
+/** Restriction code a timing decision is about (for the statutory check). */
+function decisionCode(d: Decision): string | null {
+  if (d.kind === 'timed_new' || d.kind === 'timed_possible') return d.instance.restriction.code;
+  if (d.kind === 'timed_resighting') return d.observation.restrictionCode;
+  return null;
+}
+
+/**
+ * Timed lists, in order:
+ *   1. No running clock and no restriction in force          → not in force (nothing to check)
+ *   2. Overstay alert dismissed earlier this restriction period → exempt, recorded
+ *   3. Tagged vehicle (not in a statutory restriction)          → confirmed today: exempt; else check
+ *   4. Permit(s) held for the plate                             → show details; officer decides
+ *   5. Running clock → re-sighting; otherwise new sighting
+ */
 function decideTimed(input: EngineInput, list: TimedList, expireIds: Set<string>): Decision {
   const { at, plate } = input;
-  const linked = input.allowLists.filter((a) => list.allowListIds.includes(a.id));
-  const allowHit = findAllowHit(plate, linked, at);
-  if (allowHit) return { kind: 'timed_exempt', hit: allowHit };
+  const key = plateKey(plate);
+  const rest = decideTiming(input, list, expireIds);
+  if (rest.kind === 'timed_not_in_force') return rest;
 
+  const dismissed = input.observations
+    .filter((o) => o.listId === list.id && o.status === 'dismissed' && o.key === key && o.windowEndsAt > at && o.startedAt <= at)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (dismissed) return { kind: 'timed_dismissed', observation: dismissed, reason: dismissed.dismissReason ?? 'permit_displayed' };
+
+  const statutory = isStatutoryRestriction(decisionCode(rest) ?? '');
+  const permits = statutory ? [] : findPermits(plate, list, input.allowLists, at);
+  const afterFlag: Decision = permits.length ? { kind: 'timed_permit', hits: permits, then: rest } : rest;
+
+  const flag = statutory ? undefined : input.flags?.find((f) => f.key === key);
+  if (flag) return flag.confirmedDay === localDateString(at) ? { kind: 'timed_flag_exempt', flag } : { kind: 'timed_flag_check', flag, then: afterFlag };
+  return afterFlag;
+}
+
+function decideTiming(input: EngineInput, list: TimedList, expireIds: Set<string>): Decision {
+  const { at, plate } = input;
   const active = input.observations.filter(
     (o) => o.listId === list.id && o.status === 'active' && !expireIds.has(o.id),
   );
@@ -193,4 +284,11 @@ export function newObservation(args: {
     closedAt: null,
     scanCount: 1,
   };
+}
+
+/** The timing decision behind a permit pop-up or known-vehicle check (what "continue" applies). */
+export function timingDecision(d: Decision): Decision {
+  let x = d;
+  while (x.kind === 'timed_permit' || x.kind === 'timed_flag_check') x = x.then;
+  return x;
 }

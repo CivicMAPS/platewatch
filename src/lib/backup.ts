@@ -1,9 +1,9 @@
 /** JSON backup / restore. Images are embedded as base64 data URLs when included. */
-import { getAllObservations, getAllScans, getDismissed, getLists, replaceAll } from './db';
+import { getAllObservations, getAllScans, getDismissed, getFlags, getLists, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
 import { normalisePayment, prunePaidBy } from './payment';
-import type { DismissedCapture, Observation, PaidBy, PaymentAreas, PlateList, ScanRecord } from './types';
+import type { DismissedCapture, Observation, PaidBy, PaymentAreas, PlateFlag, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
 export const BACKUP_VERSION = 1;
@@ -23,6 +23,8 @@ export interface BackupFile {
   /** Optional: patrol captures dismissed at review (absent in backups made before 21 Nov 2026). */
   includesDismissed?: boolean;
   dismissed?: SerialDismissed[];
+  /** Plate record tags (known disability / emergency vehicles); exported with scan records. */
+  flags?: PlateFlag[];
 }
 
 export interface BackupOptions {
@@ -63,6 +65,7 @@ export async function createBackup(includeScans: boolean, appVersion: string, op
     scans,
     includesDismissed: !!options.includeDismissed,
     dismissed,
+    ...(includeScans ? { flags: await getFlags() } : {}),
   };
   return new Blob([JSON.stringify(file)], { type: 'application/json' });
 }
@@ -103,6 +106,7 @@ export function parseBackup(text: string): {
   scans: ScanRecord[];
   /** Undefined when the backup does not include the Dismissed list. */
   dismissed?: DismissedCapture[];
+  flags?: PlateFlag[];
 } {
   let raw: unknown;
   try {
@@ -123,7 +127,14 @@ export function parseBackup(text: string): {
     if ((l.type === 'allow' || l.type === 'hot') && Array.isArray(l.entries)) {
       l.entries = (l.entries as Record<string, unknown>[])
         .filter((e) => isObj(e) && typeof e.plate === 'string')
-        .map((e) => ({ ...e, key: plateKey(str(e.plate)) }));
+        .map((e) => {
+          const out: Record<string, unknown> = { ...e, key: plateKey(str(e.plate)) };
+          // Permit details: strings only; streets a list of strings.
+          for (const k of ['vehicle', 'rpa'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
+          if (Array.isArray(out.streets)) out.streets = (out.streets as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim());
+          if (!Array.isArray(out.streets) || !(out.streets as string[]).length) delete out.streets;
+          return out;
+        });
     }
     if (l.type === 'timed' && (!isObj(l.segment) || !Array.isArray(l.restrictions))) continue;
     if (l.type === 'timed') {
@@ -198,7 +209,19 @@ export function parseBackup(text: string): {
       });
     }
   }
-  return { lists, observations, scans, dismissed };
+  const flags = Array.isArray(raw.flags)
+    ? (raw.flags as unknown[])
+        .filter((f): f is Record<string, unknown> => isObj(f) && typeof f.plate === 'string' && (f.kind === 'disability' || f.kind === 'emergency'))
+        .map((f): PlateFlag => ({
+          key: plateKey(str(f.plate)),
+          plate: str(f.plate),
+          kind: f.kind as PlateFlag['kind'],
+          createdAt: typeof f.createdAt === 'number' ? f.createdAt : 0,
+          sourceScanId: str(f.sourceScanId),
+          confirmedDay: typeof f.confirmedDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f.confirmedDay) ? f.confirmedDay : '',
+        }))
+    : undefined;
+  return { lists, observations, scans, dismissed, ...(flags ? { flags } : {}) };
 }
 
 export async function restoreBackup(text: string, merge: boolean): Promise<{ lists: number; scans: number; dismissed: number }> {

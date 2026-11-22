@@ -1,7 +1,7 @@
 import { patrol, hasPatrol, frameUrlFor, type Sighting } from '../../lib/patrol';
 import { deviceTimeZone, toLocalIso } from '../../lib/time';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { paymentLines } from '../../lib/payment';
+import { isPaidBy, paymentFor, paymentLines } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { CameraController, CameraError, fileToCanvas, type CameraCapabilities } from '../../lib/camera';
@@ -29,7 +29,7 @@ import { formatClock, formatDateTime, formatDuration, formatMinutes } from '../.
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
-import type { GeoFix } from '../../lib/types';
+import type { GeoFix, TimedRestriction } from '../../lib/types';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -63,6 +63,13 @@ interface ResultState {
   possibleFirsts: Map<string, ScanRecord>;
 }
 
+
+/** The restriction a timed decision is about: the one in force for a new sighting, or the observation's. */
+function restrictionFor(l: TimedList, d: Decision): TimedRestriction | undefined {
+  if (d.kind === 'timed_new' || d.kind === 'timed_possible') return d.instance.restriction;
+  if (d.kind === 'timed_resighting') return l.restrictions.find((r) => r.id === d.observation.restrictionId);
+  return undefined;
+}
 
 export function scanView(params: Record<string, string>, app: App): View {
   const listId = params.id ?? '';
@@ -514,6 +521,8 @@ export function scanView(params: Record<string, string>, app: App): View {
         if (res.decision.kind === 'allow_none') res.decision.possible = [];
       }
       await expireObservations(res.expireObservationIds, at);
+      // Payment to check, and to keep with the evidence: the numbers tied to the restriction in force.
+      if (l.type === 'timed' && l.payment) pending.meta.payment = paymentFor(l.payment, restrictionFor(l, res.decision));
 
       let saved: ScanRecord | null = null;
       let comparison: Comparison | null = null;
@@ -912,6 +921,7 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   const resultPanel = (): TemplateResult => {
     const r = result!;
+    const enforced = list?.type === 'timed' ? restrictionFor(list, r.decision) : undefined;
     return html`<div class="mx-auto max-w-xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-32">
       <div class="mb-3 flex items-center justify-between">
         <h1 class="text-lg font-bold">Result</h1>
@@ -921,7 +931,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         ${r.hotHits.length ? hotAlert(r.hotHits) : nothing}
         ${decisionPanel(r)}
         ${['timed_new','timed_resighting'].includes(r.decision.kind) && paymentLines(pending?.meta.payment).length
-          ? html`<section class="card"><h2>Check payment before enforcing</h2>${paymentLines(pending?.meta.payment).map(line => html`<p>${line}</p>`)}</section>` : nothing}
+          ? html`<section class="card" data-testid="payment-check"><h2>Check payment before enforcing${isPaidBy(enforced) ? ` · ${enforced.code}` : ''}</h2>${paymentLines(pending?.meta.payment).map(line => html`<p>${line}</p>`)}</section>` : nothing}
         ${r.saved
           ? html`<p class="text-center text-xs text-slate-500">Saved · SHA-256 ${r.saved.sha256.slice(0, 16)}… · <a class="underline" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}

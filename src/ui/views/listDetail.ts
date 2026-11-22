@@ -1,4 +1,4 @@
-import { paymentLines } from '../../lib/payment';
+import { paymentLines, restrictionPaymentLabel } from '../../lib/payment';
 import { zoneLabel } from '../../lib/listIndex';
 import { formatBays } from '../../lib/importer';
 import { html, nothing, type TemplateResult } from 'lit-html';
@@ -130,11 +130,12 @@ export function listDetailView(params: Record<string, string>, app: App): View {
               </ul>`
           : nothing}
         ${!l.restrictions.length ? html`<p class="mt-2 text-sm text-amber-300" data-testid="pending-note">Imported without restrictions. Add them with Edit before scanning here.</p>` : nothing}
-        <ul class="mt-3 grid gap-1 text-sm">
+        <ul class="mt-3 grid gap-1 text-sm" data-testid="restriction-lines">
           ${l.restrictions.map(
-            (r) => html`<li class="flex items-center gap-2">
+            (r) => html`<li class="flex flex-wrap items-center gap-x-2">
               <span class=${inst?.restriction.id === r.id ? 'text-emerald-300' : 'text-slate-300'}>${describeRestriction(r)}${r.graceMinutes ? ` (+${r.graceMinutes}m grace)` : ''}</span>
               ${r.description ? html`<span class="text-slate-500">— ${r.description}</span>` : nothing}
+              ${restrictionPaymentLabel(l.payment, r) ? html`<span class="text-xs text-brand-200" data-testid="restriction-paid-by">· ${restrictionPaymentLabel(l.payment, r)}</span>` : nothing}
             </li>`,
           )}
         </ul>

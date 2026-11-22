@@ -20,6 +20,7 @@ import {
 } from '../src/lib/kerbsideRelease';
 import { areaDatasetToRelease, councilCode, listsToRelease, releaseToDrafts } from '../src/lib/releaseAdapters';
 import type { TimedList } from '../src/lib/types';
+import { timed as timedFixture } from './fixtures';
 import { zipStore } from '../src/lib/zip';
 
 const readJson = (path: string) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'));
@@ -330,5 +331,69 @@ describe('Zones 9 and 9A → one release per zone', () => {
     expect(releases).toHaveLength(1);
     expect(releases[0]!.release[0]!.release_id).toBe('copp-patrol-area-10-v1');
     expect(releases[0]).toEqual(area10.release);
+  });
+});
+
+describe('payment numbers tied to rules, and meters', () => {
+  // Gladstone St (north), Boundary St – Montague St: one PayStay zone per restriction, several meters per zone.
+  const base = timedFixture();
+  const r = (id: string, code: string, minutes: number, zone: string, description = 'Ticket') => ({ ...base.restrictions[0]!, id, code, limitMinutes: minutes, description, days: [1, 2, 3, 4, 5] as const, paidBy: { easyPark: [], payStay: [zone] } });
+  const gladstone: TimedList = {
+    ...base,
+    segment: { street: 'Gladstone Street', fromStreet: 'Boundary Street', toStreet: 'Montague Street', side: 'north', suburb: 'South Melbourne' },
+    patrolZone: '10',
+    restrictions: [r('a', '1P', 60, '33883296'), r('b', '4P', 240, '33883294'), r('c', '2P', 120, '33883292', '')].map((x) => ({ ...x, days: [...x.days] })),
+    payment: {
+      easyPark: [],
+      payStay: [{ zone: '33883296' }, { zone: '33883294' }, { zone: '33883292' }],
+      meters: [
+        { id: 'GLP1', easyPark: [], payStay: ['33883296'] },
+        { id: 'GLP2', easyPark: [], payStay: ['33883294'] },
+        { id: 'GLP4', easyPark: [], payStay: ['33883296'] },
+        { id: 'GLP6', easyPark: [], payStay: ['33883292'] },
+        { id: 'GLP9', easyPark: [], payStay: [] },
+      ],
+    },
+  };
+  const release = listsToRelease([gladstone], { municipality: 'City of Port Phillip', timezone: 'Australia/Melbourne', generatedAt: '2026-11-22T00:00:00Z' });
+
+  it('ties each rule to its provider areas and records each meter once, with what it serves', () => {
+    valid(release);
+    const zoneOf = (id: string) => release.provider_areas.find((p) => p.provider_area_id === id)!.area_code;
+    const ruleCode = (id: string) => release.rules.find((x) => x.rule_id === id)!.sign_code;
+    expect(release.rule_assignments.map((a) => [ruleCode(a.rule_id), a.provider_area_ids.map(zoneOf)])).toEqual([
+      ['1P', ['33883296']],
+      ['4P', ['33883294']],
+      ['2P', ['33883292']],
+    ]);
+    expect(release.meters.map((m) => [m.meter_id, m.code])).toEqual([
+      ['copp-meter-glp1', 'GLP1'],
+      ['copp-meter-glp2', 'GLP2'],
+      ['copp-meter-glp4', 'GLP4'],
+      ['copp-meter-glp6', 'GLP6'],
+      ['copp-meter-glp9', 'GLP9'],
+    ]);
+    const served = release.meter_assignments.map((a) => [release.meters.find((m) => m.meter_id === a.meter_id)!.code, a.provider_area_id && zoneOf(a.provider_area_id)]);
+    expect(served).toEqual([['GLP1', '33883296'], ['GLP2', '33883294'], ['GLP4', '33883296'], ['GLP6', '33883292'], ['GLP9', null]]);
+  });
+
+  it('comes back on a device with the same payment numbers, meters and paid-by', () => {
+    const [d] = releaseToDrafts(release).drafts;
+    expect(d!.list.payment).toEqual(gladstone.payment);
+    expect(d!.list.restrictions.map((x) => [x.code, x.paidBy])).toEqual(gladstone.restrictions.map((x) => [x.code, x.paidBy]));
+  });
+
+  it('rejects a rule or meter tied to a provider area that is not on its extent', () => {
+    const bad = structuredClone(release);
+    bad.provider_area_assignments = bad.provider_area_assignments.filter((a) => !a.provider_area_id.endsWith('33883292'));
+    const errs = validateRelease(bad).map((e) => e.path);
+    expect(errs).toEqual(expect.arrayContaining(['rule_assignments[2].provider_area_ids', 'meter_assignments[3].provider_area_id']));
+  });
+
+  it('relinks meter keys with the rest; the printed code stays', () => {
+    const linked = relinkRelease(release, '482771930');
+    valid(linked);
+    expect(linked.meters[0]).toMatchObject({ meter_id: '482771930-meter-glp1', code: 'GLP1' });
+    expect(linked.rule_assignments[0]!.provider_area_ids[0]).toMatch(/^482771930-paystay-/);
   });
 });

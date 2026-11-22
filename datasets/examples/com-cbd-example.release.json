@@ -429,13 +429,14 @@
       "assignment_id": "com-20055:south:bay-58-bay-72>com-easypark-7514",
       "provider_area_id": "com-easypark-7514",
       "extent_id": "com-20055:south:bay-58-bay-72",
-      "meter_id": null,
       "valid_from": null,
       "valid_to": null,
       "source_id": null,
       "verification": "unverified"
     }
   ],
+  "meters": [],
+  "meter_assignments": [],
   "rules": [
     {
       "rule_id": "com-rule-8f4b99f4",
@@ -505,6 +506,7 @@
       "rule_id": "com-rule-8f4b99f4",
       "extent_id": "com-20055:north:all",
       "grace_minutes": null,
+      "provider_area_ids": [],
       "valid_from": null,
       "valid_to": null,
       "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
@@ -516,6 +518,7 @@
       "rule_id": "com-rule-d13147b9",
       "extent_id": "com-20055:south:bay-58-bay-72",
       "grace_minutes": null,
+      "provider_area_ids": [],
       "valid_from": null,
       "valid_to": null,
       "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
@@ -527,6 +530,7 @@
       "rule_id": "com-rule-82826649",
       "extent_id": "com-20055:south:bay-58-bay-72",
       "grace_minutes": null,
+      "provider_area_ids": [],
       "valid_from": null,
       "valid_to": null,
       "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",

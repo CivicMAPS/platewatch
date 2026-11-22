@@ -202,7 +202,30 @@ export interface ProviderAreaAssignmentRow {
   assignment_id: string;
   provider_area_id: string;
   extent_id: string;
-  meter_id: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  source_id: string | null;
+  verification: Verification;
+}
+
+/** A parking meter, as printed on it (e.g. GLP1). */
+export interface MeterRow {
+  meter_id: string;
+  code: string;
+  lat: number | null;
+  lng: number | null;
+  notes: string | null;
+}
+
+/**
+ * A meter serving an extent: the whole extent (and its parking area) when provider_area_id is
+ * null, otherwise that EasyPark or PayStay area on the extent. One meter can serve several areas.
+ */
+export interface MeterAssignmentRow {
+  assignment_id: string;
+  meter_id: string;
+  extent_id: string;
+  provider_area_id: string | null;
   valid_from: string | null;
   valid_to: string | null;
   source_id: string | null;
@@ -229,6 +252,8 @@ export interface RuleAssignmentRow {
   rule_id: string;
   extent_id: string;
   grace_minutes: number | null;
+  /** The extent's provider areas (EasyPark, PayStay) that pay for this rule here; [] when not tied. */
+  provider_area_ids: string[];
   valid_from: string | null;
   valid_to: string | null;
   source_id: string | null;
@@ -250,6 +275,8 @@ export interface KerbsideRelease {
   zone_assignments: ZoneAssignmentRow[];
   provider_areas: ProviderAreaRow[];
   provider_area_assignments: ProviderAreaAssignmentRow[];
+  meters: MeterRow[];
+  meter_assignments: MeterAssignmentRow[];
   rules: RuleRow[];
   rule_assignments: RuleAssignmentRow[];
 }
@@ -266,9 +293,11 @@ export const TABLES = {
   zones: ['zone_id', 'scheme_id', 'code', 'name'],
   zone_assignments: ['assignment_id', 'zone_id', 'extent_id', 'valid_from', 'valid_to', 'source_id', 'verification'],
   provider_areas: ['provider_area_id', 'provider', 'area_code', 'account', 'name'],
-  provider_area_assignments: ['assignment_id', 'provider_area_id', 'extent_id', 'meter_id', 'valid_from', 'valid_to', 'source_id', 'verification'],
+  provider_area_assignments: ['assignment_id', 'provider_area_id', 'extent_id', 'valid_from', 'valid_to', 'source_id', 'verification'],
+  meters: ['meter_id', 'code', 'lat', 'lng', 'notes'],
+  meter_assignments: ['assignment_id', 'meter_id', 'extent_id', 'provider_area_id', 'valid_from', 'valid_to', 'source_id', 'verification'],
   rules: ['rule_id', 'type', 'sign_code', 'max_stay_minutes', 'days', 'all_day', 'start', 'end', 'public_holidays', 'exempt_zone_ids', 'exceptions', 'description'],
-  rule_assignments: ['assignment_id', 'rule_id', 'extent_id', 'grace_minutes', 'valid_from', 'valid_to', 'source_id', 'source_sign_id', 'verification'],
+  rule_assignments: ['assignment_id', 'rule_id', 'extent_id', 'grace_minutes', 'provider_area_ids', 'valid_from', 'valid_to', 'source_id', 'source_sign_id', 'verification'],
 } as const;
 export type TableName = keyof typeof TABLES;
 export const TABLE_NAMES = Object.keys(TABLES) as TableName[];
@@ -305,6 +334,7 @@ export const ids = {
   scheme: (owner: string, kind: ZoneKind) => `${owner}-${kind.replace('_', '-')}`,
   zone: (owner: string, kind: ZoneKind, code: string) => `${owner}-${kind.replace('_', '-')}-${slug(code) || code}`,
   providerArea: (owner: string, provider: Provider, code: string) => `${owner}-${provider}-${slug(code)}`,
+  meter: (owner: string, code: string) => `${owner}-meter-${slug(code)}`,
   source: (owner: string, name: string) => `${owner}-src-${slug(name)}`,
   rule: (owner: string, r: Omit<RuleRow, 'rule_id'>) => `${owner}-rule-${hash(JSON.stringify(r))}`,
   assignment: (extentId: string, targetId: string) => `${extentId}>${targetId}`,
@@ -361,6 +391,8 @@ export function emptyRelease(meta: Omit<ReleaseRow, 'release_id' | 'kind' | 'sta
     zone_assignments: [],
     provider_areas: [],
     provider_area_assignments: [],
+    meters: [],
+    meter_assignments: [],
     rules: [],
     rule_assignments: [],
   };
@@ -505,13 +537,36 @@ export class ReleaseBuilder {
     return zoneId;
   }
 
-  providerArea(extentId: string, provider: Provider, code: string, a: Partial<Pick<ProviderAreaAssignmentRow, 'meter_id' | 'valid_from' | 'valid_to' | 'source_id' | 'verification'>> = {}): string {
+  providerArea(extentId: string, provider: Provider, code: string, a: Partial<Pick<ProviderAreaAssignmentRow, 'valid_from' | 'valid_to' | 'source_id' | 'verification'>> = {}): string {
     const id = this.add('provider_areas', { provider_area_id: ids.providerArea(this.owner, provider, code), provider, area_code: code, account: null, name: null });
     this.add('provider_area_assignments', {
       assignment_id: ids.assignment(extentId, id),
       provider_area_id: id,
       extent_id: extentId,
-      meter_id: a.meter_id ?? null,
+      valid_from: a.valid_from ?? null,
+      valid_to: a.valid_to ?? null,
+      source_id: a.source_id ?? null,
+      verification: a.verification ?? 'unverified',
+    });
+    return id;
+  }
+
+  /**
+   * A meter (defined once by its printed code) serving an extent: the whole extent when
+   * providerAreaId is null, otherwise that provider area, which must be on the extent.
+   */
+  meter(
+    extentId: string,
+    code: string,
+    providerAreaId: string | null = null,
+    a: Partial<Pick<MeterRow, 'lat' | 'lng' | 'notes'> & Pick<MeterAssignmentRow, 'valid_from' | 'valid_to' | 'source_id' | 'verification'>> = {},
+  ): string {
+    const id = this.add('meters', { meter_id: ids.meter(this.owner, code), code: code.trim(), lat: a.lat ?? null, lng: a.lng ?? null, notes: a.notes ?? null });
+    this.add('meter_assignments', {
+      assignment_id: providerAreaId ? `${ids.assignment(extentId, id)}>${providerAreaId}` : ids.assignment(extentId, id),
+      meter_id: id,
+      extent_id: extentId,
+      provider_area_id: providerAreaId,
       valid_from: a.valid_from ?? null,
       valid_to: a.valid_to ?? null,
       source_id: a.source_id ?? null,
@@ -524,7 +579,7 @@ export class ReleaseBuilder {
   rule(
     extentId: string,
     rule: Pick<RuleRow, 'type' | 'days'> & Partial<Omit<RuleRow, 'rule_id' | 'type' | 'days'>>,
-    a: Partial<Pick<RuleAssignmentRow, 'grace_minutes' | 'valid_from' | 'valid_to' | 'source_id' | 'source_sign_id' | 'verification'>> = {},
+    a: Partial<Pick<RuleAssignmentRow, 'grace_minutes' | 'provider_area_ids' | 'valid_from' | 'valid_to' | 'source_id' | 'source_sign_id' | 'verification'>> = {},
   ): string {
     const allDay = rule.all_day ?? !(rule.start && rule.end);
     const content: Omit<RuleRow, 'rule_id'> = {
@@ -546,6 +601,7 @@ export class ReleaseBuilder {
       rule_id: id,
       extent_id: extentId,
       grace_minutes: a.grace_minutes ?? null,
+      provider_area_ids: [...new Set(a.provider_area_ids ?? [])],
       valid_from: a.valid_from ?? null,
       valid_to: a.valid_to ?? null,
       source_id: a.source_id ?? null,
@@ -569,7 +625,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const HHMM = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Keys holding a council's own values, never rewritten by relinking and not owner-prefixed. */
-const NOT_OWNED = new Set(['display_id', 'external_id', 'asset_id', 'meter_id', 'source_sign_id', 'linking_id', 'dataset_id']);
+const NOT_OWNED = new Set(['display_id', 'external_id', 'asset_id', 'source_sign_id', 'linking_id', 'dataset_id']);
 
 /**
  * Checks the fixed structure (exact keys on every record), vocabularies, references between
@@ -711,6 +767,31 @@ export function validateRelease(input: unknown): ReleaseError[] {
     date(p, 'valid_to', r.valid_to);
     oneOf(p, 'verification', r.verification, VERIFICATION);
   }
+  // Which provider areas each extent has: a meter or rule may only be tied to those.
+  const areasOn = new Map<string, Set<string>>();
+  for (const [r] of rows('provider_area_assignments')) {
+    const set = areasOn.get(String(r.extent_id)) ?? new Set<string>();
+    set.add(String(r.provider_area_id));
+    areasOn.set(String(r.extent_id), set);
+  }
+  const onExtent = (p: string, field: string, extentId: unknown, areaId: unknown) => {
+    if (typeof areaId === 'string' && keyIndex.get('provider_areas')!.has(areaId) && !areasOn.get(String(extentId))?.has(areaId))
+      err(`${p}.${field}`, `"${areaId}" is not assigned to extent "${String(extentId)}" in provider_area_assignments`);
+  };
+  for (const [r, p] of rows('meters')) {
+    if (typeof r.code !== 'string' || !r.code) err(`${p}.code`, 'is required, as printed on the meter');
+    if ((r.lat === null) !== (r.lng === null) || (typeof r.lat === 'number' && (Math.abs(r.lat) > 90 || Math.abs(r.lng as number) > 180))) err(p, 'lat/lng must both be null or WGS84 degrees');
+  }
+  for (const [r, p] of rows('meter_assignments')) {
+    ref(p, 'meter_id', r.meter_id, 'meters');
+    ref(p, 'extent_id', r.extent_id, 'extents');
+    ref(p, 'provider_area_id', r.provider_area_id, 'provider_areas', true);
+    onExtent(p, 'provider_area_id', r.extent_id, r.provider_area_id);
+    ref(p, 'source_id', r.source_id, 'sources', true);
+    date(p, 'valid_from', r.valid_from);
+    date(p, 'valid_to', r.valid_to);
+    oneOf(p, 'verification', r.verification, VERIFICATION);
+  }
   for (const [r, p] of rows('rules')) {
     oneOf(p, 'type', r.type, RULE_TYPES);
     if (!Array.isArray(r.days) || !r.days.length || r.days.some((d) => !DAYS.includes(d as Day))) err(`${p}.days`, 'must list days as mon…sun');
@@ -725,6 +806,12 @@ export function validateRelease(input: unknown): ReleaseError[] {
     ref(p, 'extent_id', r.extent_id, 'extents');
     ref(p, 'source_id', r.source_id, 'sources', true);
     if (r.grace_minutes !== null && !(Number.isInteger(r.grace_minutes) && (r.grace_minutes as number) >= 0 && (r.grace_minutes as number) <= 120)) err(`${p}.grace_minutes`, 'must be null or 0–120');
+    if (!Array.isArray(r.provider_area_ids)) err(`${p}.provider_area_ids`, 'must be a list ([] when not tied to a payment number)');
+    else
+      for (const a of r.provider_area_ids) {
+        ref(p, 'provider_area_ids', a, 'provider_areas');
+        onExtent(p, 'provider_area_ids', r.extent_id, a);
+      }
     date(p, 'valid_from', r.valid_from);
     date(p, 'valid_to', r.valid_to);
     oneOf(p, 'verification', r.verification, VERIFICATION);
@@ -737,7 +824,7 @@ export function validateRelease(input: unknown): ReleaseError[] {
 /**
  * Swap the owner prefix of every key from the council code (development) to the council's
  * linking ID once it is onboarded: com-20567 → 482771930-20567. display_id keeps the council
- * code (users still see com-20567); council values (asset, external, meter and sign IDs) are not
+ * code (users still see com-20567); council values (asset, external and sign IDs, meter codes) are not
  * touched. Returns a new release.
  */
 export function relinkRelease(r: KerbsideRelease, linkingId: string): KerbsideRelease {
@@ -784,6 +871,7 @@ export function splitByZone(r: KerbsideRelease, kind: ZoneKind = 'patrol'): { re
     const za = r.zone_assignments.filter((a) => ext.has(a.extent_id));
     const pa = r.provider_area_assignments.filter((a) => ext.has(a.extent_id));
     const ra = r.rule_assignments.filter((a) => ext.has(a.extent_id));
+    const ma = r.meter_assignments.filter((a) => ext.has(a.extent_id));
     const rules = r.rules.filter((x) => ra.some((a) => a.rule_id === x.rule_id));
     const zoneRefs = new Set([...za.map((a) => a.zone_id), ...rules.flatMap((x) => x.exempt_zone_ids)]);
     const keptZones = r.zones.filter((z) => zoneRefs.has(z.zone_id));
@@ -807,6 +895,8 @@ export function splitByZone(r: KerbsideRelease, kind: ZoneKind = 'patrol'): { re
         zone_assignments: za,
         provider_areas: r.provider_areas.filter((x) => pa.some((a) => a.provider_area_id === x.provider_area_id)),
         provider_area_assignments: pa,
+        meters: r.meters.filter((x) => ma.some((a) => a.meter_id === x.meter_id)),
+        meter_assignments: ma,
         rules,
         rule_assignments: ra,
       } as KerbsideRelease,

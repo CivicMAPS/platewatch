@@ -72,6 +72,7 @@ function fields(l: TimedList): Field[] {
     add('paystay', 'PayStay zone', p.zone);
     add('meter', 'Meter ID', p.meter);
   }
+  for (const m of l.payment?.meters ?? []) add('meter', 'Meter ID', m.id);
   return f;
 }
 

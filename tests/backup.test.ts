@@ -11,7 +11,7 @@ describe('backup import', () => {
   it('drops malformed paid-parking data instead of crashing the views', () => {
     const bad = { ...timed(), payment: { easyPark: 'x', payStay: [{ zone: 42 }, null, { zone: '00042', meter: 7 }] } };
     const [list] = parseBackup(file([bad])).lists;
-    expect(list?.type === 'timed' && list.payment).toEqual({ easyPark: [], payStay: [{ zone: '00042', meter: '' }] });
+    expect(list?.type === 'timed' && list.payment).toEqual({ easyPark: [], payStay: [{ zone: '00042' }] });
   });
 
   it('keeps sub-segment bounds, road segment ID and bays, and drops malformed ones', () => {
@@ -29,10 +29,26 @@ describe('backup import', () => {
     expect(bad?.type === 'timed' && bad.payment).toEqual({ easyPark: [], payStay: [] });
   });
 
-  it('keeps valid paid-parking data', () => {
-    const payment = { easyPark: ['010'], payStay: [{ zone: '020', meter: '03' }] };
+  it('keeps valid paid-parking data, moving a meter stored with its zone (older backups) into meters', () => {
+    const payment = { easyPark: ['010'], payStay: [{ zone: '020', meter: '03' }, { zone: '020', meter: '04' }] };
     const [list] = parseBackup(file([{ ...timed(), payment }])).lists;
-    expect(list?.type === 'timed' && list.payment).toEqual(payment);
+    expect(list?.type === 'timed' && list.payment).toEqual({
+      easyPark: ['010'],
+      payStay: [{ zone: '020' }],
+      meters: [{ id: '03', easyPark: [], payStay: ['020'] }, { id: '04', easyPark: [], payStay: ['020'] }],
+    });
+  });
+
+  it('keeps meters and restriction payment links, dropping links to numbers the list does not have', () => {
+    const payment = { easyPark: [], payStay: [{ zone: '33883296' }, { zone: '33883294' }], meters: [{ id: 'GLP1', easyPark: [], payStay: ['33883296'] }, { id: 'SEG', easyPark: 5, payStay: null }, { id: 3 }] };
+    const restrictions = [
+      { ...timed().restrictions[0]!, id: 'a', paidBy: { easyPark: ['999'], payStay: ['33883296', 7] } },
+      { ...timed().restrictions[0]!, id: 'b', paidBy: { easyPark: ['999'], payStay: [] } },
+    ];
+    const [list] = parseBackup(file([{ ...timed(), payment, restrictions }])).lists;
+    if (list?.type !== 'timed') throw new Error('timed list expected');
+    expect(list.payment?.meters).toEqual([{ id: 'GLP1', easyPark: [], payStay: ['33883296'] }, { id: 'SEG', easyPark: [], payStay: [] }]);
+    expect(list.restrictions.map((r) => r.paidBy)).toEqual([{ easyPark: [], payStay: ['33883296'] }, undefined]);
   });
 
   it('treats a missing payment as none and a non-array allowListIds as empty', () => {

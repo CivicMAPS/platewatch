@@ -14,7 +14,7 @@ data in any format is adapted to them.
 
 ## Principles
 
-1. **Flat tables of identical records.** A release is 13 tables. Every record in a table has
+1. **Flat tables of identical records.** A release is 15 tables. Every record in a table has
    exactly the same keys, in the same order, with `null` (or `[]`) where a value is unknown or
    not yet acquired. Records link to each other by ID; nothing is nested or repeated inline.
 2. **Council data is adapted to the tables, never the reverse.** Each council's export goes
@@ -75,9 +75,11 @@ cross streets and side, and updates it rather than duplicating it.
 | `zones` | zone in a scheme | `zone_id`, `scheme_id`, `code` (exactly as issued: `9`, `9a`, `009`), `name` (e.g. "Flagstaff") |
 | `zone_assignments` | zone on an extent | `assignment_id`, `zone_id`, `extent_id`, `valid_from`, `valid_to`, `source_id`, `verification` |
 | `provider_areas` | payment provider area | `provider_area_id`, `provider` (easypark, paystay, other), `area_code` (as text), `account`, `name` |
-| `provider_area_assignments` | provider area on an extent | `assignment_id`, `provider_area_id`, `extent_id`, `meter_id`, `valid_from`, `valid_to`, `source_id`, `verification` |
+| `provider_area_assignments` | provider area on an extent | `assignment_id`, `provider_area_id`, `extent_id`, `valid_from`, `valid_to`, `source_id`, `verification` |
+| `meters` | parking meter | `meter_id`, `code` (as printed, e.g. `GLP1`), `lat`, `lng`, `notes` |
+| `meter_assignments` | meter serving an extent | `assignment_id`, `meter_id`, `extent_id`, `provider_area_id` (null: the whole extent and its parking area), `valid_from`, `valid_to`, `source_id`, `verification` |
 | `rules` | signed rule | `rule_id`, `type`, `sign_code`, `max_stay_minutes`, `days[]`, `all_day`, `start`, `end`, `public_holidays`, `exempt_zone_ids[]`, `exceptions[]`, `description` |
-| `rule_assignments` | rule on an extent | `assignment_id`, `rule_id`, `extent_id`, `grace_minutes`, `valid_from`, `valid_to`, `source_id`, `source_sign_id`, `verification` |
+| `rule_assignments` | rule on an extent | `assignment_id`, `rule_id`, `extent_id`, `grace_minutes`, `provider_area_ids[]` (the provider areas that pay for it here), `valid_from`, `valid_to`, `source_id`, `source_sign_id`, `verification` |
 
 - **Extents and sides:** `side` is `north`, `south`, `east`, `west`, `centre`, `both`, `odd`
   or `even`. A whole side has null bounds and part `all`. Where signs change part way along,
@@ -93,6 +95,15 @@ cross streets and side, and updates it rather than duplicating it.
   - `exempt_zone_ids` links exceptions to zones (e.g. `copp-rpa-7`).
 - **Zones:** City of Melbourne parking area numbers are zones in the council's `parking_area`
   scheme. EasyPark and PayStay areas are provider areas.
+- **Paying for a rule:** a rule assignment's `provider_area_ids` lists the EasyPark areas and
+  PayStay zones that pay for that rule on that extent. For example, on Gladstone St 1P is paid
+  with PayStay `33883296`, 4P with `33883294` and 2P with `33883292`. It is `[]` when the rule is
+  not tied to a payment number. Each listed area must be assigned to the same extent.
+- **Meters:** each meter is listed once in `meters` by its printed code, with its key
+  `<owner>-meter-<code>`. A meter assignment ties it to an extent:
+  - with `provider_area_id` null, it serves the whole extent and its parking area;
+  - otherwise it serves that provider area. One meter can serve several areas (one assignment
+    each), and one area can have several meters (`33883296`: `GLP1`, `GLP4`).
 - **Validity:** `valid_from`/`valid_to` (exclusive) on assignments date when they apply.
 
 ## Deferred from the full standard
@@ -104,7 +115,6 @@ work, and can be added in a later 1.x version without breaking anything:
 - segment lineage and segment versions;
 - nodes and street runs (boundaries are labels and types on the segment);
 - localities and postcodes;
-- a separate meter register (a meter ID sits on the provider area assignment);
 - separate schedule and evidence tables (windows sit in the rule; evidence is the source, sign
   ID and verification on each assignment);
 - reviewed segment–source matches.
@@ -119,7 +129,7 @@ npm run release:link -- datasets/copp-patrol-area-10.release.json <linking ID> o
 
 - **Changed:** every key (`copp-…` → `<linking ID>-…`), and `release.linking_id` is set.
 - **Not changed:** `display_id` (users still see `copp-…`) and council values (`external_id`,
-  `asset_id`, `meter_id`, `source_sign_id`).
+  `asset_id`, `source_sign_id`, meter `code`).
 - **Checks:** the release is validated before and after.
 
 The secret CivicMAPS ID is never written to a release.
@@ -197,7 +207,9 @@ PlateWatch turns each extent into a timed list:
 | patrol zone | zone code and name |
 | RPA zone | permit area |
 | parking-area zone | payment parking area |
-| EasyPark and PayStay provider areas (with meter ID) | payment |
+| EasyPark and PayStay provider areas | payment numbers |
+| meters and what each serves | meters (whole segment, or the chosen numbers) |
+| `provider_area_ids` on a timed rule | the restriction's *Paid with* numbers |
 | bays with positions | bays |
 | timed rules (with grace) | restrictions |
 | other rules | *Other signs* |

@@ -3,6 +3,7 @@ import { getAllowLists, getList, getTimedLists, putList, uid } from '../../lib/d
 import { patrolZones, zoneNames } from '../../lib/listIndex';
 import { formatBays, parseBays } from '../../lib/importer';
 import { isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
+import { normalisePayment, paidByLabel, prunePaidBy } from '../../lib/payment';
 import { describeRestriction, minutesFromCode, validateRestriction } from '../../lib/restriction';
 import {
   RISK_LEVEL_LABELS,
@@ -15,7 +16,10 @@ import {
   type PlateList,
   type RiskLevel,
   type RiskTag,
+  type PaidBy,
+  type PaymentAreas,
   type StreetSide,
+  type TimedList,
   type TimedRestriction,
   type Weekday,
 } from '../../lib/types';
@@ -141,6 +145,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
     if (l.type === 'timed') {
       if (l.payment?.easyPark.some(area => !area.trim())) e.payment = 'EasyPark AreaNumber is required.';
       if (l.payment?.payStay.some(p => !p.zone.trim())) e.payment = 'PayStay ParkingZone is required.';
+      if (l.payment?.meters?.some(m => !m.id.trim())) e.payment = 'Meter ID is required.';
       if (!l.segment.street.trim()) e.street = 'Street / segment name is required.';
       if (!l.segment.fromStreet.trim()) e.fromStreet = 'Required.';
       if (!l.segment.toStreet.trim()) e.toStreet = 'Required.';
@@ -165,6 +170,16 @@ export function listFormView(params: Record<string, string>, app: App): View {
         return;
       }
     }
+    // Blank payment numbers and meter IDs are reported before cleaning would drop them.
+    if (list.type === 'timed') {
+      const payErr = validate(list).payment;
+      if (payErr) {
+        errors = { ...errors, payment: payErr };
+        app.toast('Please fix the highlighted fields.', 'error');
+        app.update();
+        return;
+      }
+    }
     const cleaned: PlateList = { ...list, name: list.name.trim(), notes: list.notes.trim() } as PlateList;
     if (cleaned.type === 'timed') {
       cleaned.segment = {
@@ -174,15 +189,18 @@ export function listFormView(params: Record<string, string>, app: App): View {
         toStreet: cleaned.segment.toStreet.trim(),
         suburb: cleaned.segment.suburb.trim(),
       };
-      cleaned.restrictions = cleaned.restrictions.map((r) => ({ ...r, code: r.code.trim().toUpperCase() }));
       if (cleaned.payment) {
-        const area = cleaned.payment.parkingArea?.trim();
-        if (area) cleaned.payment = { ...cleaned.payment, parkingArea: area };
-        else {
-          const { parkingArea: _drop, ...rest } = cleaned.payment;
-          cleaned.payment = rest;
-        }
+        const pay = normalisePayment(cleaned.payment);
+        // Meters keep only links to numbers still on the segment (none left = whole segment).
+        if (pay.meters) pay.meters = pay.meters.map((m) => ({ id: m.id, ...(prunePaidBy(m, pay) ?? { easyPark: [], payStay: [] }) }));
+        cleaned.payment = pay;
       }
+      const payment = cleaned.payment;
+      cleaned.restrictions = cleaned.restrictions.map((r) => {
+        const { paidBy: _p, ...rest } = r;
+        const paidBy = prunePaidBy(r.paidBy, payment);
+        return { ...rest, code: r.code.trim().toUpperCase(), ...(paidBy ? { paidBy } : {}) };
+      });
       const subFrom = cleaned.segment.subFrom?.trim();
       const subTo = cleaned.segment.subTo?.trim();
       const { subFrom: _f, subTo: _t, ...segRest } = cleaned.segment;
@@ -331,15 +349,93 @@ export function listFormView(params: Record<string, string>, app: App): View {
             @input=${(e: Event) => update({ description: (e.target as HTMLInputElement).value })} />
         </div>
       </div>
-      <p class="mt-2 text-xs text-slate-400">${describeRestriction(r)}${r.graceMinutes ? ` · +${r.graceMinutes}m grace` : ''}</p>
+      ${paidWith(l, r, update)}
+      <p class="mt-2 text-xs text-slate-400">${describeRestriction(r)}${r.graceMinutes ? ` · +${r.graceMinutes}m grace` : ''}${paidByLabel(r.paidBy) ? ` · paid with ${paidByLabel(r.paidBy)}` : ''}</p>
       ${err(`r-${r.id}`)}
     </div>`;
+  };
+
+  /* Paid parking: numbers on the segment, meters, and which numbers pay for each restriction. */
+
+  /** Toggle chip, as for days. */
+  const toggleChip = (label: string, on: boolean, onClick: () => void, testId?: string) =>
+    html`<button type="button" aria-pressed=${on ? 'true' : 'false'} data-testid=${testId ?? nothing}
+      class="chip min-h-10 ${on ? 'border-brand-400 bg-brand-500/20 text-brand-100' : 'border-ink-600 bg-ink-800 text-slate-400'}"
+      @click=${onClick}>${label}</button>`;
+
+  const toggle = (xs: string[], x: string) => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x]);
+
+  /** The segment's payment numbers that can be tied to a restriction or meter. */
+  const payNumbers = (pay: PaymentAreas | undefined) => [
+    ...(pay?.easyPark ?? []).filter(Boolean).map((v) => ({ kind: 'easyPark' as const, v, label: `EasyPark ${v}` })),
+    ...[...new Set((pay?.payStay ?? []).map((p) => p.zone).filter(Boolean))].map((v) => ({ kind: 'payStay' as const, v, label: `PayStay ${v}` })),
+  ];
+
+  /** "Paid with" on a restriction: which of the segment's EasyPark areas and PayStay zones pay for it. */
+  const paidWith = (l: TimedList, r: TimedRestriction, update: (patch: Partial<TimedRestriction>) => void): TemplateResult | typeof nothing => {
+    const numbers = payNumbers(l.payment);
+    if (!numbers.length) return nothing;
+    const paid: PaidBy = r.paidBy ?? { easyPark: [], payStay: [] };
+    return html`<fieldset class="mt-3">
+      <legend class="field-label">Paid with</legend>
+      <div class="flex flex-wrap gap-2">
+        ${numbers.map((n) =>
+          toggleChip(n.label, paid[n.kind].includes(n.v), () => update({ paidBy: { ...paid, [n.kind]: toggle(paid[n.kind], n.v) } }), `paid-${r.id}-${n.v}`),
+        )}
+      </div>
+      <p class="mt-1 text-xs text-slate-400">Choose the numbers that pay for this restriction. None chosen: not tied to a payment number.</p>
+    </fieldset>`;
+  };
+
+  /** Editing a payment number carries its links on restrictions and meters with it. */
+  const renameNumber = (l: TimedList, kind: 'easyPark' | 'payStay', from: string, to: string) => {
+    if (from === to || !from) return;
+    const swap = (xs: string[]) => (xs.includes(from) ? [...new Set(xs.map((x) => (x === from ? to : x)).filter(Boolean))] : xs);
+    l.restrictions = l.restrictions.map((r) => (r.paidBy ? { ...r, paidBy: { ...r.paidBy, [kind]: swap(r.paidBy[kind]) } } : r));
+    for (const m of l.payment?.meters ?? []) m[kind] = swap(m[kind]);
+  };
+
+  const paymentFields = (l: TimedList): TemplateResult => {
+    const pay = (l.payment ??= { easyPark: [], payStay: [] });
+    const meters = (pay.meters ??= []);
+    const numbers = payNumbers(pay);
+    return html`<section class="card mt-4 grid gap-3">
+      <h2 class="section-title">Paid parking (optional)</h2>
+      ${text({ id: 'parkingArea', label: 'Parking area number', value: pay.parkingArea ?? '', placeholder: 'e.g. 637 (one per segment)', maxlength: 12, onInput: (v) => { pay.parkingArea = v.trim(); } })}
+      <p class="-mt-2 text-xs text-slate-400">A bay's kerb sign is this number followed by the bay number (637 + bay 58 = 63758); search accepts either.</p>
+      <label><input id="easyPark" type="checkbox" .checked=${!!pay.easyPark.length} @change=${() => set(() => { pay.easyPark = pay.easyPark.length ? [] : ['']; })}> EasyPark</label>
+      ${pay.easyPark.map((entry, i) => html`<div class="grid grid-cols-[1fr_auto] items-end gap-2">
+        ${text({ id: `easyPark-${i}`, label: 'AreaNumber', value: entry, required: true, onInput: (v) => set(() => { renameNumber(l, 'easyPark', pay.easyPark[i]!, v.trim()); pay.easyPark[i] = v.trim(); }) })}
+        <button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.splice(i, 1))}>Remove</button>
+      </div>`)}
+      ${pay.easyPark.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.push(''))}>Add EasyPark area</button>` : nothing}
+      <label><input id="payStay" type="checkbox" .checked=${!!pay.payStay.length} @change=${() => set(() => { pay.payStay = pay.payStay.length ? [] : [{ zone: '' }]; })}> PayStay</label>
+      ${pay.payStay.map((entry, i) => html`<div class="grid grid-cols-[1fr_auto] items-end gap-2">
+        ${text({ id: `payStayzone-${i}`, label: 'ParkingZone', value: entry.zone, required: true, placeholder: 'e.g. 3388… (one per side)', onInput: (v) => set(() => { renameNumber(l, 'payStay', entry.zone, v.trim()); entry.zone = v.trim(); }) })}
+        <button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.splice(i, 1))}>Remove</button>
+      </div>`)}
+      ${pay.payStay.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.push({ zone: '' }))}>Add PayStay zone</button>` : nothing}
+      <h3 class="mt-2 text-sm font-bold text-slate-200">Meters</h3>
+      ${meters.map((m, i) => html`<div class="grid gap-2 rounded-xl border border-ink-600 bg-ink-800/60 p-3">
+        <div class="grid grid-cols-[1fr_auto] items-end gap-2">
+          ${text({ id: `meter-${i}`, label: 'Meter ID', value: m.id, required: true, placeholder: 'e.g. GLP1', maxlength: 24, onInput: (v) => { m.id = v.trim(); } })}
+          <button type="button" class="btn-secondary" @click=${() => set(() => meters.splice(i, 1))}>Remove</button>
+        </div>
+        <p class="field-label">Pays for</p>
+        <div class="flex flex-wrap gap-2">
+          ${toggleChip('Whole segment', !m.easyPark.length && !m.payStay.length, () => set(() => { m.easyPark = []; m.payStay = []; }), `meter-${i}-segment`)}
+          ${numbers.map((n) => toggleChip(n.label, m[n.kind].includes(n.v), () => set(() => { m[n.kind] = toggle(m[n.kind], n.v); }), `meter-${i}-${n.v}`))}
+        </div>
+      </div>`)}
+      <button type="button" class="btn-secondary" data-testid="add-meter" @click=${() => set(() => meters.push({ id: '', easyPark: [], payStay: [] }))}>${icon('plus')} Add meter</button>
+      <p class="text-xs text-slate-400">A meter pays for the whole segment${pay.parkingArea ? ` and parking area ${pay.parkingArea}` : ' (and its parking area)'}, or for the EasyPark areas and PayStay zones chosen; one meter can serve several. Tie each restriction to its numbers under <em>Paid with</em> below.</p>
+      ${err('payment')}
+    </section>`;
   };
 
   const timedFields = (): TemplateResult => {
     if (list?.type !== 'timed') return html``;
     const l = list;
-    const pay = l.payment ??= { easyPark: [], payStay: [] };
     const seg = (patch: Partial<typeof l.segment>) => set(() => (l.segment = { ...l.segment, ...patch }));
     return html`
       <section class="card mt-4 grid gap-3">
@@ -388,11 +484,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
         </div>
       </section>
 
-<section class="card mt-4 grid gap-3"><h2 class="section-title">Paid parking (optional)</h2>
-${text({ id: 'parkingArea', label: 'Parking area number', value: pay.parkingArea ?? '', placeholder: 'e.g. 637 (one per segment)', maxlength: 12, onInput: v => { pay.parkingArea = v.trim(); } })}
-<p class="-mt-2 text-xs text-slate-400">A bay's kerb sign is this number followed by the bay number (637 + bay 58 = 63758); search accepts either.</p><label><input id="easyPark" type="checkbox" .checked=${!!pay.easyPark.length} @change=${() => set(() => { pay.easyPark = pay.easyPark.length ? [] : ['']; })}> EasyPark</label>
-${pay.easyPark.map((entry, i) => html`<div class="grid gap-2">${text({ id: "easyPark-" + i, label: "AreaNumber", value: entry, required: true, onInput: v => { pay.easyPark[i] = v.trim(); } })}<button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.splice(i, 1))}>Remove</button></div>`)}${pay.easyPark.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.push(''))}>Add EasyPark entry</button>` : nothing}<label><input id="payStay" type="checkbox" .checked=${!!pay.payStay.length} @change=${() => set(() => { pay.payStay = pay.payStay.length ? [] : [{ zone: '', meter: '' }]; })}> PayStay</label>
-${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "payStayzone-" + i, label: "ParkingZone", value: entry.zone, required: true, placeholder: "e.g. 3388… (one per side)", onInput: v => { entry.zone = v.trim(); } })}${text({ id: "payStaymeter-" + i, label: "Meter ID", value: entry.meter, placeholder: "Optional", onInput: v => { entry.meter = v.trim(); } })}<button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.splice(i, 1))}>Remove</button></div>`)}${pay.payStay.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.push({ zone: '', meter: '' }))}>Add PayStay entry</button>` : nothing}${err('payment')}</section>
+${paymentFields(l)}
       <section class="card mt-4 grid gap-3">
         <h2 class="section-title">Parking restrictions</h2>
         ${l.restrictions.map((r, i) => restrictionEditor(r, i))}
@@ -693,6 +785,8 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
           return;
         }
         list = structuredClone(found);
+        // Older lists kept one meter with each PayStay zone entry; edit them as separate meters.
+        if (list.type === 'timed' && list.payment) list.payment = normalisePayment(list.payment);
       } else {
         const type = params.type as ListType;
         if (!['allow', 'timed', 'hot'].includes(type)) {

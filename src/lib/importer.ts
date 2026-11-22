@@ -12,6 +12,7 @@
  *
  * Everything here is pure; src/ui/views/importView.ts reads the files and saves the plan.
  */
+import { normalisePayment } from './payment';
 import { uid } from './db';
 import { RELEASE_SCHEMA, validateRelease, type KerbsideRelease } from './kerbsideRelease';
 import { areaDatasetToRelease, isAreaDataset, releaseToDrafts } from './releaseAdapters';
@@ -110,13 +111,13 @@ export const CSV_TEMPLATES = {
   timed: {
     fileName: 'platewatch-timed-segments-template.csv',
     header:
-      'segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
+      'segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,meter_ids,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
     example: [
-      'copp-normanby-road-from-boundary-to-montague,all,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
-      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – illustrative asset ID and signs; replace',
-      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – illustrative asset ID and signs; replace',
-      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
-      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
+      'copp-normanby-road-from-boundary-to-montague,all,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
+      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001:CVT1,,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – illustrative asset ID and signs; replace',
+      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,,,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – illustrative asset ID and signs; replace',
+      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,,,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
+      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
     ].join('\n'),
   },
   bays: {
@@ -384,8 +385,10 @@ export function parseSide(input: string | null | undefined): StreetSide | null {
 /** All-caps zone names from CivicMAPS ("CHINATOWN") shown as "Chinatown". */
 const zoneTitle = (s: string) => (s === s.toUpperCase() ? s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()) : s);
 
-const cleanPayment = (p: PaymentAreas): PaymentAreas | undefined =>
-  p.parkingArea || p.easyPark.length || p.payStay.length ? p : undefined;
+const cleanPayment = (p: PaymentAreas): PaymentAreas | undefined => {
+  const n = normalisePayment(p);
+  return n.parkingArea || n.easyPark.length || n.payStay.length || n.meters ? n : undefined;
+};
 
 function newRestriction(code: string, minutes: number, days: Weekday[], t: { allDay: boolean; startTime: string; endTime: string }, grace = 0, description = ''): TimedRestriction {
   return { id: uid(), code, limitMinutes: minutes, graceMinutes: grace, days, startTime: t.startTime, endTime: t.endTime, allDay: t.allDay, description };
@@ -419,6 +422,8 @@ const COLUMN_ALIASES: Record<string, string> = {
   road_side: 'side',
   enforcement_zone: 'patrol_zone',
   road_segment_asset_id: 'road_segment_id',
+  meters: 'meter_ids',
+  meter_id: 'meter_ids',
 };
 
 function rowsWithHeader(table: string[][]): { header: string[]; rows: { line: number; row: Row }[] } {
@@ -577,11 +582,21 @@ function timedFromCsv(file: string, table: string[][], out: ImportResult): void 
     if (row.list_name && l.name === defaultListName(l.segment)) l.name = row.list_name;
     const pay = l.payment!;
     if (!pay.parkingArea && row.parking_area) pay.parkingArea = row.parking_area;
-    for (const a of splitList(row.easypark_areas ?? '')) if (!pay.easyPark.includes(a)) pay.easyPark.push(a);
+    // The numbers on a sign's row pay for that sign's restriction; `zone:meter` ties a meter to a zone.
+    const rowAreas = splitList(row.easypark_areas ?? '');
+    const rowZones: string[] = [];
+    const meters = (pay.meters ??= []);
+    for (const a of rowAreas) if (!pay.easyPark.includes(a)) pay.easyPark.push(a);
     for (const z of splitList(row.paystay_zones ?? '')) {
-      const [zone, meter = ''] = z.split(':').map((x) => x.trim());
-      if (zone && !pay.payStay.some((p) => p.zone === zone)) pay.payStay.push({ zone, meter });
+      const [zone = '', meter = ''] = z.split(':').map((x) => x.trim());
+      if (!zone) continue;
+      rowZones.push(zone);
+      if (!pay.payStay.some((p) => p.zone === zone)) pay.payStay.push({ zone });
+      if (meter) meters.push({ id: meter, easyPark: [], payStay: [zone] });
     }
+    // Meters for the whole segment (and its parking area).
+    for (const m of splitList(row.meter_ids ?? '')) meters.push({ id: m, easyPark: [], payStay: [] });
+    if (restriction && (rowAreas.length || rowZones.length)) restriction.paidBy = { easyPark: rowAreas, payStay: [...new Set(rowZones)] };
     if (bays) l.bays = [...new Set([...(l.bays ?? []), ...bays])].sort((x, y) => x - y);
     if (row.notes && !g.notes.includes(row.notes)) g.notes.push(row.notes);
     if (untimed) g.untimed.push(untimed);

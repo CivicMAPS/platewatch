@@ -2770,6 +2770,8 @@
   ],
   "provider_areas": [],
   "provider_area_assignments": [],
+  "meters": [],
+  "meter_assignments": [],
   "rules": [],
   "rule_assignments": []
 }

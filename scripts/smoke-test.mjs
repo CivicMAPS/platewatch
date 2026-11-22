@@ -205,12 +205,18 @@ async function main() {
   await page.click('#payStay');
   await click('Save list');
   await page.waitForFunction(() => document.body.innerText.includes('PayStay ParkingZone is required.'));
-  // Port Phillip PayStay: a zone number only, no meter ID.
+  // Port Phillip PayStay zone, a meter that serves it, and the restriction tied to it.
   await type('#payStayzone-0', '338851200001');
+  await page.click('[data-testid=add-meter]');
+  await type('#meter-0', 'GLP1');
+  await page.click('[data-testid=meter-0-338851200001]');
+  await page.click('[data-testid^=paid-][data-testid$="-338851200001"]');
+  await waitText('paid with PayStay 338851200001');
   await shot('timed-form');
   await click('Save list');
   await waitText('Tracked vehicles (0)');
-  log('timed list saved (segment, between streets, restriction, linked allow list)');
+  await waitText('PayStay 338851200001 (meter GLP1)');
+  log('timed list saved (segment, between streets, restriction paid with PayStay + meter, linked allow list)');
   const timedUrl = page.url();
 
   // Home: grouped by patrol zone, found by a bay kerb sign (parking area 637 + bay 58) and by PayStay number.
@@ -267,7 +273,10 @@ async function main() {
   await shot('confirm');
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
-  log('first sighting → scan record created with time allowance');
+  // Payment to check is the restriction's own PayStay zone with its meter.
+  await waitText('Check payment before enforcing · 2P');
+  await waitText('PayStay ParkingZone 338851200001 · Meter ID GLP1');
+  log('first sighting → scan record created with time allowance; payment check for the restriction in force');
   await shot('recorded');
 
   // Scan 2 (within allowance)

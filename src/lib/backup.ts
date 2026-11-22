@@ -2,7 +2,8 @@
 import { getAllObservations, getAllScans, getDismissed, getLists, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
-import type { DismissedCapture, Observation, PaymentAreas, PlateList, ScanRecord } from './types';
+import { normalisePayment, prunePaidBy } from './payment';
+import type { DismissedCapture, Observation, PaidBy, PaymentAreas, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
 export const BACKUP_VERSION = 1;
@@ -82,7 +83,17 @@ export function sanitisePayment(v: unknown): PaymentAreas | undefined {
     .filter((p): p is Record<string, unknown> => isObj(p) && typeof p.zone === 'string' && p.zone.trim() !== '')
     .map((p) => ({ zone: str(p.zone), meter: str(p.meter) }));
   const parkingArea = typeof v.parkingArea === 'string' && v.parkingArea.trim() ? v.parkingArea.trim() : undefined;
-  return parkingArea ? { parkingArea, easyPark, payStay } : { easyPark, payStay };
+  const meters = (Array.isArray(v.meters) ? v.meters : [])
+    .filter((m): m is Record<string, unknown> => isObj(m) && typeof m.id === 'string' && m.id.trim() !== '')
+    .map((m) => ({ id: str(m.id), ...sanitisePaidBy(m) }));
+  return normalisePayment({ ...(parkingArea ? { parkingArea } : {}), easyPark, payStay, ...(meters.length ? { meters } : {}) });
+}
+
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []);
+
+/** EasyPark areas and PayStay zones a restriction or meter is tied to. */
+export function sanitisePaidBy(v: unknown): PaidBy {
+  return isObj(v) ? { easyPark: strings(v.easyPark), payStay: strings(v.payStay) } : { easyPark: [], payStay: [] };
 }
 
 /** Validate and sanitise lists from an untrusted file. Throws with a readable message. */
@@ -119,6 +130,13 @@ export function parseBackup(text: string): {
       if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
       l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
       l.payment = sanitisePayment(l.payment);
+      // A restriction may only be tied to payment numbers the list has.
+      for (const r of l.restrictions as Record<string, unknown>[]) {
+        if (!isObj(r)) continue;
+        const paidBy = 'paidBy' in r ? prunePaidBy(sanitisePaidBy(r.paidBy), l.payment as PaymentAreas | undefined) : undefined;
+        if (paidBy) r.paidBy = paidBy;
+        else delete r.paidBy;
+      }
       for (const k of ['patrolZone', 'patrolZoneName', 'rpa', 'roadSegmentId', 'displayId'] as const) if (typeof l[k] !== 'string') delete l[k];
       const seg = l.segment as Record<string, unknown>;
       for (const k of ['subFrom', 'subTo'] as const) if (typeof seg[k] !== 'string') delete seg[k];

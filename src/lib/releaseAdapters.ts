@@ -22,8 +22,9 @@ import {
   type RuleType,
   type Side,
 } from './kerbsideRelease';
+import { normalisePayment } from './payment';
 import { minutesFromCode } from './restriction';
-import type { PaymentAreas, StreetSide, TimedList, TimedRestriction, UntimedControl, Weekday } from './types';
+import type { Meter, PaidBy, PaymentAreas, StreetSide, TimedList, TimedRestriction, UntimedControl, Weekday } from './types';
 
 /* ───────────────────────────── Councils ───────────────────────────── */
 
@@ -91,7 +92,19 @@ export function releaseToDrafts(r: KerbsideRelease): { drafts: ReleaseDraft[]; s
   const zoneAs = by(r.zone_assignments);
   const provAs = by(r.provider_area_assignments);
   const ruleAs = by(r.rule_assignments);
+  const meterAs = by(r.meter_assignments);
+  const meterCodes = new Map(r.meters.map((m) => [m.meter_id, m.code]));
   const bays = by(r.bays);
+  /** Provider area IDs → the EasyPark areas and PayStay zones a device keeps. */
+  const paidOf = (areaIds: readonly (string | null)[]): PaidBy => {
+    const out: PaidBy = { easyPark: [], payStay: [] };
+    for (const id of areaIds) {
+      const p = id ? providers.get(id) : undefined;
+      if (p?.provider === 'easypark' && !out.easyPark.includes(p.area_code)) out.easyPark.push(p.area_code);
+      if (p?.provider === 'paystay' && !out.payStay.includes(p.area_code)) out.payStay.push(p.area_code);
+    }
+    return out;
+  };
   const drafts: ReleaseDraft[] = [];
   const skipped: string[] = [];
 
@@ -112,7 +125,11 @@ export function releaseToDrafts(r: KerbsideRelease): { drafts: ReleaseDraft[]; s
       const minutes = rule.max_stay_minutes ?? (rule.sign_code ? minutesFromCode(rule.sign_code) : null);
       if (TIMED.has(rule.type) && minutes) {
         const code = rule.sign_code || (rule.type === 'loading_zone' ? `LZ${minutes}` : `${minutes} min`);
-        restrictions.push({ id: uid(), code, limitMinutes: minutes, graceMinutes: a.grace_minutes ?? 0, days, ...timesOf(rule), description });
+        const paidBy = paidOf(a.provider_area_ids);
+        restrictions.push({
+          id: uid(), code, limitMinutes: minutes, graceMinutes: a.grace_minutes ?? 0, days, ...timesOf(rule), description,
+          ...(paidBy.easyPark.length || paidBy.payStay.length ? { paidBy } : {}),
+        });
       } else untimed.push({ control: rule.type, label: rule.sign_code || RULE_LABEL[rule.type], days, ...timesOf(rule), description });
     }
     if (e.restrictions_status === 'supplied' && !restrictions.length) {
@@ -135,8 +152,13 @@ export function releaseToDrafts(r: KerbsideRelease): { drafts: ReleaseDraft[]; s
     for (const a of provAs.get(e.extent_id) ?? []) {
       const p = providers.get(a.provider_area_id)!;
       if (p.provider === 'easypark' && !payment.easyPark.includes(p.area_code)) payment.easyPark.push(p.area_code);
-      if (p.provider === 'paystay' && !payment.payStay.some((x) => x.zone === p.area_code)) payment.payStay.push({ zone: p.area_code, meter: a.meter_id ?? '' });
+      if (p.provider === 'paystay' && !payment.payStay.some((x) => x.zone === p.area_code)) payment.payStay.push({ zone: p.area_code });
     }
+    // Meters: a meter assigned to the whole extent pays for the whole segment; otherwise for its areas.
+    const byMeter = new Map<string, (string | null)[]>();
+    for (const a of meterAs.get(e.extent_id) ?? []) byMeter.set(a.meter_id, [...(byMeter.get(a.meter_id) ?? []), a.provider_area_id]);
+    const meters: Meter[] = [...byMeter].map(([id, areas]) => ({ id: meterCodes.get(id) ?? id, ...(areas.includes(null) ? { easyPark: [], payStay: [] } : paidOf(areas)) }));
+    if (meters.length) payment.meters = meters;
     const extentBays = (bays.get(e.extent_id) ?? []).filter((b) => b.status === 'active');
     const located = extentBays.filter((b) => b.lat !== null && b.lng !== null);
     const sideLetter = SIDE_LETTER[e.side] ? ` (${SIDE_LETTER[e.side]})` : '';
@@ -164,7 +186,7 @@ export function releaseToDrafts(r: KerbsideRelease): { drafts: ReleaseDraft[]; s
         ...(patrolZoneName ? { patrolZoneName } : {}),
         ...(rpa ? { rpa } : {}),
         ...(s.asset_id ? { roadSegmentId: s.asset_id } : {}),
-        ...(payment.parkingArea || payment.easyPark.length || payment.payStay.length ? { payment } : {}),
+        ...(payment.parkingArea || payment.easyPark.length || payment.payStay.length || payment.meters ? { payment } : {}),
         ...(extentBays.length ? { bays: [...new Set(extentBays.map((b) => b.bay_number))].sort((x, y) => x - y) } : {}),
         ...(located.length ? { bayPoints: located.map((b) => ({ bay: b.bay_number, lat: b.lat!, lng: b.lng!, ...(b.plate_number ? { sign: b.plate_number } : {}) })) } : {}),
         ...(untimed.length ? { untimedControls: untimed } : {}),
@@ -222,8 +244,17 @@ export function listsToRelease(
     if (l.patrolZone || l.patrolZoneName) b.zone(extentId, 'patrol', l.patrolZone || l.patrolZoneName!, l.patrolZoneName ?? null, { source_id: src });
     const rpaZone = l.rpa ? b.zone(extentId, 'rpa', l.rpa, null, { source_id: src }) : null;
     if (l.payment?.parkingArea) b.zone(extentId, 'parking_area', l.payment.parkingArea, null, { source_id: src });
-    for (const a of l.payment?.easyPark ?? []) b.providerArea(extentId, 'easypark', a, { source_id: src });
-    for (const p of l.payment?.payStay ?? []) b.providerArea(extentId, 'paystay', p.zone, { meter_id: p.meter || null, source_id: src });
+    const pay = l.payment ? normalisePayment(l.payment) : undefined;
+    const area = { easyPark: new Map<string, string>(), payStay: new Map<string, string>() };
+    for (const a of pay?.easyPark ?? []) area.easyPark.set(a, b.providerArea(extentId, 'easypark', a, { source_id: src }));
+    for (const p of pay?.payStay ?? []) area.payStay.set(p.zone, b.providerArea(extentId, 'paystay', p.zone, { source_id: src }));
+    const areaIds = (x: PaidBy | undefined) =>
+      [...(x?.easyPark ?? []).map((a) => area.easyPark.get(a)), ...(x?.payStay ?? []).map((z) => area.payStay.get(z))].filter((id): id is string => !!id);
+    for (const m of pay?.meters ?? []) {
+      const linked = areaIds(m);
+      if (!linked.length) b.meter(extentId, m.id, null, { source_id: src });
+      for (const id of linked) b.meter(extentId, m.id, id, { source_id: src });
+    }
     const points = new Map((l.bayPoints ?? []).map((p) => [p.bay, p]));
     for (const n of l.bays ?? []) {
       const p = points.get(n);
@@ -246,7 +277,7 @@ export function listsToRelease(
           exceptions,
           exempt_zone_ids: rpaZone && exceptions.some((x) => /permit/i.test(x)) ? [rpaZone] : [],
         },
-        { grace_minutes: r.graceMinutes || null, source_id: src },
+        { grace_minutes: r.graceMinutes || null, provider_area_ids: areaIds(r.paidBy), source_id: src },
       );
     }
     for (const u of l.untimedControls ?? []) {

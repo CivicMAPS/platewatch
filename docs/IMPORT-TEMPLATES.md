@@ -58,7 +58,8 @@ placeholder: officers can find it and scan against it, and it shows *Restriction
 | `permit_area` | | `7` | Residential permit area code (exported as `copp-rpa-7`, so the same number in another council stays distinct). |
 | `parking_area` | | `645` | Parking area number (one per segment). Kerb plate = area + bay (`64558`). |
 | `easypark_areas` | | `7514;7515` | Separated by `;`. |
-| `paystay_zones` | | `338851200001` or `00042:4521` | Separated by `;`; add `:meter` for a meter ID. |
+| `paystay_zones` | | `338851200001` or `33883296:GLP1` | Separated by `;`. Add `:meter` to tie a meter to the zone (repeat the zone for each meter: `33883296:GLP1;33883296:GLP4`). |
+| `meter_ids` | | `GLP9` | Meters for the whole segment and its parking area, separated by `;`. |
 | `restrictions_status` | | `supplied` | `supplied`, `pending_field_capture` (placeholder) or `no_parking_spaces` (left out). |
 | `control` | | `time_limit` | `time_limit`, `metered`, `ticket`, `loading_zone`, `permit_zone`, `no_stopping`, `no_parking`, `clearway`, `bus_zone`, `taxi_zone`, `accessible`, `works_zone`, `other`. Can be left blank when `sign_code` says it (`2P`, `No Stopping`). |
 | `sign_code` | | `2P`, `1/2P`, `P15`, `LZ 30`, `No Stopping` | As printed on the sign. |
@@ -75,7 +76,11 @@ placeholder: officers can find it and scan against it, and it shows *Restriction
 - Other controls are kept as *Other signs* on the list. A part with only those has nothing to
   time; it is left out and listed under *Left out*.
 - For single-valued columns (zone, permit area, parking area…), the first value given in a
-  part's rows is used. EasyPark areas and PayStay zones from all of a part's rows are combined.
+  part's rows is used. EasyPark areas, PayStay zones and meters from all of a part's rows are
+  combined on the list.
+- **Payment is tied to the sign on its row.** The `easypark_areas` and `paystay_zones` on a
+  sign's row are the numbers that pay for that restriction (*Paid with* in the app). Leave them
+  blank on rows for unpaid signs, such as No Stopping or a free loading zone.
 
 Older files that use the first template's columns (`street`, `from_street`, `to_street`,
 `sub_from`, `sub_to`, `rpa`, `sign`, `minutes`, `grace`, `bays`) still import.

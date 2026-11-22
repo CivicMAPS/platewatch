@@ -75,6 +75,26 @@ export interface TimedRestriction {
   allDay: boolean;
   /** Free description, e.g. "Permit zone 12 excepted". */
   description: string;
+  /**
+   * The segment's EasyPark areas and PayStay zones that pay for this restriction (values from the
+   * list's payment). Absent or empty: not tied to a payment number.
+   */
+  paidBy?: PaidBy;
+}
+
+/** Payment numbers tied to a restriction or a meter. */
+export interface PaidBy {
+  easyPark: string[];
+  payStay: string[];
+}
+
+/**
+ * A parking meter. It pays for the whole segment (and its parking area) when it lists no numbers,
+ * otherwise for the EasyPark areas and PayStay zones it lists; one meter can serve several.
+ */
+export interface Meter extends PaidBy {
+  /** As printed on the meter, e.g. "GLP1". */
+  id: string;
 }
 
 export interface PaymentAreas {
@@ -85,8 +105,14 @@ export interface PaymentAreas {
   parkingArea?: string;
   /** EasyPark area numbers; a segment can have several (e.g. one side changes restriction mid-day). */
   easyPark: string[];
-  /** PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side. */
-  payStay: { zone: string; meter: string }[];
+  /**
+   * PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side.
+   * `meter` is only on lists saved before meters were separate (one meter per zone entry);
+   * normalisePayment moves it into `meters`.
+   */
+  payStay: { zone: string; meter?: string }[];
+  /** Meters on this segment and what each pays for. */
+  meters?: Meter[];
 }
 
 export interface BayPoint {

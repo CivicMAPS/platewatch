@@ -79,7 +79,9 @@ describe('timed CSV template', () => {
     expect(lists).toHaveLength(2);
     const [coventry, bourke] = lists;
     expect(coventry).toMatchObject({ patrolZone: '9', patrolZoneName: 'South Melbourne Market', segment: { street: 'Coventry Street', side: 'south' } });
-    expect(coventry!.payment).toEqual({ easyPark: [], payStay: [{ zone: '338851200002', meter: '' }] });
+    expect(coventry!.payment).toEqual({ easyPark: [], payStay: [{ zone: '338851200002' }] });
+    // The number on each sign's row pays for that row's restriction.
+    expect(coventry!.restrictions.map((x) => x.paidBy)).toEqual([{ easyPark: [], payStay: ['338851200002'] }, { easyPark: [], payStay: ['338851200002'] }]);
     expect(coventry!.restrictions.map((x) => [x.code, x.days, x.startTime, x.endTime])).toEqual([
       ['2P', [1, 2, 3, 4, 5], '08:00', '18:00'],
       ['2P', [6], '08:00', '12:30'],
@@ -132,9 +134,35 @@ describe('timed CSV with civicmaps.parking_dataset columns', () => {
       row({ ...base, control: 'no_stopping', days: 'Mon-Fri', start: '07:00', end: '09:00' }),
     ].join('\n');
     const [d] = timedDrafts(csv, 'x.csv');
-    expect(d!.list).toMatchObject({ externalId: 'copp-coventry-street-from-montague-to-ferrars:north:all', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
+    expect(d!.list).toMatchObject({ externalId: 'copp-coventry-street-from-montague-to-ferrars:north:all', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001' }] } });
     expect(d!.list.restrictions[0]).toMatchObject({ code: '2P', limitMinutes: 120, graceMinutes: 5, description: 'Ticket · Permit Zone 7 excepted' });
     expect(d!.list.untimedControls).toEqual([{ control: 'no_stopping', label: 'No stopping', days: [1, 2, 3, 4, 5], allDay: false, startTime: '07:00', endTime: '09:00', description: '' }]);
+  });
+
+  it('ties the EasyPark and PayStay numbers on a row to that row\'s restriction; zone:meter and meter_ids add meters', () => {
+    // Gladstone St (north): one PayStay zone per restriction, several meters per zone, one meter for the whole segment.
+    const g = { ...base, road: 'Gladstone Street', between_from: 'Boundary Street', between_to: 'Montague Street', segment_id: 'copp-gladstone-street-from-boundary-to-montague' };
+    const csv = [
+      CSV_TEMPLATES.timed.header,
+      row({ ...g, paystay_zones: '33883296:GLP1;33883296:GLP4', control: 'ticket', sign_code: '1P', days: 'Mon-Fri', start: '08:00', end: '18:00' }),
+      row({ ...g, paystay_zones: '33883294:GLP2', meter_ids: 'GLP9', control: 'ticket', sign_code: '4P', days: 'Mon-Fri', start: '08:00', end: '18:00' }),
+      row({ ...g, paystay_zones: '33883292:GLP6', sign_code: '2P', days: 'Mon-Fri', start: '08:00', end: '18:00' }),
+      row({ ...g, control: 'no_stopping', days: 'Mon-Fri', start: '07:00', end: '09:00' }),
+    ].join('\n');
+    const [d] = timedDrafts(csv, 'x.csv');
+    const l = d!.list;
+    expect(l.payment).toEqual({
+      easyPark: [],
+      payStay: [{ zone: '33883296' }, { zone: '33883294' }, { zone: '33883292' }],
+      meters: [
+        { id: 'GLP1', easyPark: [], payStay: ['33883296'] },
+        { id: 'GLP4', easyPark: [], payStay: ['33883296'] },
+        { id: 'GLP2', easyPark: [], payStay: ['33883294'] },
+        { id: 'GLP9', easyPark: [], payStay: [] },
+        { id: 'GLP6', easyPark: [], payStay: ['33883292'] },
+      ],
+    });
+    expect(l.restrictions.map((r) => [r.code, r.paidBy?.payStay])).toEqual([['1P', ['33883296']], ['4P', ['33883294']], ['2P', ['33883292']]]);
   });
 
   it('honours restrictions_status: pending is a placeholder, no_parking_spaces is left out', () => {

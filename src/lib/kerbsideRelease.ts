@@ -489,13 +489,18 @@ export class ReleaseBuilder {
     });
   }
 
-  /** Assign a zone (created with its scheme if new) to an extent. */
-  zone(extentId: string, kind: ZoneKind, code: string, name: string | null = null, a: Partial<Pick<ZoneAssignmentRow, 'valid_from' | 'valid_to' | 'source_id' | 'verification'>> = {}): string {
+  /** Define a zone (and its scheme) without assigning it, e.g. a council's zone not yet mapped to segments. */
+  defineZone(kind: ZoneKind, code: string, name: string | null = null): string {
     const schemeId = this.add('zone_schemes', { scheme_id: ids.scheme(this.owner, kind), kind, name: SCHEME_NAMES[kind] });
     const zoneId = ids.zone(this.owner, kind, code);
     const existing = this.r.zones.find((z) => z.zone_id === zoneId);
     if (existing && !existing.name && name) existing.name = name;
-    this.add('zones', { zone_id: zoneId, scheme_id: schemeId, code, name });
+    return this.add('zones', { zone_id: zoneId, scheme_id: schemeId, code, name });
+  }
+
+  /** Assign a zone (created with its scheme if new) to an extent. */
+  zone(extentId: string, kind: ZoneKind, code: string, name: string | null = null, a: Partial<Pick<ZoneAssignmentRow, 'valid_from' | 'valid_to' | 'source_id' | 'verification'>> = {}): string {
+    const zoneId = this.defineZone(kind, code, name);
     this.add('zone_assignments', { assignment_id: ids.assignment(extentId, zoneId), zone_id: zoneId, extent_id: extentId, valid_from: a.valid_from ?? null, valid_to: a.valid_to ?? null, source_id: a.source_id ?? null, verification: a.verification ?? 'unverified' });
     return zoneId;
   }
@@ -758,6 +763,57 @@ const csvCell = (v: unknown): string => {
   const s = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
+
+/**
+ * One release per patrol zone: each holds the extents assigned to that zone with everything they
+ * reference (segments, source refs, bays, assignments, zones, provider areas, rules) and all sources.
+ * An extent in two zones goes in both. Extents with no patrol zone are returned in `unassigned`,
+ * not guessed into a zone.
+ */
+export function splitByZone(r: KerbsideRelease, kind: ZoneKind = 'patrol'): { releases: KerbsideRelease[]; unassigned: string[] } {
+  const meta = r.release[0]!;
+  const schemes = new Set(r.zone_schemes.filter((s) => s.kind === kind).map((s) => s.scheme_id));
+  const zones = r.zones.filter((z) => schemes.has(z.scheme_id));
+  const zoneIds = new Set(zones.map((z) => z.zone_id));
+  const assigned = new Set(r.zone_assignments.filter((a) => zoneIds.has(a.zone_id)).map((a) => a.extent_id));
+  const releases = zones.flatMap((zone) => {
+    const ext = new Set(r.zone_assignments.filter((a) => a.zone_id === zone.zone_id).map((a) => a.extent_id));
+    if (!ext.size) return [];
+    const extents = r.extents.filter((e) => ext.has(e.extent_id));
+    const segs = new Set(extents.map((e) => e.segment_id));
+    const za = r.zone_assignments.filter((a) => ext.has(a.extent_id));
+    const pa = r.provider_area_assignments.filter((a) => ext.has(a.extent_id));
+    const ra = r.rule_assignments.filter((a) => ext.has(a.extent_id));
+    const rules = r.rules.filter((x) => ra.some((a) => a.rule_id === x.rule_id));
+    const zoneRefs = new Set([...za.map((a) => a.zone_id), ...rules.flatMap((x) => x.exempt_zone_ids)]);
+    const keptZones = r.zones.filter((z) => zoneRefs.has(z.zone_id));
+    const segments = r.segments.filter((x) => segs.has(x.segment_id));
+    const refs = r.segment_source_refs.filter((x) => segs.has(x.segment_id));
+    const datasetId = `${kind === 'patrol' ? 'patrol-area' : kind.replace('_', '-')}-${slug(zone.code)}`;
+    const release: ReleaseRow = { ...meta, dataset_id: datasetId, release_id: `${ownerOf(meta)}-${datasetId}-v${meta.version}` };
+    return [
+      {
+        schema: r.schema,
+        schema_version: r.schema_version,
+        release: [release],
+        // Sources are the dataset's provenance (what was checked and its limits): all are kept.
+        sources: r.sources,
+        segments,
+        segment_source_refs: refs,
+        extents,
+        bays: r.bays.filter((x) => ext.has(x.extent_id)),
+        zone_schemes: r.zone_schemes.filter((x) => keptZones.some((z) => z.scheme_id === x.scheme_id)),
+        zones: keptZones,
+        zone_assignments: za,
+        provider_areas: r.provider_areas.filter((x) => pa.some((a) => a.provider_area_id === x.provider_area_id)),
+        provider_area_assignments: pa,
+        rules,
+        rule_assignments: ra,
+      } as KerbsideRelease,
+    ];
+  });
+  return { releases, unassigned: r.extents.filter((e) => !assigned.has(e.extent_id)).map((e) => e.extent_id) };
+}
 
 /**
  * Each table as CSV text, columns in the standard's order. Null is an empty cell; lists and

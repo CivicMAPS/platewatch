@@ -13,6 +13,7 @@ import {
   emptyRelease,
   ReleaseBuilder,
   SIDES,
+  slug,
   STAY_REQUIRED,
   type BoundType,
   type Day,
@@ -265,6 +266,9 @@ export function isAreaDataset(v: unknown): boolean {
   return isObj(v) && Array.isArray(v.street_segments) && (isObj(v.record_defaults) || 'dataset_title' in v);
 }
 
+/** A segment end at the edge of the source map rather than a cross street. */
+const MAP_EDGE = /\bmap boundary\b|\bmap edge\b/i;
+
 const AREA_RULE: [RegExp, RuleType][] = [
   [/no\s*stopping/i, 'no_stopping'],
   [/no\s*parking/i, 'no_parking'],
@@ -292,7 +296,10 @@ export function areaDatasetToRelease(src: Record<string, unknown>, opts: { linki
   const municipality = str(scope.municipality) || 'Unknown council';
   const code = councilCode(municipality);
   const known = COUNCILS[municipality.toLowerCase()];
-  const area = str(defaults.enforcement_zone) || (Array.isArray(scope.requested_enforcement_zones) ? str(scope.requested_enforcement_zones[0]) : '');
+  // The patrol zones the dataset covers: one (Area 10) or several (Zones 9 and 9A).
+  const requested = (Array.isArray(scope.requested_enforcement_zones) ? scope.requested_enforcement_zones : []).map(str).filter(Boolean);
+  const areaZones = str(defaults.enforcement_zone) ? [str(defaults.enforcement_zone)] : requested;
+  const area = areaZones.map(slug).join('-');
   const notes = [str(scope.area_depicted), str(scope.important_distinction), ...(Array.isArray(src.missing_authoritative_fields) ? [`Missing authoritative fields: ${src.missing_authoritative_fields.map(str).join(', ')}`] : [])].filter(Boolean);
   const b = new ReleaseBuilder(
     emptyRelease({
@@ -312,7 +319,7 @@ export function areaDatasetToRelease(src: Record<string, unknown>, opts: { linki
       name: str(s.name),
       issuer: str(s.publisher) || null,
       dataset: str(s.reference) || str(s.map_reference) || null,
-      url: str(s.resource_url) || str(s.catalogue_url) || str(s.wfs_url) || null,
+      url: str(s.url) || str(s.resource_url) || str(s.catalogue_url) || str(s.wfs_url) || null,
       format: str(s.format) || null,
       licence: null,
       reference_date: str(s.reference_period) || str(s.document_date) || null,
@@ -321,27 +328,44 @@ export function areaDatasetToRelease(src: Record<string, unknown>, opts: { linki
     }),
   );
   const mapSource = sources[0] ?? null;
+  // Every zone the dataset covers is defined, even before segments are assigned to it.
+  for (const z of areaZones) b.defineZone('patrol', z);
+  const unassigned: string[] = [];
   for (const raw of (src.street_segments as unknown[]).filter(isObj)) {
     const r = { ...defaults, ...raw } as Record<string, unknown>;
     const assetId = str(r.road_segment_id) || str(r.road_segment_asset_id) || str(r.asset_id) || null;
     const dq = isObj(r.data_quality) ? r.data_quality : {};
     const restrictions = (Array.isArray(r.parking_restrictions) ? r.parking_restrictions : []).filter(isObj).filter((pr) => pr.restriction_applied);
+    const zone = str(r.enforcement_zone);
+    const candidates = (Array.isArray(r.enforcement_zone_candidates) ? r.enforcement_zone_candidates : []).map(str).filter(Boolean);
+    for (const z of candidates) b.defineZone('patrol', z);
+    const from = str(r.between_street_name);
+    const to = str(r.and_street_name);
     const segmentId = b.segment({
       asset_id: assetId,
       road_name: str(r.road_segment_name),
-      from_label: str(r.between_street_name),
-      to_label: str(r.and_street_name),
+      from_label: from,
+      to_label: to,
+      // "Western map boundary": the edge of the source map, not a cross street.
+      from_type: MAP_EDGE.test(from) ? 'boundary' : 'intersection',
+      to_type: MAP_EDGE.test(to) ? 'boundary' : 'intersection',
       locality: str(r.locality) || null,
       geometry: isObj(r.geometry) ? (r.geometry as never) : null,
       verification: restrictions.length ? 'unverified' : 'pending_field_capture',
       source_id: mapSource,
-      notes: [str(dq.endpoints_status), str(dq.restriction_status)].filter(Boolean).join('; ') || null,
+      notes: [dq.street_names_visually_confirmed === false ? 'street name not visually confirmed' : '', str(dq.endpoints_status), str(dq.restriction_status)].filter(Boolean).join('; ') || null,
     });
     if (mapSource && str(r.segment_id)) b.sourceRef(segmentId, mapSource, str(r.segment_id), 'source_row_id');
     if (mapSource && assetId) b.sourceRef(segmentId, mapSource, assetId, 'road_segment_asset_id');
     const side = (SIDES as readonly string[]).includes(str(r.road_side)) ? (str(r.road_side) as Side) : 'both';
-    const extentId = b.extent({ segment_id: segmentId, side, restrictions_status: restrictions.length ? 'supplied' : 'pending_field_capture' });
-    if (str(r.enforcement_zone)) b.zone(extentId, 'patrol', str(r.enforcement_zone), null, { source_id: mapSource });
+    const extentId = b.extent({
+      segment_id: segmentId,
+      side,
+      restrictions_status: restrictions.length ? 'supplied' : 'pending_field_capture',
+      notes: !zone && candidates.length ? `Patrol zone not yet assigned (candidates: ${candidates.join(', ')})` : null,
+    });
+    if (zone) b.zone(extentId, 'patrol', zone, null, { source_id: mapSource });
+    else if (candidates.length) unassigned.push(str(r.segment_id) || segmentId);
     for (const pr of restrictions) {
       const text = str(pr.restriction_applied);
       const signCode = /(\d+\/\d+P|\d+P|P\d+)/i.exec(text)?.[1]?.toUpperCase() ?? null;
@@ -372,5 +396,6 @@ export function areaDatasetToRelease(src: Record<string, unknown>, opts: { linki
       );
     }
   }
+  if (unassigned.length) warnings.push(`${unassigned.length} segment(s) have no patrol zone yet (only candidates: ${areaZones.join(', ')}). They import under "No patrol zone" until each is assigned.`);
   return { release: b.r, warnings };
 }

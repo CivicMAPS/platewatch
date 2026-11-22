@@ -12,6 +12,7 @@ import {
   relinkRelease,
   ReleaseBuilder,
   releaseToCsv,
+  splitByZone,
   TABLE_NAMES,
   TABLES,
   validateRelease,
@@ -271,5 +272,63 @@ describe('CSV tables in a zip', () => {
     writeFileSync(file, Buffer.from(await zip.arrayBuffer()));
     const listing = execFileSync('python3', ['-I', '-c', 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print("\\n".join(z.namelist())); print(z.read("rel/segments.csv").decode().splitlines()[0])', file], { encoding: 'utf8' });
     expect(listing.trim().split('\n')).toEqual([...TABLE_NAMES.map((t) => `rel/${t}.csv`), TABLES.segments.join(',')]);
+  });
+});
+
+describe('Zones 9 and 9A → one release per zone', () => {
+  const source = readJson('tests/fixtures/copp-area-9-9a-source.json');
+  const { release: r, warnings } = areaDatasetToRelease(source);
+
+  it('defines both zones but assigns no segment while the source only lists candidates', () => {
+    valid(r);
+    expect(r.release[0]).toMatchObject({ release_id: 'copp-patrol-area-9-9a-v1', dataset_id: 'patrol-area-9-9a' });
+    expect(r.zones.map((z) => [z.zone_id, z.code])).toEqual([['copp-patrol-9', '9'], ['copp-patrol-9a', '9A']]);
+    expect(r.segments).toHaveLength(14);
+    expect(r.zone_assignments).toEqual([]);
+    expect(r.extents.every((e) => e.notes === 'Patrol zone not yet assigned (candidates: 9, 9A)')).toBe(true);
+    expect(warnings).toEqual(['14 segment(s) have no patrol zone yet (only candidates: 9, 9A). They import under "No patrol zone" until each is assigned.']);
+  });
+
+  it('keeps a map edge as a boundary, not a cross street, and notes unconfirmed names', () => {
+    const market = r.segments.find((s) => s.segment_id === 'copp-market-street-from-western-map-boundary-to-clarendon')!;
+    expect(market).toMatchObject({ from_label: 'Western map boundary', from_type: 'boundary', to_type: 'intersection' });
+    expect(r.segments.find((s) => s.road_name === 'Clarke Street')!.notes).toMatch(/^street name not visually confirmed/);
+    expect(r.sources[1]!.url).toBe('https://opendata.portphillip.vic.gov.au/explore/');
+  });
+
+  it('puts unassigned extents in no file rather than guessing a zone', () => {
+    const { releases, unassigned } = splitByZone(r);
+    expect(releases).toEqual([]);
+    expect(unassigned).toHaveLength(14);
+  });
+
+  it('splits into one complete release per zone once segments are assigned', () => {
+    // Illustrative split for the test only; the real 9 / 9A assignment comes from the council.
+    const assignedSource = structuredClone(source);
+    assignedSource.street_segments.forEach((s: Record<string, unknown>, i: number) => (s.enforcement_zone = i < 5 ? '9' : '9A'));
+    const { release, warnings: w } = areaDatasetToRelease(assignedSource);
+    expect(w).toEqual([]);
+    const { releases, unassigned } = splitByZone(release);
+    expect(unassigned).toEqual([]);
+    expect(releases.map((x) => [x.release[0]!.release_id, x.extents.length])).toEqual([
+      ['copp-patrol-area-9-v1', 5],
+      ['copp-patrol-area-9a-v1', 9],
+    ]);
+    for (const x of releases) {
+      valid(x);
+      expect(x.zones).toHaveLength(1);
+      expect(x.segments.map((s) => s.segment_id).sort()).toEqual([...new Set(x.extents.map((e) => e.segment_id))].sort());
+    }
+    expect(releases[1]!.zones[0]).toMatchObject({ zone_id: 'copp-patrol-9a', code: '9A' });
+    // Imported on a device, each zone's lists carry their own patrol zone.
+    expect(releaseToDrafts(releases[1]!).drafts.every((d) => d.list.patrolZone === '9A')).toBe(true);
+  });
+
+  it('a single-zone release splits into itself (Area 10)', () => {
+    const { releases, unassigned } = splitByZone(area10.release);
+    expect(unassigned).toEqual([]);
+    expect(releases).toHaveLength(1);
+    expect(releases[0]!.release[0]!.release_id).toBe('copp-patrol-area-10-v1');
+    expect(releases[0]).toEqual(area10.release);
   });
 });

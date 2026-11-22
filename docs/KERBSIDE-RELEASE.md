@@ -133,13 +133,24 @@ The secret CivicMAPS ID is never written to a release.
   empty cell; lists and geometry are JSON text.
   - From a file: `npm run release:csv -- <release.json> <folder>`.
   - From PlateWatch: *Import → Export → Tables (CSV)*, which gives a zip.
+- **One release per patrol zone:** a release covering several zones (City of Port Phillip
+  zones 9 and 9A) is split so a device can load only the zone it patrols:
 
-## Council area datasets (Area 10)
+  ```
+  npm run release:split -- <release.json> <folder>
+  ```
 
-`areaDatasetToRelease` adapts a `street_segments` + `record_defaults` dataset to a candidate
-release, and PlateWatch also imports such a file directly.
+  This gives `copp-patrol-area-9.release.json` and `copp-patrol-area-9a.release.json`.
+  - Each holds that zone's extents and everything they reference, plus all of the sources.
+  - An extent in two zones goes in both.
+  - Extents with no patrol zone go in no file; they are listed instead.
 
-| Area 10 | Release |
+## Council area datasets (Area 10, Zones 9 and 9A)
+
+`areaDatasetToRelease` adapts a `street_segments` dataset (with or without `record_defaults`)
+to a candidate release, and PlateWatch also imports such a file directly.
+
+| Area dataset | Release |
 |---|---|
 | `scope.municipality` | `release`: `municipality_name`, `council_code` `copp`, `state`, `country`, `timezone` |
 | `dataset_title`, `scope`, `missing_authoritative_fields` | `release.notes` |
@@ -150,6 +161,10 @@ release, and PlateWatch also imports such a file directly.
 | `segment_id` (the source's own row ID) | `segment_source_refs` with `id_scheme: source_row_id` |
 | `road_side` | `extents.side` |
 | `enforcement_zone: "10"` | zone `copp-patrol-10` in scheme `copp-patrol`, assigned to the extent |
+| `scope.requested_enforcement_zones: ["9", "9A"]` | zones `copp-patrol-9` and `copp-patrol-9a` (code `9A` as issued) are defined; the dataset is `patrol-area-9-9a` |
+| `enforcement_zone: null` with `enforcement_zone_candidates` | no zone assignment (not guessed); the extent notes the candidates and the import warns. The segments show under *No patrol zone* until assigned |
+| "Western map boundary" and other map edges | `from_type`/`to_type` `boundary`, not `intersection` |
+| `data_quality.street_names_visually_confirmed: false` | noted on the segment |
 | `parking_restrictions[]` with `restriction_applied: null` | no rule; extent `pending_field_capture` |
 | `parking_restrictions[]` with a control | `rules` + `rule_assignments` (sign ID, effective dates, verification) |
 
@@ -159,6 +174,9 @@ To complete Area 10:
 2. Survey each side, splitting it into extents where signs change.
 3. Add the rules, PayStay provider areas and meters.
 4. Raise `verification` as records are field checked or verified.
+
+To complete Zones 9 and 9A, set each segment's `enforcement_zone` to `9` or `9A`, convert it,
+then split the release into one release per zone.
 
 ## CivicMAPS-preview data
 

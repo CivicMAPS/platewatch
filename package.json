@@ -17,7 +17,8 @@
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug",
     "android:release": "npm run android:sync && cd android && ./gradlew assembleRelease",
     "release:csv": "node --experimental-strip-types --no-warnings scripts/release-to-csv.ts",
-    "release:link": "node --experimental-strip-types --no-warnings scripts/assign-linking-id.ts"
+    "release:link": "node --experimental-strip-types --no-warnings scripts/assign-linking-id.ts",
+    "release:split": "node --experimental-strip-types --no-warnings scripts/split-release.ts"
   },
   "author": "TechCorp",
   "license": "UNLICENSED",

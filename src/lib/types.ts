@@ -2,6 +2,25 @@
 
 export type ListType = 'allow' | 'timed' | 'hot';
 
+/**
+ * Where a list came from (WF-S26 OQ26-5, owner decision 23/11/2026).
+ * - `system`: applied to the device from outside — imported from a file today; in EnforcementMAPS,
+ *   published from the CommandMAPS dashboard by a team leader or parking services management.
+ * - `officer`: created on the device by the officer for their patrol (a daily digital chalking list).
+ * Lists saved before this field existed have none and are treated as `officer` lists with no day.
+ */
+export type ListOrigin = 'system' | 'officer';
+
+export interface ListSource {
+  origin: ListOrigin;
+  /** File name(s) a system list was imported from, joined with ", ". */
+  importedFrom?: string;
+  /** When a system list was last imported or updated by an import. */
+  importedAt?: number;
+  /** Officer lists: the local day ("YYYY-MM-DD") the list was created for. */
+  serviceDay?: string;
+}
+
 export interface BaseList {
   id: string;
   type: ListType;
@@ -9,6 +28,8 @@ export interface BaseList {
   notes: string;
   createdAt: number;
   updatedAt: number;
+  /** Provenance; absent on lists saved before it existed. See `lib/listPolicy.ts`. */
+  source?: ListSource;
 }
 
 /* ───────────────────────────── Allow list ───────────────────────────── */
@@ -353,6 +374,8 @@ export interface Settings {
   diagnostics: boolean;
   /** Home: patrol zone shown (null = all zones, '' = lists without a zone). */
   listZoneFilter: string | null;
+  /** CivicMAPS display theme: light civic surfaces, or the design system's low-light dark theme. */
+  theme: 'light' | 'dark';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -365,4 +388,5 @@ export const DEFAULT_SETTINGS: Settings = {
   // On during the development field-test stage; turn the default off before production.
   diagnostics: true,
   listZoneFilter: null,
+  theme: 'light',
 };

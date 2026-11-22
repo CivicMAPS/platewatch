@@ -260,7 +260,7 @@ async function main() {
   await page.mouse.up();
   await page.waitForSelector('[data-testid=zoom-slider]', { visible: true, timeout: 5000 });
   if ((await page.evaluate(() => window.__zoom)) !== 3.5) throw new Error('long-press changed the zoom');
-  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; ● DIAG shown');
+  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; DIAG shown');
   await shot('camera');
   await page.click('[data-testid=shutter]');
   await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 90000 });
@@ -350,7 +350,7 @@ async function main() {
     const permitText = await page.$eval('[data-testid=result-exempt]', (el) => el.textContent);
     const permitClass = await page.$eval('[data-testid=result-exempt]', (el) => el.className);
     if (!/Permit valid/.test(permitText) || !/Sighting recorded/.test(permitText)) throw new Error(`permit result for ${plate} was "${permitText}"`);
-    if (!/border-emerald-500/.test(permitClass)) throw new Error('permit result is not green');
+    if (!/border-active\b/.test(permitClass)) throw new Error('permit result is not green (CivicMAPS --status-active)');
     await waitText('Saved · SHA-256');
   }
   await shot('permit-valid');
@@ -388,6 +388,25 @@ async function main() {
   await page.$eval('[data-testid=list-search]', (el) => { el.value = ''; el.dispatchEvent(new Event('input')); });
   await waitText('Restrictions to enter');
   log('bulk import: CSV template + CivicMAPS kerbside JSON → 4 timed lists, found by bay sign');
+
+  // Imported lists are system lists (OQ26-5). In the development build they stay editable and
+  // deletable here, with a SYSTEM tag; import is reachable from the Home header.
+  await page.waitForSelector('[data-testid=header-import]', { visible: true });
+  await type('[data-testid=list-search]', '64558');
+  await waitText('64558 = area 645 · bay 58');
+  await page.click('[data-testid=timed-row] button');
+  await page.waitForSelector('[data-testid=system-tag]', { visible: true });
+  await waitText('Imported from');
+  await page.waitForSelector('[data-testid=edit-list]', { visible: true });
+  await page.waitForSelector('[data-testid=delete-list]', { visible: true });
+  await shot('system-list');
+  await page.click('[data-testid=edit-list]');
+  await page.waitForSelector('[data-testid=dev-override]', { visible: true });
+  await waitText('Paid parking (optional)');
+  await shot('system-list-edit');
+  await page.goto(`${ORIGIN}/#/`);
+  await page.waitForSelector('[data-testid=list-search]', { visible: true });
+  log('imported list: SYSTEM tag and provenance; editable and deletable in the development build');
 
   // The kerbside release for City of Port Phillip Patrol Area 10: 55 segments, signs not yet surveyed.
   await page.goto(`${ORIGIN}/#/import`);

@@ -154,6 +154,16 @@ export function parseBackup(text: string): {
         );
       else delete l.untimedControls;
     }
+    // Provenance (OQ26-5): keep only a well-formed source; anything else counts as an officer list.
+    if (isObj(l.source) && (l.source.origin === 'system' || l.source.origin === 'officer')) {
+      const src = l.source;
+      l.source = {
+        origin: src.origin,
+        ...(typeof src.importedFrom === 'string' ? { importedFrom: src.importedFrom } : {}),
+        ...(typeof src.importedAt === 'number' && Number.isFinite(src.importedAt) ? { importedAt: src.importedAt } : {}),
+        ...(typeof src.serviceDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(src.serviceDay) ? { serviceDay: src.serviceDay } : {}),
+      };
+    } else delete l.source;
     lists.push(l as unknown as PlateList);
   }
 

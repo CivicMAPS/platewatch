@@ -312,6 +312,22 @@ describe('CivicMAPS-preview JSON', () => {
 });
 
 describe('planImport', () => {
+  it('marks every created or updated list as a system list from its file(s) (OQ26-5)', () => {
+    const existing: TimedList = timed({
+      id: 'officer-list',
+      source: { origin: 'officer', serviceDay: '2026-11-21' },
+      segment: { street: 'Smith Street', fromStreet: 'Johnston St', toStreet: 'Gertrude St', side: 'both', suburb: 'Fitzroy' },
+    });
+    const csv = [
+      LEGACY_TIMED_HEADER,
+      '3,North,Smith Street,Johnston St,Gertrude St,both,Fitzroy,,,,,,,,2P,,Mon-Fri,08:00,18:00,,,',
+      '3,North,Brunswick Street,Johnston St,Gertrude St,both,Fitzroy,,,,,,,,1P,,Mon-Fri,09:00,17:00,,,',
+    ].join('\n');
+    const plan = planImport(parseImportFile(csv, 'zone-3.csv').drafts, [existing], { updateExisting: true }, 1_800_000_000_000);
+    for (const l of [...plan.created, ...plan.updated]) expect(l.source).toEqual({ origin: 'system', importedFrom: 'zone-3.csv', importedAt: 1_800_000_000_000 });
+    expect(plan.updated[0]!.id).toBe('officer-list');
+  });
+
   it('creates new lists and updates the matching segment, keeping its id, linked allow lists and restrictions when the import has none', () => {
     const existing: TimedList = timed({
       id: 'keep-me',

@@ -14,6 +14,7 @@
  */
 import { normalisePayment } from './payment';
 import { uid } from './db';
+import { systemSource } from './listPolicy';
 import { RELEASE_SCHEMA, validateRelease, type KerbsideRelease } from './kerbsideRelease';
 import { areaDatasetToRelease, isAreaDataset, releaseToDrafts } from './releaseAdapters';
 import { normalisePlate, plateKey } from './plate';
@@ -1146,6 +1147,13 @@ export function planImport(drafts: readonly ImportDraft[], existing: readonly Pl
   const leftAlone = new Set<string>();
 
   const unmatchedBays: string[] = [];
+  /** Files each changed list came from (a draft's source is "file" or "file row n"). */
+  const filesById = new Map<string, Set<string>>();
+  const noteFile = (id: string, source: string) => {
+    let set = filesById.get(id);
+    if (!set) filesById.set(id, (set = new Set()));
+    set.add(source.replace(/ row \d+$/, ''));
+  };
 
   for (const d of drafts) {
     const keys = d.kind === 'bays' ? keysOf({ type: 'timed', name: '', ...d.target }) : keysOf(d.list as PlateList);
@@ -1171,6 +1179,7 @@ export function planImport(drafts: readonly ImportDraft[], existing: readonly Pl
         updatedAt: now,
       };
       changed.set(merged.id, { list: merged, isNew: isNewTarget });
+      noteFile(merged.id, d.source);
       for (const k of keysOf(merged)) index.set(k, merged);
       continue;
     }
@@ -1186,7 +1195,14 @@ export function planImport(drafts: readonly ImportDraft[], existing: readonly Pl
       next = mergeInto(target, d, now);
     }
     changed.set(next.id, { list: next, isNew });
+    noteFile(next.id, d.source);
     for (const k of [...keys, ...keysOf(next)]) index.set(k, next);
+  }
+  // Every list an import creates or changes is a system list (OQ26-5): in EnforcementMAPS its
+  // settings are not edited on the device. Record which file(s) it came from.
+  for (const [id, files] of filesById) {
+    const c = changed.get(id);
+    if (c) c.list = { ...c.list, source: systemSource([...files].join(', '), now) };
   }
   const createdLists = [...changed.values()].filter((c) => c.isNew).map((c) => c.list);
   return {

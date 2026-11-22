@@ -10,10 +10,10 @@ import { describeOcr, timingState } from '../../lib/recordSummary';
 import { shareFile } from '../../lib/files';
 import { formatLatLng, mapUrl } from '../../lib/geo';
 import { sha256Hex } from '../../lib/hash';
-import { formatClock, formatDateTime, formatDuration, formatMinutes } from '../../lib/time';
+import { formatClock, formatDateTime, formatDuration, formatMinutes, formatStamp } from '../../lib/time';
 import type { Observation, PlateList, ScanRecord } from '../../lib/types';
 import type { App, View } from '../app';
-import { header, icon, page, plateBadge, UrlBag } from '../components';
+import { banner, header, icon, nearMatchSheet, page, plateBadge, statusPill, UrlBag } from '../components';
 import { outcomeChip } from './listDetail';
 
 /** Timing status; "overdue" matches OVERDUE on the list once allowance + grace has run out. */
@@ -23,10 +23,10 @@ function timingLine(o: Observation): TemplateResult {
   const started = `started ${formatDateTime(o.startedAt)}`;
   if (state === 'overdue') {
     const endedAt = o.allowanceEndsAt + o.graceMinutes * 60_000;
-    return html`<p class="text-sm text-slate-300">Status: <strong class="text-red-300">overdue</strong> · ${started} · allowance ended ${formatClock(endedAt)} (${formatDuration(now - endedAt)} ago). Re-scan the vehicle to record an overstay.</p>`;
+    return html`<p class="text-sm text-neutral-700">${statusPill('overdue')} ${started} · allowance ended <span class="font-plate">${formatClock(endedAt)}</span> (${formatDuration(now - endedAt)} ago). Re-scan the vehicle to record an overstay.</p>`;
   }
-  const label = state === 'running' ? 'active' : state;
-  return html`<p class="text-sm text-slate-300">Status: <strong>${label}</strong> · ${started} · allowance ends ${formatClock(o.allowanceEndsAt)}</p>`;
+  const pill = state === 'running' ? statusPill('timing', 'Active') : statusPill('not_in_force', state);
+  return html`<p class="text-sm text-neutral-700">${pill} ${started} · allowance ends <span class="font-plate">${formatClock(o.allowanceEndsAt)}</span></p>`;
 }
 
 export function recordView(params: Record<string, string>, app: App): View {
@@ -40,8 +40,11 @@ export function recordView(params: Record<string, string>, app: App): View {
   const urls = new UrlBag();
 
   let near: string[] = [];
+  /** Persistent error for the edit-plate form (assessment D6). */
+  let draftError = '';
   const saveDraft = async (dismiss = false) => {
     if (!scan || draft === null || !list) return;
+    draftError = '';
     try {
       if (!dismiss) {
         const lists = [...await getHotLists(), ...((await getAllowLists()).filter(a =>
@@ -58,7 +61,11 @@ export function recordView(params: Record<string, string>, app: App): View {
       }
       await correctRecord(id,normalisePlate(draft),scan.plate);
       near=[]; draft=null; await load();
-    } catch(error) {app.toast((error as Error).message,'error');}
+    } catch (error) {
+      near = [];
+      draftError = (error as Error).message;
+      app.update();
+    }
   };
   let draft: string | null = null;
   const load = async () => {
@@ -147,7 +154,7 @@ export function recordView(params: Record<string, string>, app: App): View {
     app.update();
   };
 
-  const row = (label: string, value: TemplateResult | string) => html`<dt class="text-slate-400">${label}</dt><dd class="min-w-0 break-words">${value}</dd>`;
+  const row = (label: string, value: TemplateResult | string) => html`<dt class="text-neutral-600">${label}</dt><dd class="min-w-0 break-words">${value}</dd>`;
 
   return {
     mount: load,
@@ -160,20 +167,42 @@ export function recordView(params: Record<string, string>, app: App): View {
           title: s.plate,
           subtitle: list ? list.name : 'Scan record',
           back: () => app.back(`/list/${s.listId}`),
-          actions: html`<button type="button" class="btn-ghost min-h-11 px-3" aria-label="Share evidence" @click=${share}>${icon('share')}</button>`,
+          actions: html`<button type="button" class="btn-chrome" aria-label="Share evidence" @click=${share}>${icon('share')}</button>`,
         })}
         ${page(html`
-          <a href=${urls.get(s.image)} target="_blank" rel="noopener"><img src=${urls.get(s.image)} alt="Evidence image" class="w-full rounded-xl border border-ink-600 bg-black" /></a>
-          ${draft === null ? html`<button class="btn-secondary" @click=${() => { draft=s.plate; app.update(); }}>Edit plate</button>` :
-            html`<form @submit=${async (event:Event) => {
-              event.preventDefault();
-              await saveDraft();
-            }}><label>Plate <input class="field" maxlength="10" .value=${draft} @input=${(e:Event) => draft=(e.target as HTMLInputElement).value}></label>
-            <button class="btn-primary">Save and recheck</button><button type="button" class="btn-secondary" @click=${() => {draft=null;app.update();}}>Cancel</button></form>`}
-          ${near.length ? html`<div role="dialog" class="fixed inset-0 z-50 grid place-items-center bg-black/80"><section class="card"><img class="max-h-48" src=${urls.get(s.thumb)} alt="Current capture"><p>Current scan · ${draft}</p>${near.map(n => html`<p>Near match · ${n}</p>`)}<button class="btn-primary" @click=${() => {near=[];app.update();}}>Edit</button><button class="btn-secondary" @click=${() => saveDraft(true)}>Dismiss</button></section></div>` : nothing}
-          ${s.revisions?.map(r => html`<p>Previous plate ${r.plate} · ${r.outcome} · amended ${formatDateTime(r.at)}</p>`)}
-          ${s.amendmentResult ? html`<p>Recheck · ${s.amendmentResult.replaceAll('_',' ')} ${s.amendmentMatches?.join(', ')}</p>` : nothing}
-          <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome)}${s.corrected ? html`<span class="chip border-ink-600 text-slate-300">OCR corrected</span>` : nothing}</div>
+          <a href=${urls.get(s.image)} target="_blank" rel="noopener"><img src=${urls.get(s.image)} alt="Evidence image" class="w-full rounded-md border border-neutral-200 bg-black" /></a>
+          <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
+          ${draft === null
+            ? html`<button type="button" class="btn-secondary mt-3 w-full" @click=${() => { draft = s.plate; draftError = ''; app.update(); }}>${icon('edit')} Edit plate</button>`
+            : html`<form class="card mt-3" @submit=${async (event: Event) => { event.preventDefault(); await saveDraft(); }}>
+                <label for="edit-plate" class="field-label">Corrected plate</label>
+                <input id="edit-plate" class="field text-center font-plate text-2xl font-bold tracking-[0.2em] uppercase" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                  .value=${draft} @input=${(e: Event) => (draft = (e.target as HTMLInputElement).value)} />
+                <p class="mt-2 text-xs text-neutral-600">Re-runs the check at the original capture time. The evidence image and its SHA-256 are not changed.</p>
+                ${draftError ? html`<div class="mt-3">${banner('alert', 'Could not save the corrected plate', draftError)}</div>` : nothing}
+                <div class="mt-3 grid grid-cols-2 gap-3">
+                  <button type="button" class="btn-secondary" @click=${() => { draft = null; draftError = ''; app.update(); }}>Cancel</button>
+                  <button type="submit" class="btn-primary">${icon('check')} Save and recheck</button>
+                </div>
+              </form>`}
+          ${near.length
+            ? nearMatchSheet({
+                imageUrl: urls.get(s.thumb),
+                plate: normalisePlate(draft ?? ''),
+                suggestions: near,
+                onEdit: () => { near = []; app.update(); },
+                onNotMatch: () => void saveDraft(true),
+              })
+            : nothing}
+          ${s.amendmentResult
+            ? html`<div class="mt-3">${banner('pending', 'Rechecked after plate correction', html`${s.amendmentResult.replaceAll('_', ' ')}${s.amendmentMatches?.length ? html` · <span class="font-plate">${s.amendmentMatches.join(', ')}</span>` : nothing}`)}</div>`
+            : nothing}
+          ${s.revisions?.length
+            ? html`<section class="card mt-3">
+                <h2 class="section-title">Plate history</h2>
+                <ul class="grid gap-1 text-sm">${s.revisions.map((r) => html`<li>Previous plate <span class="font-plate font-semibold">${r.plate}</span> · ${r.outcome.replaceAll('_', ' ')} · amended ${formatDateTime(r.at)}</li>`)}</ul>
+              </section>`
+            : nothing}
 
           ${observation
             ? html`<section class="card mt-4">
@@ -182,11 +211,11 @@ export function recordView(params: Record<string, string>, app: App): View {
                 <ol class="mt-3 grid gap-2">
                   ${timeline.map(
                     (t, i) => html`<li>
-                      <a href="#/record/${t.id}" class="flex items-center gap-3 rounded-xl p-2 ${t.id === s.id ? 'bg-ink-800' : ''}">
+                      <a href="#/record/${t.id}" class="flex items-center gap-3 rounded-md p-2 ${t.id === s.id ? 'bg-surface-sunken' : ''}">
                         <img src=${urls.get(t.thumb)} alt="" class="h-12 w-16 rounded-md object-cover" />
                         <div class="flex-1 text-sm">
-                          <p class="font-semibold">Scan ${i + 1} · ${formatClock(t.meta.capturedAt)}</p>
-                          <p class="text-xs text-slate-400">${i === 0 ? 'First sighting' : `+${formatDuration(t.meta.capturedAt - observation!.startedAt)} after scan 1`}</p>
+                          <p class="font-semibold">Scan ${i + 1} · <span class="font-plate">${formatClock(t.meta.capturedAt)}</span></p>
+                          <p class="text-xs text-neutral-600">${i === 0 ? 'First sighting' : `+${formatDuration(t.meta.capturedAt - observation!.startedAt)} after scan 1`}</p>
                         </div>
                         ${outcomeChip(t.outcome)}
                       </a>
@@ -203,34 +232,35 @@ export function recordView(params: Record<string, string>, app: App): View {
             <h2 class="section-title">Capture metadata</h2>
             <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
               ${paymentLines(s.meta.payment).map(line => row('Paid parking', line))}
-              ${row('Device time', html`<span class="font-plate">${s.meta.capturedAtLocal}</span>`)}
+              ${row('Device time', html`<span class="font-plate">${formatStamp(s.meta.capturedAt)}</span>`)}
+              ${row('ISO 8601', html`<span class="font-plate text-xs">${s.meta.capturedAtLocal}</span>`)}
               ${row('UTC', html`<span class="font-plate">${new Date(s.meta.capturedAt).toISOString()}</span>`)}
               ${row('Time zone', s.meta.timeZone)}
               ${loc
-                ? html`${row('Lat, lng', html`<a class="text-brand-400 underline" href=${mapUrl(loc)} target="_blank" rel="noopener noreferrer">${formatLatLng(loc)}</a>`)}
+                ? html`${row('Lat, lng', html`<a class="link font-plate" href=${mapUrl(loc)} target="_blank" rel="noopener noreferrer">${formatLatLng(loc)}</a>`)}
                   ${row('Accuracy', `±${loc.accuracy.toFixed(1)} m`)}
                   ${loc.altitude !== null ? row('Altitude', `${loc.altitude.toFixed(1)} m${loc.altitudeAccuracy !== null ? ` ±${loc.altitudeAccuracy.toFixed(1)}` : ''}`) : nothing}
                   ${loc.heading !== null ? row('Heading', `${loc.heading.toFixed(0)}°`) : nothing}
                   ${loc.speed !== null ? row('Speed', `${(loc.speed * 3.6).toFixed(1)} km/h`) : nothing}
                   ${row('Fix age', s.meta.locationAgeMs !== null ? `${(s.meta.locationAgeMs / 1000).toFixed(1)} s` : '—')}`
-                : row('Location', html`<span class="text-red-300">Unavailable</span>`)}
+                : row('Location', html`<span class="inline-flex items-center gap-1 font-semibold text-alert-strong">${icon('alert', 'h-4 w-4')} Unavailable</span>`)}
               ${row('OCR', describeOcr(s))}
               ${row('SHA-256', html`<span class="font-plate text-xs">${s.sha256}</span>`)}
             </dl>
             <button type="button" class="btn-secondary mt-3 w-full" @click=${verify} ?disabled=${integrity === 'checking'}>${icon('shield')} Verify image integrity & EXIF</button>
             ${integrity === 'ok'
-              ? html`<p class="mt-2 text-sm text-emerald-300">Image hash matches the value recorded at capture.</p>`
+              ? html`<div class="mt-3">${banner('active', 'Image hash matches the value recorded at capture.', undefined, 'integrity-ok')}</div>`
               : integrity === 'mismatch'
-                ? html`<p class="mt-2 text-sm text-red-300">Hash mismatch — image differs from capture.</p>`
+                ? html`<div class="mt-3">${banner('alert', 'Hash mismatch — image differs from capture.', 'Do not rely on this image as evidence.', 'integrity-mismatch')}</div>`
                 : nothing}
             ${exif
-              ? html`<p class="mt-1 text-xs text-slate-400">EXIF: DateTimeOriginal ${exif.dateTimeOriginal ?? '—'} ${exif.offset ?? ''} · GPS ${exif.lat !== undefined ? `${exif.lat.toFixed(6)}, ${exif.lng?.toFixed(6)}` : 'none'}${exif.accuracy !== undefined ? ` ±${exif.accuracy} m` : ''}</p>`
+              ? html`<p class="mt-1 text-xs text-neutral-600">EXIF: DateTimeOriginal ${exif.dateTimeOriginal ?? '—'} ${exif.offset ?? ''} · GPS ${exif.lat !== undefined ? `${exif.lat.toFixed(6)}, ${exif.lng?.toFixed(6)}` : 'none'}${exif.accuracy !== undefined ? ` ±${exif.accuracy} m` : ''}</p>`
               : nothing}
           </section>
 
           <div class="mt-4 grid grid-cols-2 gap-3">
             <button type="button" class="btn-secondary" @click=${share}>${icon('share')} Share / save</button>
-            <button type="button" class="btn-ghost text-red-300" @click=${remove}>${icon('trash')} Delete</button>
+            <button type="button" class="btn-secondary" @click=${remove}>${icon('trash')} Delete</button>
           </div>
         `)}`;
     },

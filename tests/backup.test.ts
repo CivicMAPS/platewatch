@@ -8,6 +8,16 @@ import { timed } from './fixtures';
 const file = (lists: unknown[]) => JSON.stringify({ schema: BACKUP_SCHEMA, version: 1, lists, observations: [], scans: [] });
 
 describe('backup import', () => {
+  it('keeps a well-formed list source and drops a malformed one', () => {
+    const src = { origin: 'system', importedFrom: 'zone-3.csv', importedAt: 1_800_000_000_000, junk: 1 };
+    const [ok] = parseBackup(file([{ ...timed(), source: src }])).lists;
+    expect(ok!.source).toEqual({ origin: 'system', importedFrom: 'zone-3.csv', importedAt: 1_800_000_000_000 });
+    const [officer] = parseBackup(file([{ ...timed(), source: { origin: 'officer', serviceDay: '2026-11-22', importedAt: 'x' } }])).lists;
+    expect(officer!.source).toEqual({ origin: 'officer', serviceDay: '2026-11-22' });
+    const [bad] = parseBackup(file([{ ...timed(), source: { origin: 'admin' } }])).lists;
+    expect(bad!.source).toBeUndefined();
+  });
+
   it('drops malformed paid-parking data instead of crashing the views', () => {
     const bad = { ...timed(), payment: { easyPark: 'x', payStay: [{ zone: 42 }, null, { zone: '00042', meter: 7 }] } };
     const [list] = parseBackup(file([bad])).lists;

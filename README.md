@@ -4,7 +4,7 @@
 title: PlateWatch
 version: 1.0.0
 platforms: [Android APK (Capacitor 8), PWA (Chrome/Android, any HTTPS host)]
-stack: [TypeScript, Vite 8, lit-html, Tailwind CSS 4 (local build), Tesseract.js 7 (on-device WASM), IndexedDB, piexifjs]
+stack: [TypeScript, Vite 8, lit-html, Tailwind CSS 4 (local build) on CivicMAPS Design System 2.0.0-rc tokens, Lucide icons, Tesseract.js 7 (on-device WASM), IndexedDB, piexifjs]
 ---
 
 # PlateWatch
@@ -28,7 +28,8 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | Walking / vehicle patrol | Native camera screen with Exit (and Android Back), a capture counter and Single/Multi capture modes. Multi reads continuously and captures a plate seen in two frames close together, but only plate-like text (letters *and* digits, 4–8 characters) on screen, inside the guide in walking patrol; a second reading of the same plate (`1UP6YF` after `1UR6YF`) is offered as a choice at review instead of a new capture. Single reads only on the shutter, which also takes all-letter personalised plates. The shutter works in both. Every capture flashes the screen and vibrates. |
 | Field diagnostics | On by default during the development stage (Settings → Field diagnostics). Records camera resolution and zoom range, each capture's OCR engine, reading and time, the plate the officer confirmed, GPS accuracy and fix age, and every minute battery, battery temperature and Android thermal status; patrol adds frame and read rates every 30 s. On-device only; export as JSON from Settings. |
 | Street segment data | **[civicmaps.kerbside_release](docs/KERBSIDE-RELEASE.md)** is the CivicMAPS road and kerbside data standard (lean pilot core), shared with EnforcementMAPS: 15 flat tables (segments, extents, bays, zones, provider areas, meters, rules and their assignments, sources; each rule tied to the EasyPark or PayStay numbers that pay for it) in which every record has the same keys, with null where unknown. Every council's data is adapted to it. Keys use the council's linking ID (or its council code until onboarded) and the road segment asset ID; users see `com-20567`. Delivered as one JSON for devices and one CSV per table for councils, with a JSON Schema ([schemas/](schemas)), scripts to make the CSV and swap in the linking ID, and releases in [datasets/](datasets), including City of Port Phillip Patrol Area 10. |
-| Bulk import / export | *Home → New list → Import from file* (also Settings, and the empty Home screen). Reads civicmaps.kerbside_release files (validated first), area datasets (`street_segments` + `record_defaults`), the CSV templates (timed segments, numbered bays with positions, allow and hot lists; [docs/IMPORT-TEMPLATES.md](docs/IMPORT-TEMPLATES.md), [templates/](templates)) and CivicMAPS-preview data files. Shows what will be created, updated and left out, and why, before saving. Re-imports match on extent IDs, then street and side, and update lists in place; segments not yet surveyed import as placeholders. Exports all timed lists as a candidate release (JSON, or a zip of CSV tables). |
+| Bulk import / export | *Home → Import* (header ⇧), *New list → Import from file*, Settings, or the empty Home screen. Reads civicmaps.kerbside_release files (validated first), area datasets (`street_segments` + `record_defaults`), the CSV templates (timed segments, numbered bays with positions, allow and hot lists; [docs/IMPORT-TEMPLATES.md](docs/IMPORT-TEMPLATES.md), [templates/](templates)) and CivicMAPS-preview data files. Shows what will be created, updated and left out, and why, before saving. Re-imports match on extent IDs, then street and side, and update lists in place; segments not yet surveyed import as placeholders. Exports all timed lists as a candidate release (JSON, or a zip of CSV tables). |
+| List ownership | Imported lists are **system** lists (`SYSTEM` tag, "Imported from …"); lists made on the device are the officer's own. In this development build every list can be imported, created, edited and deleted. In an EnforcementMAPS build (`VITE_PLATEWATCH_MODE=enforcementmaps`) import moves to CommandMAPS (team leaders and parking services management, with authorisation), system lists are read-only, and officers create timed lists without paid parking that last for the day. See [docs/LIST-RULES.md](docs/LIST-RULES.md). |
 | Backup | Export lists, or lists + scan records, as JSON; *Include dismissed captures* (off by default) adds the Dismissed list with its evidence images. Import merges or replaces; a backup without dismissed captures leaves the device's Dismissed list untouched. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
@@ -150,12 +151,14 @@ src/
     camera.ts       rear camera, torch, zoom, continuous AF, wake lock
     ocr.ts / image.ts  Tesseract worker, ROI mapping, preprocessing
     backup.ts / files.ts  JSON export/import, share/save on web + Android
+  styles/civicmaps/  vendored CivicMAPS design-system tokens + DM Sans (see docs/DESIGN-SYSTEM.md)
   ui/             lit-html views (home, list form, list detail, scan, record, text reader, settings)
 tests/            vitest suites
 scripts/          OCR asset copy, icon generation, E2E smoke test
 android/          Capacitor project (permissions, signing, backup exclusions, PatrolCamera plugin)
 docs/SECURITY.md  CSP, data handling, permissions
 docs/EMAPS-INTEGRATION-ASSESSMENT.md  EnforcementMAPS integration gaps, battery/GPS plan
+docs/DESIGN-SYSTEM.md  CivicMAPS design system wiring and conformance (D1–D16)
 ```
 
 ## Data & privacy

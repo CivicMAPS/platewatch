@@ -5,18 +5,18 @@ so that segments are not entered one by one in the field. Open it from **Home �
 from file**, **Settings → Backup → Import lists from CSV / CivicMAPS files**, or the empty Home
 screen.
 
-The normalised format is **[civicmaps.parking_dataset](PARKING-DATA-SCHEMA.md)** (JSON). The CSV
-templates below are a spreadsheet-friendly view of the same model, for office staff, with the
-same column names. The Import screen reads:
+The CivicMAPS format is **[civicmaps.kerbside_release](KERBSIDE-RELEASE.md)** (JSON, or one CSV
+per table). The CSV templates below are a simpler, spreadsheet-friendly way for office staff to
+enter segments, one row per sign, using the release's identifiers. The Import screen reads:
 
 | File | Kind |
 |---|---|
-| `*.parking.json` with `"schema": "civicmaps.parking_dataset"` | The normalised dataset. It is validated first; a dataset with errors is not imported, and each problem is listed by path (e.g. `segments[12].sides[0].parts[1].restrictions[0].days`). |
-| Area datasets with `street_segments` and `record_defaults` (e.g. City of Port Phillip *Patrol Area 10*) | Converted to the normalised dataset on the way in. |
+| `*.release.json` with `"schema": "civicmaps.kerbside_release"` | A CivicMAPS release. It is validated first; a release with any problem is not imported, and each problem is listed by path (e.g. `rules[3].days`). |
+| Area datasets with `street_segments` and `record_defaults` (e.g. City of Port Phillip *Patrol Area 10*) | Converted to a candidate release on the way in. |
 | `platewatch-timed-segments-template.csv` | Street segments and their signs. |
 | `platewatch-bays-template.csv` | Numbered bays with positions, for segments in the same import or already on the device. |
 | `platewatch-allow-list-template.csv`, `platewatch-hot-list-template.csv` | Permits and hot-list plates. |
-| CivicMAPS-preview kerbside, road-segment, field-survey and parking-area-zone JSON | See [PARKING-DATA-SCHEMA.md](PARKING-DATA-SCHEMA.md#civicmaps-preview-data). |
+| CivicMAPS-preview kerbside, road-segment, field-survey and parking-area-zone JSON | See [KERBSIDE-RELEASE.md](KERBSIDE-RELEASE.md#civicmaps-preview-data). |
 
 To import:
 
@@ -25,34 +25,35 @@ To import:
    numbers or paths), stretches left out, and bays without a matching segment.
 3. Press **Import**. Nothing is saved before then.
 
-Importing the same data again is safe. Timed lists are matched by their dataset ID
-(`dataset_id/segment_id/side/part_id`), then by street, cross streets, side and part. Allow and
+Importing the same data again is safe. Timed lists are matched by their extent ID
+(`<segment_id>:<side>:<part_id>`), then by street, cross streets, side and part. Allow and
 hot lists are matched by name. A matching list is updated in place and keeps its name, linked
 allow lists and scan history. Restrictions already entered are kept when the import has none.
 
-The Import screen also **exports** all timed lists as a civicmaps.parking_dataset, for
-EnforcementMAPS or another device.
+The Import screen also **exports** all timed lists as a candidate civicmaps.kerbside_release:
+*Release (JSON)* for EnforcementMAPS or another device, or *Tables (CSV)* (a zip of one CSV per
+table) for council staff. Enter the council name; the council code is derived from it (`com`,
+`copp`), and a linking ID can be given once the council is onboarded.
 
 ## Timed segments: `platewatch-timed-segments-template.csv`
 
 **One row per signed control.** Rows for the same part form one timed list, with one restriction
-per row. A part is identified by `dataset_id` + `segment_id` + `side` + `part_id` when
+per row. A part is identified by `segment_id` + `side` + `part_id` (its extent ID) when
 `segment_id` is given, otherwise by road, cross streets, side and part bounds. A part with no
 signs yet gets one row with `restrictions_status` = `pending_field_capture`. It is imported as a
 placeholder: officers can find it and scan against it, and it shows *Restrictions to enter*.
 
 | Column | Required | Example | Notes |
 |---|---|---|---|
-| `dataset_id` | | `copp-patrol-area-10` | Same as `dataset.id` in the JSON: `<council code>-<area>`. |
-| `segment_id` | | `copp-31065` | `<council code>-<road segment asset ID>`, or the provisional `copp-normanby-rd-boundary-st-montague-st` until the asset ID is known. With `dataset_id` it ties rows to the dataset. |
+| `segment_id` | | `copp-31065` | `<council code>-<road segment asset ID>`, or `<council code>-<asset name>` (`copp-normanby-road-from-boundary-to-montague`) until the asset ID is known. Use the linking ID instead of the council code once the council is onboarded. Ties rows to the release. |
 | `part_id` | where a side has several parts | `bay-58-bay-72` | `all` (or blank) for the whole side. |
-| `road_segment_id` | | `20055` | The council's road segment asset ID (the column may also be named `road_segment_asset_id`). Not the same as `segment_id`. |
-| `patrol_zone` | | `10` | Internal patrol zone / enforcement area number (exported as `copp-10`). Home groups lists by it. |
+| `road_segment_id` | | `20055` | The council's road segment asset ID (the column may also be named `road_segment_asset_id`). Not the same as `segment_id`, and not the asset name. |
+| `patrol_zone` | | `10` | Internal patrol zone / enforcement area number (exported as zone `copp-patrol-10`). Home groups lists by it. |
 | `patrol_zone_name` | | `Flagstaff` | Day-to-day name of the zone. |
 | `road` | ✔ | `Coventry Street` | `St`, `Rd`, `Ave`… are matched to `Street`, `Road`, `Avenue`. |
 | `locality` | | `South Melbourne` | |
 | `between_from`, `between_to` | ✔ | `Montague Street`, `Ferrars Street` | Cross streets or boundaries, in either order. |
-| `side` | | `north` | `both` (default), `north`, `south`, `east`, `west`, `odd`, `even`. |
+| `side` | | `north` | `both` (default), `north`, `south`, `east`, `west`, `centre` (median), `odd`, `even`. |
 | `part_from`, `part_to` | | `Bay 58`, `Bay 72` | Where signs change part way along: a bay, an address or a cross street. |
 | `permit_area` | | `7` | Residential permit area code (exported as `copp-rpa-7`, so the same number in another council stays distinct). |
 | `parking_area` | | `645` | Parking area number (one per segment). Kerb plate = area + bay (`64558`). |
@@ -87,7 +88,7 @@ found are listed on the Import screen.
 
 | Column | Required | Example | Notes |
 |---|---|---|---|
-| `dataset_id`, `segment_id`, `part_id` | | `com-chinatown`, `com-20055`, `bay-58-72` | As in the timed template; preferred for matching. |
+| `segment_id`, `part_id` | | `com-20055`, `bay-58-bay-72` | As in the timed template; preferred for matching. |
 | `road`, `between_from`, `between_to` | ✔ | `Little Bourke Street`, `Swanston Street`, `Elizabeth Street` | |
 | `side`, `part_from`, `part_to` | | `south`, `Bay 58`, `Bay 72` | |
 | `bay` | ✔ | `58` | Bay number. |

@@ -15,7 +15,9 @@
     "smoke": "node scripts/smoke-test.mjs",
     "android:sync": "npm run build && npx cap sync android",
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleDebug",
-    "android:release": "npm run android:sync && cd android && ./gradlew assembleRelease"
+    "android:release": "npm run android:sync && cd android && ./gradlew assembleRelease",
+    "release:csv": "node --experimental-strip-types --no-warnings scripts/release-to-csv.ts",
+    "release:link": "node --experimental-strip-types --no-warnings scripts/assign-linking-id.ts"
   },
   "author": "TechCorp",
   "license": "UNLICENSED",

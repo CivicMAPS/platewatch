@@ -36,7 +36,7 @@ export interface AllowList extends BaseList {
 
 /* ───────────────────────────── Timed list ───────────────────────────── */
 
-export type StreetSide = 'both' | 'north' | 'south' | 'east' | 'west' | 'odd' | 'even';
+export type StreetSide = 'both' | 'north' | 'south' | 'east' | 'west' | 'centre' | 'odd' | 'even';
 
 export interface StreetSegment {
   /** Street the segment is on, e.g. "Smith Street". */
@@ -99,7 +99,7 @@ export interface BayPoint {
 
 /** A signed control without a time allowance; kept for reference and export, not timed. */
 export interface UntimedControl {
-  /** civicmaps.parking_dataset control: no_stopping, no_parking, permit_zone, loading_zone… */
+  /** civicmaps.kerbside_release rule type: no_stopping, no_parking, permit_zone, loading_zone… */
   control: 'time_limit' | 'metered' | 'ticket' | 'loading_zone' | 'permit_zone' | 'no_stopping' | 'no_parking' | 'clearway' | 'bus_zone' | 'taxi_zone' | 'accessible' | 'works_zone' | 'other';
   /** As shown, e.g. "No stopping", "Loading zone (no time limit given)". */
   label: string;
@@ -128,10 +128,12 @@ export interface TimedList extends BaseList {
   /** Signs on this stretch with no time allowance (No Stopping, No Parking, Permit Zone…). */
   untimedControls?: UntimedControl[];
   /**
-   * Where the list came from in a civicmaps.parking_dataset: "dataset/segment/side[/part]".
-   * Re-imports match on it before street names; exports keep the IDs.
+   * The extent this list came from in a civicmaps.kerbside_release: "<segment_id>:<side>:<part>".
+   * Re-imports match on it before street names; exports keep it.
    */
   externalId?: string;
+  /** What users see for the segment: council code + asset ID (com-20567), or + asset name until it has one. */
+  displayId?: string;
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */

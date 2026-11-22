@@ -15,7 +15,7 @@ export function segmentLabel(l: TimedList): string {
 /** Above this many timed lists, "All zones" shows a card per zone instead of every row. */
 const COLLAPSE_OVER = 150;
 
-const SIDE_SHORT: Record<StreetSide, string> = { both: 'both sides', north: 'N side', south: 'S side', east: 'E side', west: 'W side', odd: 'odd nos', even: 'even nos' };
+const SIDE_SHORT: Record<StreetSide, string> = { both: 'both sides', north: 'N side', south: 'S side', east: 'E side', west: 'W side', centre: 'centre', odd: 'odd nos', even: 'even nos' };
 
 /**
  * Home: every list, laid out for finding a segment quickly in the field. Timed lists are grouped
@@ -59,7 +59,7 @@ export function homeView(_p: Record<string, string>, app: App): View {
 
   const timedRow = (l: TimedList, now: number, matches: FieldMatch[]): TemplateResult => {
     const c = counts(l, now);
-    const ids = [l.rpa ? `RPA ${l.rpa}` : '', ...paymentLines(l.payment).map((p) => p.replace('Parking area', 'Area').replace('AreaNumber ', '').replace('ParkingZone ', ''))].filter(Boolean);
+    const ids = [l.displayId ?? '', l.rpa ? `RPA ${l.rpa}` : '', ...paymentLines(l.payment).map((p) => p.replace('Parking area', 'Area').replace('AreaNumber ', '').replace('ParkingZone ', ''))].filter(Boolean);
     return html`<li class="flex items-center gap-2 py-2" data-testid="timed-row">
       <button type="button" class="min-w-0 flex-1 text-left" @click=${() => app.navigate(`/list/${l.id}`)}>
         <p class="truncate text-sm font-semibold">${l.segment.fromStreet} – ${l.segment.toStreet} <span class="font-normal text-slate-400">· ${SIDE_SHORT[l.segment.side] ?? l.segment.side}</span></p>

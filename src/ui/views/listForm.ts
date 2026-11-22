@@ -41,6 +41,7 @@ const SIDES: { value: StreetSide; label: string }[] = [
   { value: 'south', label: 'South side' },
   { value: 'east', label: 'East side' },
   { value: 'west', label: 'West side' },
+  { value: 'centre', label: 'Centre (median)' },
   { value: 'odd', label: 'Odd numbers' },
   { value: 'even', label: 'Even numbers' },
 ];

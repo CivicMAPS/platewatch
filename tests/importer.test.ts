@@ -123,7 +123,7 @@ describe('timed CSV template', () => {
 
 describe('timed CSV with civicmaps.parking_dataset columns', () => {
   const row = (v: Record<string, string>) => CSV_TEMPLATES.timed.header.split(',').map((h) => v[h] ?? '').join(',');
-  const base = { dataset_id: 'copp-10', segment_id: 'coventry-st-montague-st-ferrars-st', patrol_zone: '10', road: 'Coventry Street', locality: 'South Melbourne', between_from: 'Montague Street', between_to: 'Ferrars Street', side: 'north', restrictions_status: 'supplied' };
+  const base = { segment_id: 'copp-coventry-street-from-montague-to-ferrars', patrol_zone: '10', road: 'Coventry Street', locality: 'South Melbourne', between_from: 'Montague Street', between_to: 'Ferrars Street', side: 'north', restrictions_status: 'supplied' };
 
   it('reads control, sign code, allowance, exceptions and grace; keeps the dataset external ID', () => {
     const csv = [
@@ -132,7 +132,7 @@ describe('timed CSV with civicmaps.parking_dataset columns', () => {
       row({ ...base, control: 'no_stopping', days: 'Mon-Fri', start: '07:00', end: '09:00' }),
     ].join('\n');
     const [d] = timedDrafts(csv, 'x.csv');
-    expect(d!.list).toMatchObject({ externalId: 'copp-10/coventry-st-montague-st-ferrars-st/north/all', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
+    expect(d!.list).toMatchObject({ externalId: 'copp-coventry-street-from-montague-to-ferrars:north:all', patrolZone: '10', rpa: '7', payment: { payStay: [{ zone: '338851200001', meter: '' }] } });
     expect(d!.list.restrictions[0]).toMatchObject({ code: '2P', limitMinutes: 120, graceMinutes: 5, description: 'Ticket · Permit Zone 7 excepted' });
     expect(d!.list.untimedControls).toEqual([{ control: 'no_stopping', label: 'No stopping', days: [1, 2, 3, 4, 5], allDay: false, startTime: '07:00', endTime: '09:00', description: '' }]);
   });
@@ -160,7 +160,7 @@ describe('timed CSV with civicmaps.parking_dataset columns', () => {
 describe('bays CSV', () => {
   it('adds bay numbers, positions and plate numbers to the matching timed list (by segment ID or by street)', () => {
     const timedCsv = CSV_TEMPLATES.timed.header + '\n' + CSV_TEMPLATES.timed.example;
-    const baysCsv = [CSV_TEMPLATES.bays.header, CSV_TEMPLATES.bays.example, ',,,Little Bourke Street,Elizabeth Street,Swanston Street,south,Bay 58,Bay 72,62,-37.81282,144.96426,64562X'].join('\n');
+    const baysCsv = [CSV_TEMPLATES.bays.header, CSV_TEMPLATES.bays.example, ',,Little Bourke Street,Elizabeth Street,Swanston Street,south,Bay 58,Bay 72,62,-37.81282,144.96426,64562X'].join('\n');
     const drafts = [...parseImportFile(timedCsv, 't.csv').drafts, ...parseImportFile(baysCsv, 'b.csv').drafts];
     const plan = planImport(drafts, [], { updateExisting: true });
     expect(plan.unmatchedBays).toEqual([]);
@@ -175,7 +175,7 @@ describe('bays CSV', () => {
   });
 
   it('reports bays for a segment that has no timed list, and bad coordinates', () => {
-    const csv = [CSV_TEMPLATES.bays.header, ',,,Nowhere Street,A Street,B Street,north,,,1,-37.8,144.9,', ',,,Nowhere Street,A Street,B Street,north,,,2,-137.8,144.9,'].join('\n');
+    const csv = [CSV_TEMPLATES.bays.header, ',,Nowhere Street,A Street,B Street,north,,,1,-37.8,144.9,', ',,Nowhere Street,A Street,B Street,north,,,2,-137.8,144.9,'].join('\n');
     const r = parseImportFile(csv, 'b.csv');
     expect(r.issues.map((i) => i.row)).toEqual([3]);
     expect(planImport(r.drafts, [], { updateExisting: true }).unmatchedBays[0]).toMatch(/Nowhere Street.*bays 1/);
@@ -328,19 +328,21 @@ describe('planImport', () => {
   });
 });
 
-describe('normalised and area datasets through the importer', () => {
+describe('kerbside releases and area datasets through the importer', () => {
   const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
-  it('imports a civicmaps.parking_dataset and reports invalid ones by path without importing them', () => {
-    const r = parseImportFile(read('datasets/examples/example-com-copp.parking.json'), 'example.parking.json');
-    expect(r.kind).toBe('civicmaps-dataset');
+  it('imports a civicmaps.kerbside_release and reports an invalid one by path without importing it', () => {
+    const r = parseImportFile(read('datasets/examples/com-cbd-example.release.json'), 'example.release.json');
+    expect(r.kind).toBe('civicmaps-release');
     expect(r.issues).toEqual([]);
+    // 6 extents: the north side (No Stopping only) and the stretch with no parking spaces are left out.
     expect(r.drafts.length).toBe(4);
-    const bad = JSON.parse(read('datasets/examples/example-com-copp.parking.json'));
-    bad.segments[1].sides[0].parts[0].restrictions[0].days = ['funday'];
+    expect(r.skipped).toHaveLength(2);
+    const bad = JSON.parse(read('datasets/examples/com-cbd-example.release.json'));
+    bad.rules[0].days = ['funday'];
     const rb = parseImportFile(JSON.stringify(bad), 'bad.json');
     expect(rb.drafts).toEqual([]);
-    expect(rb.issues[0]!.message).toMatch(/^segments\[1\]\.sides\[0\]\.parts\[0\]\.restrictions\[0\]\.days/);
+    expect(rb.issues[0]!.message).toMatch(/^rules\[0\]\.days/);
   });
 
   it('imports the Area 10 source file as it is (converted on the way in)', () => {
@@ -351,7 +353,7 @@ describe('normalised and area datasets through the importer', () => {
   });
 
   it('re-importing a dataset matches lists by external ID, even after the street was renamed on the device', () => {
-    const text = read('datasets/copp-patrol-area-10.parking.json');
+    const text = read('datasets/copp-patrol-area-10.release.json');
     const first = planImport(parseImportFile(text, 'a.json').drafts, [], { updateExisting: true });
     const onDevice = first.created.map((l) => (l.type === 'timed' && l.segment.street === 'Normanby Road' ? { ...l, segment: { ...l.segment, street: 'Normanby Rd (renamed)' } } : l));
     const second = planImport(parseImportFile(text, 'a.json').drafts, onDevice, { updateExisting: true });

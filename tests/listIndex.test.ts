@@ -134,3 +134,10 @@ describe('groupByZone', () => {
     expect(zoneLabel(NO_ZONE)).toBe('No patrol zone');
   });
 });
+
+describe('display ID', () => {
+  it('finds a segment by what users see (com-20567)', () => {
+    const l = seg('bourke', 'Bourke Street', 'Russell Street', 'Swanston Street', { displayId: 'com-20567', roadSegmentId: '20567' });
+    expect(searchTimedLists([...lists, l], 'com-20567').map((r) => r.list.id)).toEqual(['bourke']);
+  });
+});

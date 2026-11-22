@@ -1,0 +1,5 @@
+release_id,dataset_id,council_code,linking_id,municipality_name,state,country,timezone,version,kind,status,effective_from,generated_at,notes
+copp-patrol-area-10-v1,patrol-area-10,copp,,City of Port Phillip,VIC,AU,Australia/Melbourne,1,snapshot,candidate,,,"City of Port Phillip Parking Enforcement Patrol Area 10 - Working Street Segment and Restriction Dataset
+Parking Enforcement Patrol Area 10, centred on South Melbourne between the Normanby Road corridor, Ferrars Street, Dorcas Street and the Kings Way/Boundary Street corridor
+The PDF depicts an operational parking enforcement patrol area, not a residential parking permit area.
+Missing authoritative fields: authoritative Area 10 boundary geometry, road-side-specific kerb geometry, restriction type, applicable days, applicable start and end times, permit or vehicle exceptions, sign or parking-asset identifiers, effective dates"

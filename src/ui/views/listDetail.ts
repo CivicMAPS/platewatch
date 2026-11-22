@@ -121,7 +121,7 @@ export function listDetailView(params: Record<string, string>, app: App): View {
         <h2 class="section-title">Segment</h2>
         <p class="font-semibold">${segmentLabel(l)} ${paymentLines(l.payment).map(line => html`<span class="chip">${line}</span>`)}</p>
         ${l.segment.subFrom ? html`<p class="text-sm text-slate-200">Part of side: ${l.segment.subFrom}${l.segment.subTo ? ` → ${l.segment.subTo}` : ''}</p>` : nothing}
-        <p class="text-sm text-slate-400">${[l.patrolZone || l.patrolZoneName ? zoneLabel(l.patrolZone?.trim() || l.patrolZoneName!.trim(), l.patrolZoneName?.trim()) : '', l.rpa ? `RPA ${l.rpa}` : '', l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides', l.roadSegmentId ? `Segment ID ${l.roadSegmentId}` : ''].filter(Boolean).join(' · ')}</p>
+        <p class="text-sm text-slate-400">${[l.patrolZone || l.patrolZoneName ? zoneLabel(l.patrolZone?.trim() || l.patrolZoneName!.trim(), l.patrolZoneName?.trim()) : '', l.rpa ? `RPA ${l.rpa}` : '', l.segment.suburb, l.segment.side !== 'both' ? `${l.segment.side} side` : 'both sides', l.displayId ? `Segment ${l.displayId}` : l.roadSegmentId ? `Segment ID ${l.roadSegmentId}` : ''].filter(Boolean).join(' · ')}</p>
         ${l.bays?.length ? html`<p class="text-sm text-slate-400">Bays ${formatBays(l.bays)}${l.bayPoints?.length ? ` · ${l.bayPoints.length} with a position` : ''}</p>` : nothing}
         ${l.untimedControls?.length
           ? html`<p class="mt-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">Other signs (not timed)</p>

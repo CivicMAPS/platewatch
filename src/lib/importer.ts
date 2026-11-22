@@ -13,7 +13,8 @@
  * Everything here is pure; src/ui/views/importView.ts reads the files and saves the plan.
  */
 import { uid } from './db';
-import { convertAreaDataset, datasetToDrafts, isAreaDataset, validateDataset, DATASET_SCHEMA, type ParkingDataset } from './parkingDataset';
+import { RELEASE_SCHEMA, validateRelease, type KerbsideRelease } from './kerbsideRelease';
+import { areaDatasetToRelease, isAreaDataset, releaseToDrafts } from './releaseAdapters';
 import { normalisePlate, plateKey } from './plate';
 import { minutesFromCode } from './restriction';
 import {
@@ -85,7 +86,7 @@ export type ImportKind =
   | 'civicmaps-survey'
   | 'civicmaps-parking-areas'
   | 'civicmaps-mixed'
-  | 'civicmaps-dataset'
+  | 'civicmaps-release'
   | 'area-dataset'
   | 'unknown';
 
@@ -109,22 +110,22 @@ export const CSV_TEMPLATES = {
   timed: {
     fileName: 'platewatch-timed-segments-template.csv',
     header:
-      'dataset_id,segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
+      'segment_id,part_id,road_segment_id,patrol_zone,patrol_zone_name,road,locality,between_from,between_to,side,part_from,part_to,permit_area,parking_area,easypark_areas,paystay_zones,restrictions_status,control,sign_code,limit_minutes,days,start,end,exceptions,grace_minutes,list_name,notes',
     example: [
-      'copp-patrol-area-10,copp-normanby-rd-boundary-st-montague-st,all,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
-      'copp-patrol-area-10,copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – illustrative asset ID and signs; replace',
-      'copp-patrol-area-10,copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – illustrative asset ID and signs; replace',
-      'com-chinatown,com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
-      'com-chinatown,com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
+      'copp-normanby-road-from-boundary-to-montague,all,,10,,Normanby Road,South Melbourne,Boundary Street,Montague Street,both,,,,,,,pending_field_capture,,,,,,,,,,Signs still to be surveyed',
+      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,ticket,2P,120,Mon-Fri,08:00,18:00,Permit Zone 7 excepted,5,,Example – illustrative asset ID and signs; replace',
+      'copp-31065,all,31065,10,,Coventry Street,South Melbourne,Montague Street,Ferrars Street,north,,,7,,,338831065001,supplied,no_stopping,,,Mon-Fri,07:00,09:00,,,,Example – illustrative asset ID and signs; replace',
+      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,loading_zone,LZ 30,30,Mon-Fri,07:00,16:00,Commercial vehicles only,,,',
+      'com-20055,bay-58-bay-72,20055,,Chinatown,Little Bourke Street,Melbourne,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,,645,7514,,supplied,metered,2P,120,Sat-Sun,07:00,22:00,,,,',
     ].join('\n'),
   },
   bays: {
     fileName: 'platewatch-bays-template.csv',
-    header: 'dataset_id,segment_id,part_id,road,between_from,between_to,side,part_from,part_to,bay,lat,lng,sign_number',
+    header: 'segment_id,part_id,road,between_from,between_to,side,part_from,part_to,bay,lat,lng,sign_number',
     example: [
-      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,',
-      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,',
-      'com-chinatown,com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,',
+      'com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,58,-37.8127332,144.9645599,',
+      'com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,59,-37.8127544,144.9644881,',
+      'com-20055,bay-58-bay-72,Little Bourke Street,Swanston Street,Elizabeth Street,south,Bay 58,Bay 72,61,-37.8128019,144.9643276,',
     ].join('\n'),
   },
   allow: {
@@ -357,7 +358,7 @@ export function segmentKey(seg: StreetSegment): string {
   return [normName(seg.street), a < b ? `${a}|${b}` : `${b}|${a}`, seg.side, sub].join('::');
 }
 
-const SIDE_LETTER: Record<StreetSide, string> = { both: '', north: 'N', south: 'S', east: 'E', west: 'W', odd: 'odd', even: 'even' };
+const SIDE_LETTER: Record<StreetSide, string> = { both: '', north: 'N', south: 'S', east: 'E', west: 'W', centre: 'C', odd: 'odd', even: 'even' };
 
 /** "Little Bourke St, Swanston St – Elizabeth St (S) · Bay 58 – Bay 72". */
 export function defaultListName(seg: StreetSegment): string {
@@ -366,10 +367,11 @@ export function defaultListName(seg: StreetSegment): string {
   return `${shortName(seg.street)}, ${shortName(seg.fromStreet)} – ${shortName(seg.toStreet)}${side}${sub}`;
 }
 
-/** "northern", "North side", "N", "both sides", "odd" → a StreetSide. */
+/** "northern", "North side", "N", "centre", "both sides", "odd" → a StreetSide. */
 export function parseSide(input: string | null | undefined): StreetSide | null {
   const s = (input ?? '').trim().toLowerCase();
   if (!s || /^both/.test(s)) return 'both';
+  if (/^(c|centre|center|central|median)\b/.test(s)) return 'centre';
   if (/^n/.test(s)) return 'north';
   if (/^s/.test(s)) return 'south';
   if (/^e(ast|$)/.test(s)) return 'east';
@@ -394,7 +396,7 @@ function newRestriction(code: string, minutes: number, days: Weekday[], t: { all
 type Row = Record<string, string>;
 
 /**
- * Column names as in civicmaps.parking_dataset, mapped to the names used here (which the first
+ * Column names as in civicmaps.kerbside_release, mapped to the names used here (which the first
  * templates used, so older CSV files keep importing).
  */
 const COLUMN_ALIASES: Record<string, string> = {
@@ -442,9 +444,9 @@ const CONTROL_TEXT: Record<string, string> = {
   accessible: 'Accessible parking', works_zone: 'Works zone', other: 'Other', loading_zone: 'Loading zone (no time limit given)',
 };
 
-/** "dataset/segment/side/part" when the CSV gives a segment_id, as in civicmaps.parking_dataset (no part_id: "all"). */
+/** The extent ID "<segment_id>:<side>:<part>" when the CSV gives a segment_id, as in civicmaps.kerbside_release (no part_id: "all"). */
 function csvExternalId(row: Row, side: StreetSide): string | undefined {
-  return row.segment_id ? `${row.dataset_id || 'csv'}/${row.segment_id}/${side}/${row.part_id || 'all'}` : undefined;
+  return row.segment_id ? `${row.segment_id}:${side}:${row.part_id || 'all'}` : undefined;
 }
 
 function timedFromCsv(file: string, table: string[][], out: ImportResult): void {
@@ -1016,7 +1018,7 @@ function fromParkingAreas(file: string, d: Json, out: ImportResult): void {
 }
 
 function jsonKind(d: Json): ImportKind {
-  if (d.schema === DATASET_SCHEMA) return 'civicmaps-dataset';
+  if (d.schema === RELEASE_SCHEMA) return 'civicmaps-release';
   if (isAreaDataset(d)) return 'area-dataset';
   if (str(d.schema).startsWith('civicmaps.kerbside_parking_segment') || (Array.isArray(d.sides) && 'on_street' in d)) return 'civicmaps-kerbside';
   if (Array.isArray(d.segments) && 'street' in d) return 'civicmaps-road-segment';
@@ -1025,24 +1027,24 @@ function jsonKind(d: Json): ImportKind {
   return 'unknown';
 }
 
-/** civicmaps.parking_dataset: validated first; a dataset with errors is not imported at all. */
-function fromDataset(file: string, d: ParkingDataset, out: ImportResult): void {
-  const errors = validateDataset(d);
+/** civicmaps.kerbside_release: validated first; a release with problems is not imported at all. */
+function fromRelease(file: string, r: KerbsideRelease, out: ImportResult): void {
+  const errors = validateRelease(r);
   if (errors.length) {
-    for (const e of errors.slice(0, 200)) out.issues.push({ file, message: `${e.path || 'dataset'}: ${e.message}` });
+    for (const e of errors.slice(0, 200)) out.issues.push({ file, message: `${e.path}: ${e.message}` });
     if (errors.length > 200) out.issues.push({ file, message: `…and ${errors.length - 200} more problems.` });
     return;
   }
-  const { drafts, skipped } = datasetToDrafts(d);
+  const { drafts, skipped } = releaseToDrafts(r);
   out.skipped.push(...skipped);
   for (const x of drafts) out.drafts.push({ kind: 'timed', list: x.list, pending: x.pending, source: file });
 }
 
-/** Earlier "street_segments + record_defaults" area datasets, converted to civicmaps.parking_dataset. */
+/** Council "street_segments + record_defaults" area datasets, adapted to a candidate release on the way in. */
 function fromAreaDataset(file: string, d: Json, out: ImportResult): void {
-  const { dataset, warnings } = convertAreaDataset(d);
+  const { release, warnings } = areaDatasetToRelease(d);
   for (const w of warnings) out.issues.push({ file, message: w });
-  fromDataset(file, dataset, out);
+  fromRelease(file, release, out);
 }
 
 /* ───────────────────────────── Entry point ───────────────────────────── */
@@ -1064,7 +1066,7 @@ export function parseImportFile(text: string, file: string): ImportResult {
     for (const d of docs) {
       const kind = jsonKind(d);
       kinds.add(kind);
-      if (kind === 'civicmaps-dataset') fromDataset(file, d as unknown as ParkingDataset, out);
+      if (kind === 'civicmaps-release') fromRelease(file, d as unknown as KerbsideRelease, out);
       else if (kind === 'area-dataset') fromAreaDataset(file, d, out);
       else if (kind === 'civicmaps-kerbside') fromKerbside(file, d, out);
       else if (kind === 'civicmaps-road-segment') fromRoadSegments(file, d, out);
@@ -1074,7 +1076,7 @@ export function parseImportFile(text: string, file: string): ImportResult {
     kinds.delete('unknown');
     out.kind = kinds.size === 1 ? [...kinds][0]! : kinds.size > 1 ? 'civicmaps-mixed' : 'unknown';
     if (out.kind === 'unknown') {
-      out.issues.push({ file, message: 'Not a recognised file: expected a civicmaps.parking_dataset, an area dataset (street_segments), a PlateWatch CSV template, or a CivicMAPS-preview kerbside, road-segment, field-survey or parking-area-zone JSON file.' });
+      out.issues.push({ file, message: 'Not a recognised file: expected a civicmaps.kerbside_release, an area dataset (street_segments), a PlateWatch CSV template, or a CivicMAPS-preview kerbside, road-segment, field-survey or parking-area-zone JSON file.' });
     }
     return out;
   }
@@ -1193,6 +1195,7 @@ function mergeInto(target: PlateList, d: ImportDraft, now: number): PlateList {
       ...(l.bays?.length ? { bays: l.bays } : {}),
       ...(l.bayPoints?.length ? { bayPoints: l.bayPoints } : {}),
       ...(l.externalId ? { externalId: l.externalId } : {}),
+      ...(l.displayId ? { displayId: l.displayId } : {}),
       ...(l.untimedControls?.length ? { untimedControls: structuredClone(l.untimedControls) } : {}),
       ...(l.payment ? { payment: l.payment } : {}),
       segment: { ...target.segment, ...(l.segment.suburb ? { suburb: l.segment.suburb } : {}) },

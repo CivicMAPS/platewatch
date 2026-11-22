@@ -1,0 +1,537 @@
+{
+  "schema": "civicmaps.kerbside_release",
+  "schema_version": "1.0.0",
+  "release": [
+    {
+      "release_id": "com-cbd-example-v1",
+      "dataset_id": "cbd-example",
+      "council_code": "com",
+      "linking_id": null,
+      "municipality_name": "City of Melbourne",
+      "state": "VIC",
+      "country": "AU",
+      "timezone": "Australia/Melbourne",
+      "version": "1",
+      "kind": "snapshot",
+      "status": "candidate",
+      "effective_from": null,
+      "generated_at": "2026-11-22T00:00:00Z",
+      "notes": "Example release. Little Bourke Street 20055 comes from CivicMAPS kerbside parking assets v1; Bourke Street 20567 is illustrative."
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "name": "CivicMAPS kerbside parking assets v1",
+      "issuer": "CivicMAPS",
+      "dataset": "kerbside-parking-assets/v1",
+      "url": null,
+      "format": "JSON",
+      "licence": null,
+      "reference_date": null,
+      "data_used": [
+        "road segment ID",
+        "parking area",
+        "EasyPark area",
+        "bays and positions",
+        "parking rules"
+      ],
+      "limitations": [
+        "bay positions inferred from coordinate sequence"
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "com-20055",
+      "display_id": "com-20055",
+      "asset_id": "20055",
+      "asset_name": "little-bourke-street-from-swanston-to-elizabeth",
+      "road_name": "Little Bourke Street",
+      "locality": "Melbourne",
+      "from_label": "Swanston Street",
+      "from_type": "intersection",
+      "to_label": "Elizabeth Street",
+      "to_type": "intersection",
+      "geometry": null,
+      "status": "active",
+      "verification": "unverified",
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "notes": null
+    },
+    {
+      "segment_id": "com-20567",
+      "display_id": "com-20567",
+      "asset_id": "20567",
+      "asset_name": "bourke-street-from-russell-to-swanston",
+      "road_name": "Bourke Street",
+      "locality": "Melbourne",
+      "from_label": "Russell Street",
+      "from_type": "intersection",
+      "to_label": "Swanston Street",
+      "to_type": "intersection",
+      "geometry": null,
+      "status": "active",
+      "verification": "pending_field_capture",
+      "source_id": null,
+      "notes": "Illustrative asset ID."
+    }
+  ],
+  "segment_source_refs": [
+    {
+      "ref_id": "com-20055<com-src-civicmaps-kerbside-parking-assets-v1#road_segment_asset_id",
+      "segment_id": "com-20055",
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "external_id": "20055",
+      "id_scheme": "road_segment_asset_id",
+      "notes": null
+    }
+  ],
+  "extents": [
+    {
+      "extent_id": "com-20055:north:all",
+      "segment_id": "com-20055",
+      "side": "north",
+      "start_m": null,
+      "end_m": null,
+      "from_label": null,
+      "from_type": null,
+      "to_label": null,
+      "to_type": null,
+      "restrictions_status": "supplied",
+      "verification": "unverified",
+      "notes": "No stopping end to end."
+    },
+    {
+      "extent_id": "com-20055:south:swanston-street-bay-58",
+      "segment_id": "com-20055",
+      "side": "south",
+      "start_m": null,
+      "end_m": null,
+      "from_label": "Swanston Street",
+      "from_type": "intersection",
+      "to_label": "Bay 58",
+      "to_type": "bay",
+      "restrictions_status": "no_parking_spaces",
+      "verification": "unverified",
+      "notes": null
+    },
+    {
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "segment_id": "com-20055",
+      "side": "south",
+      "start_m": null,
+      "end_m": null,
+      "from_label": "Bay 58",
+      "from_type": "bay",
+      "to_label": "Bay 72",
+      "to_type": "bay",
+      "restrictions_status": "supplied",
+      "verification": "unverified",
+      "notes": null
+    },
+    {
+      "extent_id": "com-20055:south:bay-72-elizabeth-street",
+      "segment_id": "com-20055",
+      "side": "south",
+      "start_m": null,
+      "end_m": null,
+      "from_label": "Bay 72",
+      "from_type": "bay",
+      "to_label": "Elizabeth Street",
+      "to_type": "intersection",
+      "restrictions_status": "pending_field_capture",
+      "verification": "pending_field_capture",
+      "notes": null
+    },
+    {
+      "extent_id": "com-20567:south:all",
+      "segment_id": "com-20567",
+      "side": "south",
+      "start_m": null,
+      "end_m": null,
+      "from_label": null,
+      "from_type": null,
+      "to_label": null,
+      "to_type": null,
+      "restrictions_status": "pending_field_capture",
+      "verification": "pending_field_capture",
+      "notes": null
+    },
+    {
+      "extent_id": "com-20567:centre:all",
+      "segment_id": "com-20567",
+      "side": "centre",
+      "start_m": null,
+      "end_m": null,
+      "from_label": null,
+      "from_type": null,
+      "to_label": null,
+      "to_type": null,
+      "restrictions_status": "pending_field_capture",
+      "verification": "pending_field_capture",
+      "notes": "Centre parking: illustrative."
+    }
+  ],
+  "bays": [
+    {
+      "bay_id": "com-20055:south:bay-58",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 58,
+      "plate_number": null,
+      "lat": -37.8127332,
+      "lng": 144.9645599,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-59",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 59,
+      "plate_number": null,
+      "lat": -37.8127544,
+      "lng": 144.9644881,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-61",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 61,
+      "plate_number": null,
+      "lat": -37.8128019,
+      "lng": 144.9643276,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-62",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 62,
+      "plate_number": null,
+      "lat": -37.812822,
+      "lng": 144.9642589,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-63",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 63,
+      "plate_number": null,
+      "lat": -37.8128439,
+      "lng": 144.9641844,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-64",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 64,
+      "plate_number": null,
+      "lat": -37.8128658,
+      "lng": 144.9641099,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-65",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 65,
+      "plate_number": null,
+      "lat": -37.8128845,
+      "lng": 144.964046,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-67",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 67,
+      "plate_number": null,
+      "lat": -37.8129901,
+      "lng": 144.9636815,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-68",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 68,
+      "plate_number": null,
+      "lat": -37.8130116,
+      "lng": 144.9636084,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-69",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 69,
+      "plate_number": null,
+      "lat": -37.8130336,
+      "lng": 144.9635337,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-70",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 70,
+      "plate_number": null,
+      "lat": -37.8130557,
+      "lng": 144.9634588,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-71",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 71,
+      "plate_number": null,
+      "lat": -37.8130758,
+      "lng": 144.9633902,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    },
+    {
+      "bay_id": "com-20055:south:bay-72",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "bay_number": 72,
+      "plate_number": null,
+      "lat": -37.8130949,
+      "lng": 144.9633258,
+      "kind": "standard",
+      "status": "active",
+      "verification": "inferred",
+      "notes": null
+    }
+  ],
+  "zone_schemes": [
+    {
+      "scheme_id": "com-patrol",
+      "kind": "patrol",
+      "name": "Patrol zones"
+    },
+    {
+      "scheme_id": "com-parking-area",
+      "kind": "parking_area",
+      "name": "Parking areas"
+    },
+    {
+      "scheme_id": "com-rpa",
+      "kind": "rpa",
+      "name": "Residential permit areas"
+    }
+  ],
+  "zones": [
+    {
+      "zone_id": "com-patrol-chinatown",
+      "scheme_id": "com-patrol",
+      "code": "Chinatown",
+      "name": "Chinatown"
+    },
+    {
+      "zone_id": "com-parking-area-645",
+      "scheme_id": "com-parking-area",
+      "code": "645",
+      "name": null
+    },
+    {
+      "zone_id": "com-rpa-7",
+      "scheme_id": "com-rpa",
+      "code": "7",
+      "name": null
+    }
+  ],
+  "zone_assignments": [
+    {
+      "assignment_id": "com-20055:north:all>com-patrol-chinatown",
+      "zone_id": "com-patrol-chinatown",
+      "extent_id": "com-20055:north:all",
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20055:south:swanston-street-bay-58>com-parking-area-645",
+      "zone_id": "com-parking-area-645",
+      "extent_id": "com-20055:south:swanston-street-bay-58",
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20055:south:bay-58-bay-72>com-patrol-chinatown",
+      "zone_id": "com-patrol-chinatown",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20055:south:bay-58-bay-72>com-parking-area-645",
+      "zone_id": "com-parking-area-645",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20567:south:all>com-rpa-7",
+      "zone_id": "com-rpa-7",
+      "extent_id": "com-20567:south:all",
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    }
+  ],
+  "provider_areas": [
+    {
+      "provider_area_id": "com-easypark-7514",
+      "provider": "easypark",
+      "area_code": "7514",
+      "account": null,
+      "name": null
+    }
+  ],
+  "provider_area_assignments": [
+    {
+      "assignment_id": "com-20055:south:bay-58-bay-72>com-easypark-7514",
+      "provider_area_id": "com-easypark-7514",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "meter_id": null,
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": null,
+      "verification": "unverified"
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "com-rule-8f4b99f4",
+      "type": "no_stopping",
+      "sign_code": null,
+      "max_stay_minutes": null,
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "all_day": true,
+      "start": null,
+      "end": null,
+      "public_holidays": null,
+      "exempt_zone_ids": [],
+      "exceptions": [],
+      "description": null
+    },
+    {
+      "rule_id": "com-rule-d13147b9",
+      "type": "loading_zone",
+      "sign_code": "LZ 30",
+      "max_stay_minutes": 30,
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "all_day": false,
+      "start": "07:00",
+      "end": "16:00",
+      "public_holidays": null,
+      "exempt_zone_ids": [],
+      "exceptions": [
+        "Commercial vehicles only"
+      ],
+      "description": null
+    },
+    {
+      "rule_id": "com-rule-82826649",
+      "type": "metered",
+      "sign_code": "2P",
+      "max_stay_minutes": 120,
+      "days": [
+        "sat",
+        "sun"
+      ],
+      "all_day": false,
+      "start": "07:00",
+      "end": "22:00",
+      "public_holidays": null,
+      "exempt_zone_ids": [],
+      "exceptions": [],
+      "description": null
+    }
+  ],
+  "rule_assignments": [
+    {
+      "assignment_id": "com-20055:north:all>com-rule-8f4b99f4",
+      "rule_id": "com-rule-8f4b99f4",
+      "extent_id": "com-20055:north:all",
+      "grace_minutes": null,
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "source_sign_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20055:south:bay-58-bay-72>com-rule-d13147b9",
+      "rule_id": "com-rule-d13147b9",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "grace_minutes": null,
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "source_sign_id": null,
+      "verification": "unverified"
+    },
+    {
+      "assignment_id": "com-20055:south:bay-58-bay-72>com-rule-82826649",
+      "rule_id": "com-rule-82826649",
+      "extent_id": "com-20055:south:bay-58-bay-72",
+      "grace_minutes": null,
+      "valid_from": null,
+      "valid_to": null,
+      "source_id": "com-src-civicmaps-kerbside-parking-assets-v1",
+      "source_sign_id": null,
+      "verification": "unverified"
+    }
+  ]
+}

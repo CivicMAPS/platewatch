@@ -5,7 +5,9 @@
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { getLists, getTimedLists, putLists } from '../../lib/db';
-import { listsToDataset } from '../../lib/parkingDataset';
+import { releaseToCsv } from '../../lib/kerbsideRelease';
+import { councilCode, listsToRelease } from '../../lib/releaseAdapters';
+import { zipStore } from '../../lib/zip';
 import { deviceTimeZone } from '../../lib/time';
 import { saveFile } from '../../lib/files';
 import { CSV_TEMPLATES, parseImportFile, planImport, templateCsv, type ImportPlan, type ImportResult } from '../../lib/importer';
@@ -23,7 +25,7 @@ const KIND_LABEL: Record<ImportResult['kind'], string> = {
   'civicmaps-survey': 'CivicMAPS field survey',
   'civicmaps-parking-areas': 'CivicMAPS parking areas',
   'civicmaps-mixed': 'CivicMAPS (several kinds)',
-  'civicmaps-dataset': 'civicmaps.parking_dataset',
+  'civicmaps-release': 'civicmaps.kerbside_release',
   'area-dataset': 'Area dataset (street segments)',
   unknown: 'Not recognised',
 };
@@ -37,8 +39,9 @@ export function importView(_p: Record<string, string>, app: App): View {
   let updateExisting = true;
   let busy = false;
   let showAllIssues = false;
-  /** Export: council or area the dataset describes. */
+  /** Export: the council the lists belong to, and its linking ID once onboarded (optional). */
   let municipality = '';
+  let linkingId = '';
 
   const plan = (): ImportPlan => planImport(results.flatMap((r) => r.drafts), existing, { updateExisting });
 
@@ -83,19 +86,24 @@ export function importView(_p: Record<string, string>, app: App): View {
       app.toast(`Could not save the template: ${e.message}`, 'error'),
     );
 
-  const exportDataset = async () => {
+  const exportRelease = async (as: 'json' | 'csv') => {
     const timed = await getTimedLists();
     if (!timed.length) {
       app.toast('There are no timed lists to export.', 'warn');
       return;
     }
+    if (linkingId.trim() && !/^[A-Za-z0-9]+$/.test(linkingId.trim())) {
+      app.toast('A linking ID is letters and digits only.', 'error');
+      return;
+    }
     const name = municipality.trim() || 'Unspecified council';
-    const date = new Date().toISOString().slice(0, 10);
-    const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'platewatch'}-${date}`;
-    const dataset = listsToDataset(timed, { id, title: `${name} street segments (PlateWatch export ${date})`, municipality: name, timezone: deviceTimeZone() });
-    await saveFile(new Blob([JSON.stringify(dataset, null, 2)], { type: 'application/json' }), `${id}.parking.json`, 'PlateWatch segments').catch((e: Error) =>
-      app.toast(`Could not save the export: ${e.message}`, 'error'),
-    );
+    const release = listsToRelease(timed, { municipality: name, linkingId: linkingId.trim() || null, timezone: deviceTimeZone() });
+    const base = release.release[0]!.release_id;
+    const file =
+      as === 'json'
+        ? { blob: new Blob([JSON.stringify(release, null, 2)], { type: 'application/json' }), name: `${base}.release.json` }
+        : { blob: zipStore(Object.entries(releaseToCsv(release)).map(([t, csv]) => ({ name: `${base}/${t}.csv`, data: csv }))), name: `${base}.csv.zip` };
+    await saveFile(file.blob, file.name, 'PlateWatch release').catch((e: Error) => app.toast(`Could not save the export: ${e.message}`, 'error'));
   };
 
   const counts = (p: ImportPlan) => {
@@ -168,7 +176,7 @@ export function importView(_p: Record<string, string>, app: App): View {
         ${page(html`
           <section class="card">
             <h2 class="section-title">Choose files</h2>
-            <p class="text-sm text-slate-300">Select one or more files: civicmaps.parking_dataset JSON (the normalised format), area datasets (street_segments), CSV files made from the templates below, or CivicMAPS-preview data files. Nothing is saved until you press Import.</p>
+            <p class="text-sm text-slate-300">Select one or more files: civicmaps.kerbside_release JSON (the CivicMAPS release format), area datasets (street_segments), CSV files made from the templates below, or CivicMAPS-preview data files. Nothing is saved until you press Import.</p>
             <input ${ref(fileRef)} type="file" accept=".csv,.json,text/csv,application/json" multiple class="hidden" data-testid="import-file"
               @change=${(e: Event) => void read((e.target as HTMLInputElement).files)} />
             <button type="button" class="btn-primary mt-3 w-full" ?disabled=${busy} @click=${() => fileRef.value?.click()}>
@@ -188,10 +196,16 @@ export function importView(_p: Record<string, string>, app: App): View {
           </section>
           <section class="card mt-4">
             <h2 class="section-title">Export</h2>
-            <p class="text-sm text-slate-300">All timed lists as a civicmaps.parking_dataset (JSON) for EnforcementMAPS or another device. Lists imported from a dataset keep their segment and part IDs.</p>
-            <label class="mt-3 block"><span class="field-label">Council or area</span>
-              <input class="field" placeholder="e.g. City of Port Phillip" .value=${municipality} @input=${(e: Event) => (municipality = (e.target as HTMLInputElement).value)} /></label>
-            <button type="button" class="btn-secondary mt-3 w-full" data-testid="export-dataset" @click=${() => void exportDataset()}>${icon('share')} Export timed lists</button>
+            <p class="text-sm text-slate-300">All timed lists as a candidate civicmaps.kerbside_release: one JSON file for devices, or one CSV per table (zip) for the council to inspect.</p>
+            <label class="mt-3 block"><span class="field-label">Council</span>
+              <input class="field" placeholder="e.g. City of Port Phillip" .value=${municipality} @input=${(e: Event) => { municipality = (e.target as HTMLInputElement).value; app.update(); }} /></label>
+            <p class="mt-1 text-xs text-slate-400">Council code: <span class="font-plate">${councilCode(municipality.trim() || 'Unspecified council')}</span></p>
+            <label class="mt-3 block"><span class="field-label">Linking ID (once the council is onboarded)</span>
+              <input class="field" inputmode="numeric" placeholder="Blank: keys use the council code" .value=${linkingId} @input=${(e: Event) => (linkingId = (e.target as HTMLInputElement).value)} /></label>
+            <div class="mt-3 grid grid-cols-2 gap-3">
+              <button type="button" class="btn-secondary" data-testid="export-release" @click=${() => void exportRelease('json')}>${icon('share')} Release (JSON)</button>
+              <button type="button" class="btn-secondary" data-testid="export-csv" @click=${() => void exportRelease('csv')}>${icon('share')} Tables (CSV)</button>
+            </div>
           </section>
         `)}`;
     },

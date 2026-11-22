@@ -380,18 +380,18 @@ async function main() {
   await waitText('Restrictions to enter');
   log('bulk import: CSV template + CivicMAPS kerbside JSON → 4 timed lists, found by bay sign');
 
-  // The normalised dataset for City of Port Phillip Patrol Area 10: 55 segments, signs not yet surveyed.
+  // The kerbside release for City of Port Phillip Patrol Area 10: 55 segments, signs not yet surveyed.
   await page.goto(`${ORIGIN}/#/import`);
   await waitText('Choose files');
-  await (await page.$('[data-testid=import-file]')).uploadFile(join(root, 'datasets', 'copp-patrol-area-10.parking.json'));
-  await waitText('civicmaps.parking_dataset');
+  await (await page.$('[data-testid=import-file]')).uploadFile(join(root, 'datasets', 'copp-patrol-area-10.release.json'));
+  await waitText('civicmaps.kerbside_release');
   // Normanby Rd Boundary–Montague is already on the device from the template: 54 created, 1 updated.
   await waitText('54 timed lists created');
   await waitText('1 timed list updated');
   await page.click('[data-testid=import-save]');
   await waitText('Imported: 54 list(s) created, 1 updated');
   await waitText('Zone 10');
-  log('civicmaps.parking_dataset import: Patrol Area 10 → 54 new placeholders + 1 matched by dataset ID');
+  log('civicmaps.kerbside_release import: Patrol Area 10 → 54 new placeholders + 1 matched by extent ID');
 
   // Text reader route renders.
   await page.goto(`${ORIGIN}/#/text`);

@@ -18,8 +18,9 @@ import {
   type TimedRestriction,
   type Weekday,
 } from '../../lib/types';
+import { formatIsoDate } from '../../lib/time';
 import type { App, View } from '../app';
-import { header, icon, LIST_TYPE_META, page, plateBadge, RISK_LEVEL_CLASS, typeChip } from '../components';
+import { header, icon, LIST_TYPE_META, page, plateBadge, riskPill, typeChip } from '../components';
 
 export const VEHICLE_MAKES = [
   'Toyota', 'Mazda', 'Ford', 'Hyundai', 'Kia', 'Mitsubishi', 'Nissan', 'Holden', 'Volkswagen', 'Subaru',
@@ -208,7 +209,8 @@ export function listFormView(params: Record<string, string>, app: App): View {
 
   /* ───────────────────────────── Field helpers ───────────────────────────── */
 
-  const err = (k: string) => (errors[k] ? html`<p class="mt-1 text-sm text-red-300" data-error>${errors[k]}</p>` : nothing);
+  /** Field error: amber (interaction required) + icon + text; red is reserved for Code 1. */
+  const err = (k: string) => (errors[k] ? html`<p class="mt-1 flex items-start gap-1 text-sm font-medium text-alert-strong" data-error>${icon('alert', 'h-4 w-4 mt-0.5')}<span>${errors[k]}</span></p>` : nothing);
   const fieldCls = (k: string) => `field ${errors[k] ? 'field-invalid' : ''}`;
 
   const text = (opts: {
@@ -224,7 +226,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
     list?: string;
     maxlength?: number;
   }) => html`<div>
-    <label class="field-label" for=${opts.id}>${opts.label}${opts.required ? html` <span class="text-red-300">*</span>` : nothing}</label>
+    <label class="field-label" for=${opts.id}>${opts.label}${opts.required ? html` <span class="text-neutral-600" aria-hidden="true">*</span>` : nothing}</label>
     <input
       id=${opts.id}
       class=${fieldCls(opts.errKey ?? '')}
@@ -248,18 +250,18 @@ export function listFormView(params: Record<string, string>, app: App): View {
       set(() => {
         l.restrictions = l.restrictions.map((x) => (x.id === r.id ? { ...x, ...patch } : x));
       });
-    return html`<div class="rounded-xl border ${errors[`r-${r.id}`] ? 'border-red-500' : 'border-ink-600'} bg-ink-800/60 p-3">
+    return html`<div class="rounded-md border ${errors[`r-${r.id}`] ? 'border-2 border-alert-strong' : 'border-neutral-300'} bg-neutral-50 p-3">
       <div class="mb-3 flex items-center justify-between">
-        <p class="text-sm font-bold text-slate-200">Restriction ${idx + 1}</p>
+        <p class="text-sm font-bold text-neutral-800">Restriction ${idx + 1}</p>
         ${l.restrictions.length > 1
-          ? html`<button type="button" class="btn-ghost min-h-9 px-2 py-1 text-sm text-red-300" @click=${() => set(() => (l.restrictions = l.restrictions.filter((x) => x.id !== r.id)))}>
+          ? html`<button type="button" class="btn-ghost min-h-11 px-2 py-1 text-sm" @click=${() => set(() => (l.restrictions = l.restrictions.filter((x) => x.id !== r.id)))}>
               ${icon('trash', 'h-4 w-4')} Remove
             </button>`
           : nothing}
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="field-label" for="code-${r.id}">Sign code <span class="text-red-300">*</span></label>
+          <label class="field-label" for="code-${r.id}">Sign code <span class="text-neutral-600" aria-hidden="true">*</span></label>
           <input id="code-${r.id}" class="field font-plate uppercase" .value=${r.code} placeholder="2P" autocapitalize="characters" maxlength="12"
             @input=${(e: Event) => {
               const code = (e.target as HTMLInputElement).value.toUpperCase();
@@ -268,7 +270,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
             }} />
         </div>
         <div>
-          <label class="field-label" for="limit-${r.id}">Allowance (min) <span class="text-red-300">*</span></label>
+          <label class="field-label" for="limit-${r.id}">Allowance (min) <span class="text-neutral-600" aria-hidden="true">*</span></label>
           <input id="limit-${r.id}" class="field" type="number" inputmode="numeric" min="1" max="1440" .value=${String(r.limitMinutes)}
             @input=${(e: Event) => update({ limitMinutes: Math.round(Number((e.target as HTMLInputElement).value)) })} />
         </div>
@@ -279,13 +281,13 @@ export function listFormView(params: Record<string, string>, app: App): View {
           ${DAYS.map(({ d, label }) => {
             const on = r.days.includes(d);
             return html`<button type="button" aria-pressed=${on ? 'true' : 'false'}
-              class="chip min-h-10 ${on ? 'border-brand-400 bg-brand-500/20 text-brand-100' : 'border-ink-600 bg-ink-800 text-slate-400'}"
+              class="chip-button"
               @click=${() => update({ days: on ? r.days.filter((x) => x !== d) : [...r.days, d] })}>${label}</button>`;
           })}
         </div>
       </fieldset>
-      <label class="mt-3 flex items-center gap-3 text-sm text-slate-200">
-        <input type="checkbox" class="h-5 w-5 accent-brand-500" .checked=${r.allDay} @change=${(e: Event) => update({ allDay: (e.target as HTMLInputElement).checked })} />
+      <label class="mt-3 flex items-center gap-3 text-sm text-neutral-800">
+        <input type="checkbox" class="h-5 w-5 accent-primary" .checked=${r.allDay} @change=${(e: Event) => update({ allDay: (e.target as HTMLInputElement).checked })} />
         Applies at all times on these days
       </label>
       ${r.allDay
@@ -312,7 +314,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
             @input=${(e: Event) => update({ description: (e.target as HTMLInputElement).value })} />
         </div>
       </div>
-      <p class="mt-2 text-xs text-slate-400">${describeRestriction(r)}${r.graceMinutes ? ` · +${r.graceMinutes}m grace` : ''}</p>
+      <p class="mt-2 text-xs text-neutral-600">${describeRestriction(r)}${r.graceMinutes ? ` · +${r.graceMinutes}m grace` : ''}</p>
       ${err(`r-${r.id}`)}
     </div>`;
   };
@@ -336,7 +338,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
           ${text({ id: 'patrolZoneName', label: 'Zone name', value: l.patrolZoneName ?? '', onInput: (v) => set(() => (l.patrolZoneName = v)), placeholder: 'e.g. Flagstaff', list: 'known-zone-names', maxlength: 48 })}
         </div>
         ${text({ id: 'rpa', label: 'Residential permit area (RPA)', value: l.rpa ?? '', onInput: (v) => set(() => (l.rpa = v)), placeholder: 'Optional', list: 'known-rpas', maxlength: 24 })}
-        <p class="text-xs text-slate-400">Patrol zone: the internal enforcement area number and its day-to-day name. Home groups timed lists by zone, then road, and search finds them by zone, RPA, parking area or bay sign, EasyPark, PayStay and meter ID.</p>
+        <p class="text-xs text-neutral-600">Patrol zone: the internal enforcement area number and its day-to-day name. Home groups timed lists by zone, then road, and search finds them by zone, RPA, parking area or bay sign, EasyPark, PayStay and meter ID.</p>
         <datalist id="known-zones">${knownZones.map((z) => html`<option value=${z}>${knownZoneNames.get(z) ?? ''}</option>`)}</datalist>
         <datalist id="known-zone-names">${[...new Set(knownZoneNames.values())].map((n) => html`<option value=${n}></option>`)}</datalist>
         <datalist id="known-rpas">${knownRpas.map((r) => html`<option value=${r}></option>`)}</datalist>
@@ -361,7 +363,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
 
 <section class="card mt-4 grid gap-3"><h2 class="section-title">Paid parking (optional)</h2>
 ${text({ id: 'parkingArea', label: 'Parking area number', value: pay.parkingArea ?? '', placeholder: 'e.g. 637 (one per segment)', maxlength: 12, onInput: v => { pay.parkingArea = v.trim(); } })}
-<p class="-mt-2 text-xs text-slate-400">A bay's kerb sign is this number followed by the bay number (637 + bay 58 = 63758); search accepts either.</p><label><input id="easyPark" type="checkbox" .checked=${!!pay.easyPark.length} @change=${() => set(() => { pay.easyPark = pay.easyPark.length ? [] : ['']; })}> EasyPark</label>
+<p class="-mt-2 text-xs text-neutral-600">A bay's kerb sign is this number followed by the bay number (637 + bay 58 = 63758); search accepts either.</p><label><input id="easyPark" type="checkbox" .checked=${!!pay.easyPark.length} @change=${() => set(() => { pay.easyPark = pay.easyPark.length ? [] : ['']; })}> EasyPark</label>
 ${pay.easyPark.map((entry, i) => html`<div class="grid gap-2">${text({ id: "easyPark-" + i, label: "AreaNumber", value: entry, required: true, onInput: v => { pay.easyPark[i] = v.trim(); } })}<button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.splice(i, 1))}>Remove</button></div>`)}${pay.easyPark.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.easyPark.push(''))}>Add EasyPark entry</button>` : nothing}<label><input id="payStay" type="checkbox" .checked=${!!pay.payStay.length} @change=${() => set(() => { pay.payStay = pay.payStay.length ? [] : [{ zone: '', meter: '' }]; })}> PayStay</label>
 ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "payStayzone-" + i, label: "ParkingZone", value: entry.zone, required: true, placeholder: "e.g. 3388… (one per side)", onInput: v => { entry.zone = v.trim(); } })}${text({ id: "payStaymeter-" + i, label: "Meter ID", value: entry.meter, placeholder: "Optional", onInput: v => { entry.meter = v.trim(); } })}<button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.splice(i, 1))}>Remove</button></div>`)}${pay.payStay.length ? html`<button type="button" class="btn-secondary" @click=${() => set(() => pay.payStay.push({ zone: '', meter: '' }))}>Add PayStay entry</button>` : nothing}${err('payment')}</section>
       <section class="card mt-4 grid gap-3">
@@ -376,19 +378,19 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
       <section class="card mt-4">
         <h2 class="section-title">Linked allow lists (residential permits)</h2>
         ${allowLists.length === 0
-          ? html`<p class="text-sm text-slate-400">No allow lists saved yet. Create one (e.g. resident permits), then link it here.</p>`
+          ? html`<p class="text-sm text-neutral-600">No allow lists saved yet. Create one (e.g. resident permits), then link it here.</p>`
           : html`<ul class="grid gap-2">
               ${allowLists.map((a) => {
                 const on = l.allowListIds.includes(a.id);
                 return html`<li>
-                  <label class="flex min-h-12 items-center gap-3 rounded-xl border border-ink-600 bg-ink-800 px-3">
-                    <input type="checkbox" class="h-5 w-5 accent-brand-500" .checked=${on}
+                  <label class="flex min-h-12 items-center gap-3 rounded-md border border-neutral-300 bg-surface-sunken px-3">
+                    <input type="checkbox" class="h-5 w-5 accent-primary" .checked=${on}
                       @change=${(e: Event) => set(() => {
                         const c = (e.target as HTMLInputElement).checked;
                         l.allowListIds = c ? [...l.allowListIds, a.id] : l.allowListIds.filter((x) => x !== a.id);
                       })} />
                     <span class="flex-1">${a.name}</span>
-                    <span class="text-sm text-slate-400">${a.entries.length} plates</span>
+                    <span class="text-sm text-neutral-600">${a.entries.length} plates</span>
                   </label>
                 </li>`;
               })}
@@ -472,7 +474,7 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
       <h2 class="section-title">Add plate</h2>
       <form class="grid gap-3" @submit=${(e: Event) => { e.preventDefault(); addAllowEntry(); }}>
         <div>
-          <label class="field-label" for="allow-plate">Number plate <span class="text-red-300">*</span></label>
+          <label class="field-label" for="allow-plate">Number plate <span class="text-neutral-600" aria-hidden="true">*</span></label>
           <input id="allow-plate" class="${fieldCls('allowPlate')} font-plate text-xl tracking-widest uppercase" .value=${allowDraft.plate} autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="ABC123"
             @input=${(e: Event) => (allowDraft.plate = (e.target as HTMLInputElement).value.toUpperCase())} />
           ${err('allowPlate')}
@@ -499,16 +501,16 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
     <section class="card mt-4">
       <h2 class="section-title">Plates on this list (${l.entries.length})</h2>
       ${l.entries.length === 0
-        ? html`<p class="text-sm text-slate-400">No plates added yet.</p>`
-        : html`<ul class="divide-y divide-ink-700">
+        ? html`<p class="text-sm text-neutral-600">No plates added yet.</p>`
+        : html`<ul class="divide-y divide-neutral-200">
             ${l.entries.map(
               (e) => html`<li class="flex items-center gap-3 py-2">
                 ${plateBadge(e.plate, 'sm')}
                 <div class="min-w-0 flex-1 text-sm">
-                  <p class="truncate text-slate-200">${e.label || '—'}${e.permitNo ? html` · <span class="text-slate-400">#${e.permitNo}</span>` : nothing}</p>
-                  ${e.validFrom || e.validTo ? html`<p class="text-xs text-slate-400">Valid ${e.validFrom || '…'} → ${e.validTo || '…'}</p>` : nothing}
+                  <p class="truncate text-neutral-800">${e.label || '—'}${e.permitNo ? html` · <span class="text-neutral-600">#${e.permitNo}</span>` : nothing}</p>
+                  ${e.validFrom || e.validTo ? html`<p class="text-xs text-neutral-600">Valid ${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</p>` : nothing}
                 </div>
-                <button type="button" class="btn-ghost min-h-10 px-2 text-red-300" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
+                <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
               </li>`,
             )}
           </ul>`}
@@ -553,21 +555,21 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
     });
   };
 
-  const hotEditor = (): TemplateResult => html`<section class="card mt-4 grid gap-3 border-red-500/40">
+  const hotEditor = (): TemplateResult => html`<section class="card mt-4 grid gap-3 border-2 border-alert-border">
     <h2 class="section-title">${hotDraft.id ? 'Edit' : 'Add'} high-risk vehicle</h2>
     <div>
-      <label class="field-label" for="hot-plate">Number plate <span class="text-red-300">*</span></label>
+      <label class="field-label" for="hot-plate">Number plate <span class="text-neutral-600" aria-hidden="true">*</span></label>
       <input id="hot-plate" class="${fieldCls('hotPlate')} font-plate text-xl tracking-widest uppercase" .value=${hotDraft.plate} autocapitalize="characters" autocomplete="off" maxlength="12" placeholder="ABC123"
         @input=${(e: Event) => (hotDraft.plate = (e.target as HTMLInputElement).value.toUpperCase())} />
       ${err('hotPlate')}
     </div>
     <fieldset>
-      <legend class="field-label">Risk <span class="text-red-300">*</span></legend>
+      <legend class="field-label">Risk <span class="text-neutral-600" aria-hidden="true">*</span></legend>
       <div class="flex flex-wrap gap-2">
         ${RISK_TAGS.map((t: RiskTag) => {
           const on = hotDraft.risks.includes(t);
           return html`<button type="button" aria-pressed=${on ? 'true' : 'false'}
-            class="chip min-h-10 ${on ? 'border-red-400 bg-red-500/20 text-red-100' : 'border-ink-600 bg-ink-800 text-slate-300'}"
+            class="chip-button"
             @click=${() => set(() => (hotDraft.risks = on ? hotDraft.risks.filter((x) => x !== t) : [...hotDraft.risks, t]))}>
             ${on ? icon('check', 'h-4 w-4') : nothing}${RISK_TAG_LABELS[t]}
           </button>`;
@@ -581,7 +583,7 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
         ${(Object.keys(RISK_LEVEL_LABELS) as RiskLevel[]).map((lvl) => {
           const on = hotDraft.riskLevel === lvl;
           return html`<button type="button" aria-pressed=${on ? 'true' : 'false'}
-            class="chip min-h-11 justify-center ${on ? RISK_LEVEL_CLASS[lvl] : 'border-ink-600 bg-ink-800 text-slate-400'}"
+            class="chip-button justify-center"
             @click=${() => set(() => (hotDraft.riskLevel = lvl))}>${RISK_LEVEL_LABELS[lvl]}</button>`;
         })}
       </div>
@@ -614,7 +616,7 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
     </div>
     <div class="grid grid-cols-2 gap-3">
       <button type="button" class="btn-secondary" @click=${() => set(() => { hotDraft = emptyHotDraft(); hotEditorOpen = false; delete errors.hotPlate; delete errors.hotRisks; })}>Cancel</button>
-      <button type="button" class="btn-danger" @click=${saveHotEntry}>${hotDraft.id ? 'Update' : 'Add'} vehicle</button>
+      <button type="button" class="btn-primary" @click=${saveHotEntry}>${hotDraft.id ? 'Update' : 'Add'} vehicle</button>
     </div>
   </section>`;
 
@@ -628,19 +630,19 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
       <section class="card mt-4">
         <h2 class="section-title">Vehicles on this list (${l.entries.length})</h2>
         ${l.entries.length === 0
-          ? html`<p class="text-sm text-slate-400">No vehicles added yet.</p>`
-          : html`<ul class="divide-y divide-ink-700">
+          ? html`<p class="text-sm text-neutral-600">No vehicles added yet.</p>`
+          : html`<ul class="divide-y divide-neutral-200">
               ${l.entries.map(
                 (e) => html`<li class="py-3">
                   <div class="flex items-center gap-2">
                     ${plateBadge(e.plate, 'sm')}
-                    <span class="chip ${RISK_LEVEL_CLASS[e.riskLevel]}">${RISK_LEVEL_LABELS[e.riskLevel]}</span>
+                    ${riskPill(e.riskLevel, RISK_LEVEL_LABELS[e.riskLevel])}
                     <span class="flex-1"></span>
-                    <button type="button" class="btn-ghost min-h-10 px-2" aria-label="Edit ${e.plate}" @click=${() => set(() => { hotDraft = { ...e }; hotEditorOpen = true; })}>${icon('edit', 'h-4 w-4')}</button>
-                    <button type="button" class="btn-ghost min-h-10 px-2 text-red-300" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
+                    <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Edit ${e.plate}" @click=${() => set(() => { hotDraft = { ...e }; hotEditorOpen = true; })}>${icon('edit', 'h-4 w-4')}</button>
+                    <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
                   </div>
-                  <p class="mt-1 text-sm text-slate-300">${[e.colour, e.make, e.model, e.bodyType].filter(Boolean).join(' ') || 'No vehicle details'}</p>
-                  <p class="mt-1 text-xs text-red-200">${e.risks.map((r) => RISK_TAG_LABELS[r]).join(' · ')}</p>
+                  <p class="mt-1 text-sm text-neutral-700">${[e.colour, e.make, e.model, e.bodyType].filter(Boolean).join(' ') || 'No vehicle details'}</p>
+                  <p class="mt-1 text-xs font-medium text-alert-strong">${e.risks.map((r) => RISK_TAG_LABELS[r]).join(' · ')}</p>
                 </li>`,
               )}
             </ul>`}
@@ -686,11 +688,11 @@ ${pay.payStay.map((entry, i) => html`<div class="grid gap-2">${text({ id: "paySt
       return html`${header({
           title: editingId ? `Edit ${LIST_TYPE_META[l.type].label.toLowerCase()}` : `New ${LIST_TYPE_META[l.type].label.toLowerCase()}`,
           back: () => app.back(),
-          actions: html`<button type="button" class="btn-primary min-h-11 px-4" ?disabled=${saving} @click=${save}>Save</button>`,
+          actions: html`<button type="button" class="btn-chrome-primary" ?disabled=${saving} @click=${save}>Save</button>`,
         })}
         ${page(html`
           <section class="card grid gap-3">
-            <div class="flex items-center gap-2">${typeChip(l.type)}<span class="text-sm text-slate-400">${LIST_TYPE_META[l.type].description}</span></div>
+            <div class="flex items-center gap-2">${typeChip(l.type)}<span class="text-sm text-neutral-600">${LIST_TYPE_META[l.type].description}</span></div>
             ${text({
               id: 'name',
               label: 'List name',

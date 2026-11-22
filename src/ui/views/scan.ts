@@ -25,7 +25,7 @@ import { cropCanvas, mapCoverRect, padRect } from '../../lib/image';
 import { onOcrStatus, recognisePlate, warmUpOcr, type OcrStatus, type PlateOcrResult } from '../../lib/ocr';
 import { comparePlates, isValidPlate, normalisePlate, plateKey } from '../../lib/plate';
 import { restrictionInForce } from '../../lib/restriction';
-import { formatClock, formatDateTime, formatDuration, formatMinutes } from '../../lib/time';
+import { formatClock, formatDateTime, formatDuration, formatIsoDate, formatMinutes, formatStamp } from '../../lib/time';
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
@@ -40,7 +40,22 @@ import {
   type TimedList,
 } from '../../lib/types';
 import type { App, View } from '../app';
-import { icon, plateBadge, RISK_LEVEL_CLASS, spinner, UrlBag } from '../components';
+import {
+  banner,
+  header,
+  icon,
+  nearMatchSheet,
+  plateBadge,
+  riskPill,
+  spinner,
+  STATUS,
+  statusPill,
+  TONE_PANEL,
+  TONE_PILL,
+  TONE_TEXT,
+  UrlBag,
+  type StatusKind,
+} from '../components';
 import { segmentLabel } from './home';
 
 type Phase = 'starting' | 'live' | 'processing' | 'confirm' | 'saving' | 'result' | 'no_camera';
@@ -163,6 +178,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   let suggestions: string[] = [];
   let dismissed = '';
   let editing = false;
+  /** Blocking problem on the confirm screen: a persistent banner, not a toast (assessment D6). */
+  let confirmError: { title: string; body?: string; field?: 'plate' } | null = null;
   const listeners: PluginListenerHandle[] = [];
   /** Patrol captures awaiting review; `variants` are other readings of the same plate seen after it. */
   const queue: {s:Sighting; meta:PendingCapture['meta']; variants:string[]}[] = [];
@@ -238,6 +255,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     suggestions = [];
     dismissed = '';
     editing = false;
+    confirmError = null;
     pending = null;
     ocr = null;
     ocrError = '';
@@ -466,7 +484,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       app.toast(`${plate || 'Capture'} dismissed`, 'info');
     } catch (e) {
       phase = 'confirm';
-      app.toast(`Could not dismiss: ${(e as Error).message}`, 'error');
+      confirmError = { title: 'Could not dismiss this capture', body: (e as Error).message };
       app.update();
       return;
     }
@@ -477,14 +495,17 @@ export function scanView(params: Record<string, string>, app: App): View {
     if (!pending || !list || phase !== 'confirm') return;
     const plate = normalisePlate(plateInput);
     if (!isValidPlate(plate)) {
-      app.toast('Enter a valid number plate.', 'error');
+      confirmError = { title: 'Enter a valid number plate', body: 'Letters and digits only, as shown on the plate.', field: 'plate' };
+      app.update();
       plateInputRef.value?.focus();
       return;
     }
     if (settings().requireLocation && !pending.meta.location) {
-      app.toast('A GPS fix is required before checking (see Settings). Move to open sky and retake.', 'error');
+      confirmError = { title: 'GPS fix required before checking', body: 'Move to open sky and retake. This requirement is set in Settings → Scanning.' };
+      app.update();
       return;
     }
+    confirmError = null;
     phase = 'saving';
     app.update();
     try {
@@ -551,7 +572,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       else feedback('ok', s);
     } catch (e) {
       console.error(e);
-      app.toast(`Check failed: ${(e as Error).message}`, 'error');
+      confirmError = { title: 'Check failed', body: `${(e as Error).message} The capture is kept: check again or retake.` };
       phase = 'confirm';
     }
     app.update();
@@ -613,12 +634,16 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /* ────────────────────────────── Render ────────────────────────────── */
 
-  const geoBadge = (): TemplateResult => {
+  /** GPS accuracy: colour + icon + text. Poor or missing GPS is amber (act: move to open sky), never red. */
+  const geoBadge = (onCamera = true): TemplateResult => {
     const warn = settings().accuracyWarnMetres;
+    const base = 'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm font-semibold whitespace-nowrap';
     if (geoState.status === 'fix') {
+      const acc = `±${Math.round(geoState.fix.accuracy)} m`;
       const tone = accuracyTone(geoState.fix.accuracy, warn);
-      const cls = { good: 'bg-emerald-600', fair: 'bg-amber-600', poor: 'bg-red-600' }[tone];
-      return html`<span class="chip border-transparent ${cls} text-white">${icon('pin', 'h-4 w-4')} ±${Math.round(geoState.fix.accuracy)} m</span>`;
+      if (tone === 'good') return html`<span class="${base} ${TONE_PILL.active}" data-gps="good">${icon('pin', 'h-4 w-4')} ${acc}</span>`;
+      if (tone === 'fair') return html`<span class="${base} ${onCamera ? 'border-white/40 bg-black/50 text-white' : TONE_PILL.inactive}" data-gps="fair">${icon('pin', 'h-4 w-4')} ${acc}</span>`;
+      return html`<span class="${base} ${TONE_PILL.alert}" data-gps="poor">${icon('alert', 'h-4 w-4')} Poor GPS ${acc}</span>`;
     }
     const label =
       geoState.status === 'denied'
@@ -628,16 +653,20 @@ export function scanView(params: Record<string, string>, app: App): View {
           : geoState.status === 'error'
             ? 'GPS error'
             : 'GPS…';
-    return html`<span class="chip border-transparent bg-ink-700 text-slate-200">${icon('pin', 'h-4 w-4')} ${label}</span>`;
+    const searching = geoState.status === 'idle' || geoState.status === 'searching';
+    return html`<span class="${base} ${searching ? (onCamera ? 'border-white/40 bg-black/50 text-white' : TONE_PILL.inactive) : TONE_PILL.alert}">${icon(searching ? 'pin' : 'alert', 'h-4 w-4')} ${label}</span>`;
   };
 
+  /* Camera chrome stays dark: it sits over the live image (functional, not brand — assessment D1). */
   const topBar = (): TemplateResult => html`<div class="absolute inset-x-0 top-0 z-20 flex items-center gap-2 bg-gradient-to-b from-black/80 to-transparent px-3 pt-[calc(env(safe-area-inset-top)+0.5rem)] pb-6">
-    <button type="button" class="btn-ghost min-h-11 px-2 text-white" aria-label="Back" @click=${() => app.navigate(`/list/${listId}`)}>${icon('back', 'h-6 w-6')}</button>
+    <button type="button" class="btn min-h-11 px-2 text-white hover:bg-white/10" aria-label="Back" @click=${() => app.navigate(`/list/${listId}`)}>${icon('back', 'h-6 w-6')}</button>
     <div class="min-w-0 flex-1">
       <p class="truncate font-bold text-white">${list?.name ?? ''}</p>
-      <p class="truncate text-xs text-slate-300">${list?.type === 'timed' ? segmentLabel(list) : list?.type === 'hot' ? 'Hot list scan' : 'Allow list check'}</p>
+      <p class="truncate text-xs text-white/80">${list?.type === 'timed' ? segmentLabel(list) : list?.type === 'hot' ? 'Hot list scan' : 'Allow list check'}</p>
     </div>
-    ${settings().diagnostics ? html`<span class="text-xs font-bold text-red-300" data-testid="diag-indicator" title="Field diagnostics recording">● DIAG</span>` : nothing}
+    ${settings().diagnostics
+      ? html`<span class="inline-flex items-center gap-1 rounded-full border border-white/40 bg-black/50 px-2 py-0.5 text-xs font-semibold tracking-[0.04em] text-white" data-testid="diag-indicator" title="Field diagnostics recording">${icon('activity', 'h-3.5 w-3.5')} DIAG</span>`
+      : nothing}
     <span class="font-plate text-sm text-white tabular-nums">${formatClock(Date.now())}</span>
     ${geoBadge()}
   </div>`;
@@ -667,7 +696,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       ${zoomSliderOpen
         ? html`<label class="mb-3 flex items-center gap-3 text-sm text-white">
             <span class="w-12 font-plate tabular-nums">${formatZoom(camera.zoom)}</span>
-            <input type="range" class="flex-1 accent-brand-500" aria-label="Zoom" data-testid="zoom-slider"
+            <input type="range" class="flex-1 accent-accent" aria-label="Zoom" data-testid="zoom-slider"
               min=${range.min} max=${range.max} step=${range.step} .value=${String(camera.zoom)}
               @input=${(e: Event) => void chooseZoom(Number((e.target as HTMLInputElement).value), false)}
               @change=${(e: Event) => void chooseZoom(Number((e.target as HTMLInputElement).value), true)} />
@@ -675,7 +704,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         : nothing}
       <div class="flex justify-center">
         <button type="button" data-testid="zoom-button"
-          class="min-h-12 min-w-20 rounded-full border border-white/50 bg-black/50 px-4 text-base font-semibold tabular-nums text-white"
+          class="min-h-12 min-w-20 rounded-full border border-white/50 bg-black/50 px-4 font-plate text-base font-semibold tabular-nums text-white"
           aria-label=${`Zoom ${formatZoom(camera.zoom)}. Tap for the next zoom step, long-press for a custom zoom.`}
           @pointerdown=${startPress} @pointerup=${endPress} @pointerleave=${endPress} @pointercancel=${endPress}
           @contextmenu=${(e: Event) => e.preventDefault()}
@@ -688,38 +717,40 @@ export function scanView(params: Record<string, string>, app: App): View {
     </div>`;
   };
 
+  const cameraButton = 'btn min-h-14 w-16 flex-col gap-0 px-0 text-xs text-white hover:bg-white/10';
+
   const liveControls = (): TemplateResult => html`<div class="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 to-transparent px-4 pt-10 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
     ${hasPatrol() ? html`<div class="mx-auto mb-4 grid max-w-md grid-cols-2 gap-3">
-        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start walking patrol" @click=${() => beginPatrol('walking')}>Walking</button>
-        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start vehicle patrol" @click=${() => beginPatrol('vehicle')}>Vehicle</button>
+        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start walking patrol" @click=${() => beginPatrol('walking')}>${icon('walking')} Walking</button>
+        <button type="button" class="btn-secondary w-full justify-center" aria-label="Start vehicle patrol" @click=${() => beginPatrol('vehicle')}>${icon('vehicle')} Vehicle</button>
       </div>` : nothing}
     ${zoomControls()}
     <div class="flex items-center justify-between">
-      <button type="button" class="btn-ghost min-h-14 w-16 flex-col gap-0 px-0 text-xs text-white" @click=${() => void capture(true)} ?disabled=${phase !== 'live'}>
-        ${icon('keyboard', 'h-6 w-6')} Manual
+      <button type="button" class=${cameraButton} @click=${() => void capture(true)} ?disabled=${phase !== 'live'}>
+        ${icon('keyboard', 'h-6 w-6', 1.75)} Manual
       </button>
       <button type="button" aria-label="Capture number plate" data-testid="shutter"
-        class="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/20 transition active:scale-95 disabled:opacity-50"
+        class="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/20 transition active:scale-[0.96] disabled:opacity-40"
         ?disabled=${phase !== 'live'} @click=${() => void capture(false)}>
         ${phase === 'processing' ? spinner('h-8 w-8 text-white') : html`<span class="h-14 w-14 rounded-full bg-white"></span>`}
       </button>
       ${caps.torch
-        ? html`<button type="button" class="btn-ghost min-h-14 w-16 flex-col gap-0 px-0 text-xs ${camera.torchOn ? 'text-amber-300' : 'text-white'}"
-            @click=${async () => { await camera.setTorch(!camera.torchOn); app.update(); }}>${icon('torch', 'h-6 w-6')} Torch</button>`
-        : html`<button type="button" class="btn-ghost min-h-14 w-16 flex-col gap-0 px-0 text-xs text-white" @click=${() => fileRef.value?.click()}>
-            ${icon('upload', 'h-6 w-6')} Photo
+        ? html`<button type="button" class="${cameraButton} ${camera.torchOn ? 'text-accent' : ''}" aria-pressed=${camera.torchOn}
+            @click=${async () => { await camera.setTorch(!camera.torchOn); app.update(); }}>${icon('torch', 'h-6 w-6', 1.75)} ${camera.torchOn ? 'Torch on' : 'Torch'}</button>`
+        : html`<button type="button" class=${cameraButton} @click=${() => fileRef.value?.click()}>
+            ${icon('upload', 'h-6 w-6', 1.75)} Photo
           </button>`}
     </div>
     ${phase === 'processing'
-      ? html`<p class="mt-3 text-center text-sm text-slate-200">${ocrStatus && ocrStatus.progress < 1 ? `${ocrStatus.status} ${Math.round(ocrStatus.progress * 100)}%` : 'Reading plate…'}</p>`
-      : html`<p class="mt-3 text-center text-sm text-slate-300">Fit the number plate inside the frame</p>`}
+      ? html`<p class="mt-3 text-center text-sm text-white">${ocrStatus && ocrStatus.progress < 1 ? `${ocrStatus.status} ${Math.round(ocrStatus.progress * 100)}%` : 'Reading plate…'}</p>`
+      : html`<p class="mt-3 text-center text-sm text-white/80">Fit the number plate inside the frame</p>`}
   </div>`;
 
   const cameraLayer = (): TemplateResult => html`<div class="fixed inset-0 z-10 bg-black ${phase === 'live' || phase === 'processing' || phase === 'starting' ? '' : 'invisible'}">
     <video ${ref(videoRef)} class="h-full w-full object-cover" autoplay muted playsinline></video>
     <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <div ${ref(guideRef)} class="scan-guide relative aspect-[3/1] w-[82%] max-w-xl rounded-xl border-4 border-brand-400">
-        <span class="absolute -top-7 left-0 text-xs font-semibold tracking-wide text-brand-100 uppercase">Plate</span>
+      <div ${ref(guideRef)} class="scan-guide relative aspect-[3/1] w-[82%] max-w-xl rounded-md border-4 border-accent">
+        <span class="absolute -top-7 left-0 text-xs font-semibold text-white">Plate</span>
       </div>
     </div>
     ${phase === 'starting' ? html`<div class="absolute inset-0 flex items-center justify-center text-white">${spinner('h-10 w-10')}</div>` : nothing}
@@ -731,13 +762,18 @@ export function scanView(params: Record<string, string>, app: App): View {
     const loc = p.meta.location;
     const warn = settings().accuracyWarnMetres;
     return html`<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-      <dt class="text-slate-400">Time</dt>
-      <dd class="font-plate">${p.meta.capturedAtLocal.replace('T', ' ')}</dd>
-      <dt class="text-slate-400">Zone</dt>
-      <dd>${p.meta.timeZone}</dd>
-      <dt class="text-slate-400">Location</dt>
-      <dd class=${loc ? (loc.accuracy > warn ? 'text-amber-300' : 'text-emerald-300') : 'text-red-300'}>
-        ${loc ? html`${formatLatLng(loc)} <span class="text-slate-400">±${Math.round(loc.accuracy)} m</span>` : 'Unavailable — no GPS fix'}
+      <dt class="text-neutral-600">Time</dt>
+      <dd class="font-plate text-neutral-900" title=${p.meta.capturedAtLocal}>${formatStamp(p.meta.capturedAt)}</dd>
+      <dt class="text-neutral-600">Zone</dt>
+      <dd class="text-neutral-900">${p.meta.timeZone}</dd>
+      <dt class="text-neutral-600">Location</dt>
+      <dd>
+        ${loc
+          ? html`<span class="font-plate text-neutral-900">${formatLatLng(loc)}</span>
+              ${loc.accuracy > warn
+                ? html`<span class="ml-1 inline-flex items-center gap-1 font-semibold text-alert-strong">${icon('alert', 'h-4 w-4')} ±${Math.round(loc.accuracy)} m · low accuracy</span>`
+                : html`<span class="ml-1 inline-flex items-center gap-1 text-active-strong">${icon('check', 'h-4 w-4')} ±${Math.round(loc.accuracy)} m</span>`}`
+          : html`<span class="inline-flex items-center gap-1 font-semibold text-alert-strong">${icon('alert', 'h-4 w-4')} Unavailable — no GPS fix</span>`}
       </dd>
     </dl>`;
   };
@@ -745,38 +781,52 @@ export function scanView(params: Record<string, string>, app: App): View {
   const confirmPanel = (): TemplateResult => {
     const p = pending!;
     const busy = phase === 'saving';
-    return html`<div class="mx-auto max-w-xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-28">
-      <div class="flex items-center gap-2">
-        <button type="button" class="btn-ghost min-h-11 px-2" aria-label=${fromPatrol ? 'Dismiss' : 'Retake'} @click=${() => fromPatrol ? void dismiss() : resetToLive()} ?disabled=${busy}>${icon('back', 'h-6 w-6')}</button>
-        <h1 class="text-lg font-bold">Confirm plate</h1>
-        ${fromPatrol ? html`<span class="ml-auto text-sm text-slate-400" data-testid="review-remaining">${queue.length ? `${queue.length} more to review` : 'Last capture'}</span>` : nothing}
-      </div>
+    return html`${header({
+        title: 'Confirm plate',
+        subtitle: list?.name,
+        back: busy ? undefined : () => (fromPatrol ? void dismiss() : resetToLive()),
+        actions: fromPatrol
+          ? html`<span class="px-2 text-sm text-white/90" data-testid="review-remaining">${queue.length ? `${queue.length} more to review` : 'Last capture'}</span>`
+          : nothing,
+      })}
+      <div class="mx-auto max-w-xl px-4 pt-4 pb-28">
       ${cropUrl || frameUrl
-        ? html`<img src=${cropUrl || frameUrl} alt="Captured plate" class="mt-3 w-full rounded-xl border border-ink-600 bg-black object-contain ${frameUrl ? 'max-h-64' : 'max-h-40'}" />`
+        ? html`<img src=${cropUrl || frameUrl} alt="Captured plate" class="w-full rounded-md border border-neutral-200 bg-black object-contain ${frameUrl ? 'max-h-64' : 'max-h-40'}" />`
         : nothing}
-      ${suggestions.length ? html`<div role="dialog" aria-modal="true" class="fixed inset-0 z-50 grid place-items-center bg-black/80"><section class="card max-h-screen overflow-auto"><h2>Near match</h2><img class="max-h-48" src=${cropUrl || frameUrl} alt="Current capture"><p>Current scan · ${plateInput}</p>${suggestions.map(s => html`<p>${s}</p>`)}
-        <button class="btn-primary" @click=${() => { suggestions = []; editing = true; app.update(); plateInputRef.value?.focus(); }}>Edit</button>
-        <button class="btn-secondary" @click=${() => { suggestions = []; dismissed = normalisePlate(plateInput); void check(); }}>Dismiss</button></section></div>` : nothing}
+      ${suggestions.length
+        ? nearMatchSheet({
+            imageUrl: cropUrl || frameUrl,
+            plate: plateInput,
+            suggestions,
+            onEdit: () => { suggestions = []; editing = true; app.update(); plateInputRef.value?.focus(); },
+            onNotMatch: () => { suggestions = []; dismissed = normalisePlate(plateInput); void check(); },
+          })
+        : nothing}
+      ${confirmError ? html`<div class="mt-4">${banner('alert', confirmError.title, confirmError.body, 'confirm-error')}</div>` : nothing}
       <form class="card mt-4" @submit=${(e: Event) => { e.preventDefault(); void check(); }}>
         <label for="plate" class="field-label">Number plate (editable)</label>
         <input ${ref(plateInputRef)} id="plate" name="plate" data-testid="plate-input"
-          class="field text-center font-plate text-3xl font-bold tracking-[0.3em] uppercase"
+          class="field text-center font-plate text-3xl font-bold tracking-[0.3em] uppercase ${confirmError?.field === 'plate' ? 'field-invalid' : ''}"
+          aria-invalid=${confirmError?.field === 'plate' ? 'true' : 'false'}
           .value=${plateInput} maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text"
-          @input=${(e: Event) => (plateInput = (e.target as HTMLInputElement).value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
+          @input=${(e: Event) => {
+            plateInput = (e.target as HTMLInputElement).value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            if (confirmError?.field === 'plate') { confirmError = null; app.update(); }
+          }} />
         ${ocr
-          ? html`<p class="mt-2 text-xs text-slate-400">${ocr.durationMs ? 'OCR confidence ' + ocr.confidence + '% · ' + ocr.durationMs + ' ms' : 'Patrol reading'}${ocr.rawText ? html` · raw “${ocr.rawText}”` : nothing}</p>
+          ? html`<p class="mt-2 text-xs text-neutral-600">${ocr.durationMs ? 'OCR confidence ' + ocr.confidence + '% · ' + ocr.durationMs + ' ms' : 'Patrol reading'}${ocr.rawText ? html` · raw <span class="font-plate">“${ocr.rawText}”</span>` : nothing}</p>
               ${ocr.candidates.length > 1
-                ? html`<div class="mt-2 flex flex-wrap gap-2">
+                ? html`<div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Other readings">
                     ${ocr.candidates.map(
-                      (c) => html`<button type="button" class="chip min-h-10 border-ink-600 bg-ink-800 font-plate text-slate-200" @click=${() => { plateInput = c; app.update(); }}>${c}</button>`,
+                      (c) => html`<button type="button" class="chip-button font-plate" aria-pressed=${plateInput === c} @click=${() => { plateInput = c; if (confirmError?.field === 'plate') confirmError = null; app.update(); }}>${c}</button>`,
                     )}
                   </div>`
                 : nothing}`
-          : html`<p class="mt-2 text-xs text-slate-400">${ocrError || 'Manual entry'}</p>`}
-        <div class="mt-4 border-t border-ink-700 pt-3">${metaSummary(p)}</div>
+          : html`<p class="mt-2 text-xs text-neutral-600">${ocrError || 'Manual entry'}</p>`}
+        <div class="mt-4 border-t border-neutral-200 pt-3">${metaSummary(p)}</div>
         <div class="mt-4 grid grid-cols-2 gap-3">
           ${fromPatrol
-            ? html`<button type="button" class="btn-secondary" data-testid="dismiss" @click=${() => void dismiss()} ?disabled=${busy}>${icon('x')} Dismiss</button>`
+            ? html`<button type="button" class="btn-secondary" data-testid="dismiss" @click=${() => void dismiss()} ?disabled=${busy}>${icon('archive')} Dismiss</button>`
             : html`<button type="button" class="btn-secondary" @click=${resetToLive} ?disabled=${busy}>${icon('refresh')} Retake</button>`}
           <button type="submit" class="btn-primary" data-testid="check" ?disabled=${busy}>${busy ? spinner() : icon('check')} ${editing ? 'Save and recheck' : 'Check'}</button>
         </div>
@@ -784,69 +834,70 @@ export function scanView(params: Record<string, string>, app: App): View {
     </div>`;
   };
 
-  const hotAlert = (hits: HotHit[]): TemplateResult => html`<section class="rounded-2xl border-4 border-red-500 bg-red-950 p-4 shadow-2xl" role="alert" data-testid="hot-alert">
-    <div class="flex items-center gap-3 animate-pulse-alert">
-      ${icon('alert', 'h-10 w-10 text-red-300')}
+  /**
+   * Officer-safety interrupt (WF-S27 27g). Persistent, never a toast, no pulse. Drawn as an
+   * interaction-required (amber) alert: red stays reserved for Code 1 pending OQ27-1.
+   */
+  const hotAlert = (hits: HotHit[]): TemplateResult => html`<section class="overflow-hidden rounded-md border-4 border-alert bg-surface shadow-xl" role="alert" data-testid="hot-alert">
+    <div class="flex items-center gap-3 bg-alert px-4 py-3 text-alert-text">
+      ${icon('shield', 'h-9 w-9', 1.75)}
       <div>
-        <p class="text-xs font-bold tracking-widest text-red-300 uppercase">Officer safety</p>
-        <p class="text-2xl font-black text-white">HOT LIST MATCH</p>
+        <p class="text-xs font-bold tracking-[0.08em] uppercase">Officer safety</p>
+        <p class="text-xl font-bold">Hot list match</p>
       </div>
     </div>
-    <ul class="mt-4 grid gap-3">
+    <ul class="grid gap-3 p-4">
       ${hits.map(
-        (h) => html`<li class="rounded-xl bg-black/30 p-3">
+        (h) => html`<li class="rounded-md border border-alert-border bg-alert-bg p-3">
           <div class="flex flex-wrap items-center gap-2">
             ${plateBadge(h.entry.plate, 'lg')}
-            <span class="chip ${RISK_LEVEL_CLASS[h.entry.riskLevel]}">${RISK_LEVEL_LABELS[h.entry.riskLevel]}</span>
-            ${h.strength === 'possible' ? html`<span class="chip border-amber-400 bg-amber-500/20 text-amber-100">Possible match — verify plate</span>` : nothing}
+            ${riskPill(h.entry.riskLevel, RISK_LEVEL_LABELS[h.entry.riskLevel])}
+            ${h.strength === 'possible' ? statusPill('verify', 'Possible match — verify plate') : nothing}
           </div>
-          <p class="mt-2 text-lg font-bold text-white">${[h.entry.colour, h.entry.make, h.entry.model, h.entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</p>
-          <div class="mt-2 flex flex-wrap gap-2">${h.entry.risks.map((r) => html`<span class="chip border-red-400/70 bg-red-500/20 text-red-100">${RISK_TAG_LABELS[r]}</span>`)}</div>
-          ${h.entry.notes ? html`<p class="mt-2 text-sm whitespace-pre-line text-red-100">${h.entry.notes}</p>` : nothing}
-          <p class="mt-2 text-xs text-red-300">List: ${h.list.name}</p>
+          <p class="mt-2 text-md font-bold text-neutral-900">${[h.entry.colour, h.entry.make, h.entry.model, h.entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</p>
+          <div class="mt-2 flex flex-wrap gap-2">${h.entry.risks.map((r) => html`<span class="chip border-alert-border bg-surface text-sm text-alert-strong">${RISK_TAG_LABELS[r]}</span>`)}</div>
+          ${h.entry.notes ? html`<p class="mt-2 text-sm whitespace-pre-line text-neutral-800">${h.entry.notes}</p>` : nothing}
+          <p class="mt-2 text-xs text-neutral-700">List: ${h.list.name}</p>
         </li>`,
       )}
     </ul>
   </section>`;
 
   const evidenceTile = (label: string, s: ScanRecord): TemplateResult => html`<figure class="min-w-0">
-    <figcaption class="mb-1 text-xs font-bold tracking-wide text-slate-400 uppercase">${label}</figcaption>
-    <a href="#/record/${s.id}"><img src=${urls.get(s.image)} alt="${label} evidence" class="aspect-[4/3] w-full rounded-lg border border-ink-600 bg-black object-cover" /></a>
-    <p class="mt-1 font-plate text-sm">${formatClock(s.meta.capturedAt)}</p>
-    <p class="text-xs text-slate-400">${s.meta.location ? `±${Math.round(s.meta.location.accuracy)} m` : 'no GPS'}</p>
+    <figcaption class="mb-1 text-xs font-semibold text-neutral-700">${label}</figcaption>
+    <a href="#/record/${s.id}"><img src=${urls.get(s.image)} alt="${label} evidence" class="aspect-[4/3] w-full rounded-md border border-neutral-200 bg-black object-cover" /></a>
+    <p class="mt-1 font-plate text-sm text-neutral-900">${formatClock(s.meta.capturedAt)}</p>
+    <p class="text-xs text-neutral-600">${s.meta.location ? `±${Math.round(s.meta.location.accuracy)} m` : 'no GPS'}</p>
   </figure>`;
 
+  /** Re-sighting: within allowance = Pending blue (passive), overstay = amber (officer must act). */
   const comparisonPanel = (c: Comparison): TemplateResult => {
     const o = c.observation;
-    const tone = c.overstay ? 'border-red-500 bg-red-950' : 'border-amber-500 bg-amber-950/60';
-    return html`<section class="rounded-2xl border-4 ${tone} p-4" data-testid="comparison">
-      <p class="text-xs font-bold tracking-widest uppercase ${c.overstay ? 'text-red-300' : 'text-amber-300'}">${c.overstay ? 'Overstay' : 'Re-sighting — within allowance'}</p>
-      <div class="mt-1 flex items-end justify-between gap-3">
+    const tone = c.overstay ? 'alert' : 'pending';
+    return html`<section class="rounded-md border-2 ${TONE_PANEL[tone]} p-4" data-testid="comparison" data-tone=${tone}>
+      ${c.overstay ? statusPill('overstay') : statusPill('within_allowance')}
+      <div class="mt-2 flex items-end justify-between gap-3">
         ${plateBadge(o.plate, 'lg')}
         <div class="text-right">
-          <p class="text-xs text-slate-300">Elapsed since scan 1</p>
-          <p class="font-plate text-3xl font-black ${c.overstay ? 'text-red-200' : 'text-amber-100'}" data-testid="elapsed">${formatDuration(c.elapsedMs)}</p>
+          <p class="text-xs text-neutral-700">Elapsed since scan 1</p>
+          <p class="font-plate text-2xl font-bold whitespace-nowrap ${TONE_TEXT[tone]}" data-testid="elapsed">${formatDuration(c.elapsedMs)}</p>
         </div>
       </div>
-      <p class="mt-2 text-sm text-slate-200">
-        ${o.restrictionCode} allowance ${formatMinutes(o.limitMinutes)}${o.graceMinutes ? ` + ${formatMinutes(o.graceMinutes)} grace` : ''} ·
-        ${c.remainingMs > 0 ? html`<strong>${formatDuration(c.remainingMs)} remaining</strong>` : html`<strong>exceeded by ${formatDuration(-c.remainingMs)}</strong>`}
+      <p class="mt-2 text-sm text-neutral-800">
+        <span class="font-plate">${o.restrictionCode}</span> allowance ${formatMinutes(o.limitMinutes)}${o.graceMinutes ? ` + ${formatMinutes(o.graceMinutes)} grace` : ''} ·
+        ${c.remainingMs > 0 ? html`<strong>${formatDuration(c.remainingMs)} remaining</strong>` : html`<strong class="text-alert-strong">exceeded by ${formatDuration(-c.remainingMs)}</strong>`}
       </p>
       <div class="mt-4 grid grid-cols-2 gap-3">${evidenceTile('Scan 1', c.first)}${evidenceTile(`Scan ${o.scanCount}`, c.current)}</div>
       <button type="button" class="btn-secondary mt-4 w-full" @click=${resetObservation}>${icon('refresh')} Vehicle moved — restart timing</button>
     </section>`;
   };
 
-  const statusCard = (tone: 'ok' | 'info' | 'muted' | 'warn', title: string, body: TemplateResult | string, testid: string) => {
-    const cls = {
-      ok: 'border-emerald-500 bg-emerald-950/70',
-      info: 'border-sky-500 bg-sky-950/70',
-      muted: 'border-ink-600 bg-ink-900',
-      warn: 'border-amber-500 bg-amber-950/70',
-    }[tone];
-    return html`<section class="rounded-2xl border-2 ${cls} p-4" data-testid=${testid}>
-      <p class="text-xl font-bold">${title}</p>
-      <div class="mt-1 text-slate-200">${body}</div>
+  const statusCard = (kind: StatusKind, title: string, body: TemplateResult | string, testid: string, pillLabel?: string) => {
+    const tone = STATUS[kind].tone;
+    return html`<section class="rounded-md border-2 ${TONE_PANEL[tone]} p-4" data-testid=${testid} data-tone=${tone}>
+      ${statusPill(kind, pillLabel)}
+      <p class="mt-2 text-lg font-bold text-neutral-900">${title}</p>
+      <div class="mt-1 text-neutral-800">${body}</div>
     </section>`;
   };
 
@@ -855,29 +906,46 @@ export function scanView(params: Record<string, string>, app: App): View {
     switch (d.kind) {
       case 'timed_exempt': {
         const e = d.hit.entry;
-        const validity = e.validFrom || e.validTo ? ` · valid ${e.validFrom || '…'} → ${e.validTo || '…'}` : '';
-        return statusCard('ok', 'Permit valid', html`On <strong>${d.hit.list.name}</strong>${e.label ? ` (${e.label})` : ''}${e.permitNo ? ` · permit #${e.permitNo}` : ''}${validity}. Sighting recorded; no time limit applies.`, 'result-exempt');
+        return statusCard(
+          'permit_valid',
+          'Permit valid',
+          html`<p>Sighting recorded; no time limit applies.</p>
+            <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+              <dt class="text-neutral-600">List</dt><dd class="font-semibold">${d.hit.list.name}</dd>
+              ${e.label ? html`<dt class="text-neutral-600">Label</dt><dd>${e.label}</dd>` : nothing}
+              ${e.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${e.permitNo}</dd>` : nothing}
+              ${e.validFrom || e.validTo ? html`<dt class="text-neutral-600">Valid</dt><dd>${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</dd>` : nothing}
+            </dl>`,
+          'result-exempt',
+        );
       }
       case 'timed_not_in_force':
-        return statusCard('muted', 'Restriction not in force', d.next ? `Next restriction ${d.next.restriction.code} from ${formatDateTime(d.next.start)}. No record created.` : 'No upcoming restriction found. No record created.', 'result-not-in-force');
+        return statusCard(
+          'not_in_force',
+          'Restriction not in force',
+          html`<p>${d.next ? html`Next restriction <span class="font-plate">${d.next.restriction.code}</span> from ${formatDateTime(d.next.start)}.` : 'No upcoming restriction found.'} No record created.</p>
+            ${pending ? html`<p class="mt-1 text-sm text-neutral-600">Captured <span class="font-plate">${formatStamp(pending.meta.capturedAt)}</span></p>` : nothing}`,
+          'result-not-in-force',
+        );
       case 'timed_new': {
         const r0 = d.instance.restriction;
         const ends = (r.saved?.meta.capturedAt ?? Date.now()) + r0.limitMinutes * 60_000;
-        return statusCard('info', 'First sighting recorded', html`${r0.code} allowance (${formatMinutes(r0.limitMinutes)}) started. Expires <strong>${formatClock(ends)}</strong>. Re-scan after that time to check for overstay.`, 'result-recorded');
+        return statusCard('timing', 'First sighting recorded', html`<span class="font-plate">${r0.code}</span> allowance (${formatMinutes(r0.limitMinutes)}) started. Expires <strong class="font-plate">${formatClock(ends)}</strong>. Re-scan after that time to check for overstay.`, 'result-recorded');
       }
       case 'timed_resighting':
-        return r.comparison ? comparisonPanel(r.comparison) : statusCard('warn', 'Re-sighting', `Elapsed ${formatDuration(d.elapsedMs)}.`, 'result-resighting');
+        return r.comparison ? comparisonPanel(r.comparison) : statusCard(d.overstay ? 'overstay' : 'within_allowance', 'Re-sighting', `Elapsed ${formatDuration(d.elapsedMs)}.`, 'result-resighting');
       case 'timed_possible':
-        return html`<section class="rounded-2xl border-2 border-amber-500 bg-amber-950/60 p-4" data-testid="result-possible">
-          <p class="text-xl font-bold">Possible earlier sighting</p>
-          <p class="mt-1 text-sm text-slate-200">${r.plate} is similar to a tracked plate. Compare the images and confirm.</p>
+        return html`<section class="rounded-md border-2 ${TONE_PANEL.alert} p-4" data-testid="result-possible" data-tone="alert">
+          ${statusPill('verify')}
+          <p class="mt-2 text-lg font-bold text-neutral-900">Possible earlier sighting</p>
+          <p class="mt-1 text-sm text-neutral-800">${r.plate} is similar to a tracked plate. Compare the images and confirm.</p>
           <ul class="mt-3 grid gap-3">
             ${d.candidates.map((o) => {
               const s = r.possibleFirsts.get(o.id);
-              return html`<li class="rounded-xl bg-black/30 p-3">
+              return html`<li class="rounded-md border border-neutral-200 bg-surface p-3">
                 <div class="flex items-center gap-3">
-                  ${s ? html`<img src=${urls.get(s.thumb)} alt="" class="h-16 w-24 rounded-lg object-cover" />` : nothing}
-                  <div>${plateBadge(o.plate, 'sm')}<p class="mt-1 text-xs text-slate-300">First seen ${formatClock(o.startedAt)}</p></div>
+                  ${s ? html`<img src=${urls.get(s.thumb)} alt="" class="h-16 w-24 rounded-md object-cover" />` : nothing}
+                  <div>${plateBadge(o.plate, 'sm')}<p class="mt-1 text-xs text-neutral-700">First seen <span class="font-plate">${formatClock(o.startedAt)}</span></p></div>
                 </div>
                 <button type="button" class="btn-primary mt-3 w-full" @click=${() => void resolvePossible(o)}>Same vehicle</button>
               </li>`;
@@ -886,19 +954,19 @@ export function scanView(params: Record<string, string>, app: App): View {
           <button type="button" class="btn-secondary mt-3 w-full" @click=${() => void resolvePossible(null)}>Different vehicle — record new</button>
         </section>`;
       case 'hot_match':
-        return statusCard('warn', 'Sighting recorded', 'Evidence image with location and time saved to this hot list.', 'result-hot');
+        return statusCard('hot_sighting', 'Sighting recorded', 'Evidence image with location and time saved to this hot list.', 'result-hot');
       case 'hot_none':
-        return statusCard('ok', 'No hot-list match', `${r.plate} is not on any hot list.`, 'result-hot-none');
+        return statusCard('not_on_list', 'No hot-list match', `${r.plate} is not on any hot list.`, 'result-hot-none', 'No match');
       case 'allow_member':
         return statusCard(
-          d.validNow ? 'ok' : 'warn',
+          d.validNow ? 'on_list' : 'not_valid',
           d.validNow ? 'On allow list' : 'On allow list — not currently valid',
-          html`${d.hit.entry.label || 'No label'}${d.hit.entry.permitNo ? ` · permit #${d.hit.entry.permitNo}` : ''}${d.hit.entry.validTo ? ` · valid to ${d.hit.entry.validTo}` : ''}`,
+          html`${d.hit.entry.label || 'No label'}${d.hit.entry.permitNo ? html` · permit <span class="font-plate">#${d.hit.entry.permitNo}</span>` : ''}${d.hit.entry.validTo ? ` · valid to ${formatIsoDate(d.hit.entry.validTo)}` : ''}`,
           'result-allow',
         );
       case 'allow_none':
         return statusCard(
-          'muted',
+          'not_on_list',
           'Not on this allow list',
           html`${d.possible.length ? html`Similar: ${d.possible.map((e) => html`${plateBadge(e.plate, 'sm')} `)}` : nothing}
             <button type="button" class="btn-secondary mt-3 w-full" @click=${() => app.navigate(`/list/${listId}/edit?plate=${encodeURIComponent(r.plate)}`)}>${icon('plus')} Add ${r.plate} to this list</button>`,
@@ -907,43 +975,46 @@ export function scanView(params: Record<string, string>, app: App): View {
     }
   };
 
+  /** Paid parking numbers to check before enforcing; promoted to amber on an overstay (WF-S27 27c.4). */
+  const paymentCard = (r: ResultState): TemplateResult | typeof nothing => {
+    const lines = paymentLines(pending?.meta.payment);
+    if (!['timed_new', 'timed_resighting'].includes(r.decision.kind) || !lines.length) return nothing;
+    const overstay = r.decision.kind === 'timed_resighting' && r.decision.overstay;
+    return html`<section class="rounded-md border p-4 shadow-sm ${overstay ? 'border-2 border-alert bg-surface' : 'border-neutral-200 bg-surface'}" data-testid="payment-check">
+      <h2 class="flex items-center gap-2 text-md font-semibold text-neutral-900">${overstay ? html`<span class="text-alert-strong">${icon('alert')}</span>` : icon('info', 'h-5 w-5 text-neutral-600')} Check payment before enforcing</h2>
+      <ul class="mt-2 grid gap-1">${lines.map((line) => html`<li class="font-plate text-sm text-neutral-800">${line}</li>`)}</ul>
+    </section>`;
+  };
+
   const resultPanel = (): TemplateResult => {
     const r = result!;
-    return html`<div class="mx-auto max-w-xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-32">
-      <div class="mb-3 flex items-center justify-between">
-        <h1 class="text-lg font-bold">Result</h1>
-        ${plateBadge(r.plate, 'md')}
-      </div>
+    return html`${header({ title: 'Result', subtitle: list?.name, back: () => app.navigate(`/list/${listId}`), actions: html`<span class="pr-2">${plateBadge(r.plate, 'md')}</span>` })}
+      <div class="mx-auto max-w-xl px-4 pt-4 pb-32">
       <div class="grid gap-4">
         ${r.hotHits.length ? hotAlert(r.hotHits) : nothing}
         ${decisionPanel(r)}
-        ${['timed_new','timed_resighting'].includes(r.decision.kind) && paymentLines(pending?.meta.payment).length
-          ? html`<section class="card"><h2>Check payment before enforcing</h2>${paymentLines(pending?.meta.payment).map(line => html`<p>${line}</p>`)}</section>` : nothing}
+        ${paymentCard(r)}
         ${r.saved
-          ? html`<p class="text-center text-xs text-slate-500">Saved · SHA-256 ${r.saved.sha256.slice(0, 16)}… · <a class="underline" href="#/record/${r.saved.id}">view record</a></p>`
+          ? html`<p class="text-center text-xs text-neutral-600">Saved · SHA-256 <span class="font-plate">${r.saved.sha256.slice(0, 16)}…</span> · <a class="link" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}
       </div>
-      <div class="fixed inset-x-0 bottom-0 z-30 border-t border-ink-700 bg-ink-950/95 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur">
-        <button type="button" class="btn-primary mx-auto flex w-full max-w-xl py-4 text-lg" data-testid="next-scan" ?disabled=${phase === 'saving'} @click=${resetToLive}>
-          ${icon('camera', 'h-6 w-6')} Next scan
+      <div class="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-surface px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-lg">
+        <button type="button" class="btn-primary mx-auto flex w-full max-w-xl py-4 text-md" data-testid="next-scan" ?disabled=${phase === 'saving'} @click=${resetToLive}>
+          ${icon('camera', 'h-6 w-6', 1.75)} Next scan
         </button>
       </div>
     </div>`;
   };
 
-  const noCameraPanel = (): TemplateResult => html`<div class="mx-auto max-w-xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-16">
-    <div class="flex items-center gap-2">
-      <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Back" @click=${() => app.navigate(`/list/${listId}`)}>${icon('back', 'h-6 w-6')}</button>
-      <h1 class="text-lg font-bold">${list?.name ?? 'Scan'}</h1>
-    </div>
+  const noCameraPanel = (): TemplateResult => html`${header({ title: list?.name ?? 'Scan', subtitle: 'Live camera unavailable', back: () => app.navigate(`/list/${listId}`) })}
+    <div class="mx-auto max-w-xl px-4 pt-4 pb-16">
+    ${banner('alert', 'Live camera unavailable', cameraMessage)}
     <div class="card mt-4">
-      <p class="font-semibold">Live camera unavailable</p>
-      <p class="mt-1 text-sm text-slate-400">${cameraMessage}</p>
-      <button type="button" class="btn-primary mt-4 w-full" @click=${() => fileRef.value?.click()}>${icon('camera')} Take photo with device camera</button>
+      <button type="button" class="btn-primary w-full" @click=${() => fileRef.value?.click()}>${icon('camera')} Take photo with device camera</button>
       <button type="button" class="btn-secondary mt-3 w-full" @click=${() => void startCamera()}>${icon('refresh')} Retry live camera</button>
-      <p class="mt-3 text-xs text-slate-500">Time and location are recorded when the photo is submitted.</p>
+      <p class="mt-3 text-xs text-neutral-600">Time and location are recorded when the photo is submitted.</p>
     </div>
-    <div class="mt-4 flex items-center justify-center gap-2">${geoBadge()}</div>
+    <div class="mt-4 flex items-center justify-center gap-2">${geoBadge(false)}</div>
   </div>`;
 
   return {

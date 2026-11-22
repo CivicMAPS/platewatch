@@ -4,7 +4,7 @@
 title: PlateWatch
 version: 1.0.0
 platforms: [Android APK (Capacitor 8), PWA (Chrome/Android, any HTTPS host)]
-stack: [TypeScript, Vite 8, lit-html, Tailwind CSS 4 (local build), Tesseract.js 7 (on-device WASM), IndexedDB, piexifjs]
+stack: [TypeScript, Vite 8, lit-html, Tailwind CSS 4 (local build) on CivicMAPS Design System 2.0.0-rc tokens, Lucide icons, Tesseract.js 7 (on-device WASM), IndexedDB, piexifjs]
 ---
 
 # PlateWatch
@@ -141,12 +141,14 @@ src/
     camera.ts       rear camera, torch, zoom, continuous AF, wake lock
     ocr.ts / image.ts  Tesseract worker, ROI mapping, preprocessing
     backup.ts / files.ts  JSON export/import, share/save on web + Android
+  styles/civicmaps/  vendored CivicMAPS design-system tokens + DM Sans (see docs/DESIGN-SYSTEM.md)
   ui/             lit-html views (home, list form, list detail, scan, record, text reader, settings)
 tests/            vitest suites
 scripts/          OCR asset copy, icon generation, E2E smoke test
 android/          Capacitor project (permissions, signing, backup exclusions, PatrolCamera plugin)
 docs/SECURITY.md  CSP, data handling, permissions
 docs/EMAPS-INTEGRATION-ASSESSMENT.md  EnforcementMAPS integration gaps, battery/GPS plan
+docs/DESIGN-SYSTEM.md  CivicMAPS design system wiring and conformance (D1–D16)
 ```
 
 ## Data & privacy

@@ -70,18 +70,18 @@ export function textReaderView(_p: Record<string, string>, app: App): View {
           <button type="button" class="btn-primary" ?disabled=${busy} @click=${() => { fileRef.value?.setAttribute('capture', 'environment'); fileRef.value?.click(); }}>${icon('camera')} Camera</button>
           <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => { fileRef.value?.removeAttribute('capture'); fileRef.value?.click(); }}>${icon('upload')} Choose image</button>
         </div>
-        ${imageUrl ? html`<img src=${imageUrl} alt="Source" class="mt-4 max-h-72 w-full rounded-xl border border-ink-600 bg-black object-contain" />` : nothing}
+        ${imageUrl ? html`<img src=${imageUrl} alt="Source" class="mt-4 max-h-72 w-full rounded-md border border-neutral-300 bg-black object-contain" />` : nothing}
         ${busy
-          ? html`<p class="mt-4 flex items-center gap-2 text-slate-300">${spinner()} ${status && status.progress < 1 ? `${status.status} ${Math.round(status.progress * 100)}%` : 'Reading text…'}</p>`
+          ? html`<p class="mt-4 flex items-center gap-2 text-neutral-700">${spinner()} ${status && status.progress < 1 ? `${status.status} ${Math.round(status.progress * 100)}%` : 'Reading text…'}</p>`
           : nothing}
         ${imageUrl && !busy
           ? html`<div class="mt-4">
-              <label class="field-label" for="ocr-text">Recognised text (editable)${confidence !== null ? html` · <span class="text-slate-400">${confidence}% confidence</span>` : nothing}</label>
+              <label class="field-label" for="ocr-text">Recognised text (editable)${confidence !== null ? html` · <span class="text-neutral-600">${confidence}% confidence</span>` : nothing}</label>
               <textarea id="ocr-text" class="field min-h-56 font-plate text-sm" .value=${text} @input=${(e: Event) => (text = (e.target as HTMLTextAreaElement).value)}></textarea>
               <button type="button" class="btn-secondary mt-3 w-full" ?disabled=${!text} @click=${copy}>Copy text</button>
             </div>`
           : nothing}
-        ${!imageUrl ? html`<p class="mt-4 text-sm text-slate-400">Photograph a parking sign, permit or notice. Recognition runs entirely on this device.</p>` : nothing}
+        ${!imageUrl ? html`<p class="mt-4 text-sm text-neutral-600">Photograph a parking sign, permit or notice. Recognition runs entirely on this device.</p>` : nothing}
       `)}`,
   };
 }

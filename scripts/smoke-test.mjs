@@ -254,7 +254,7 @@ async function main() {
   await page.mouse.up();
   await page.waitForSelector('[data-testid=zoom-slider]', { visible: true, timeout: 5000 });
   if ((await page.evaluate(() => window.__zoom)) !== 3.5) throw new Error('long-press changed the zoom');
-  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; ● DIAG shown');
+  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; DIAG shown');
   await shot('camera');
   await page.click('[data-testid=shutter]');
   await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 90000 });
@@ -341,7 +341,7 @@ async function main() {
     const permitText = await page.$eval('[data-testid=result-exempt]', (el) => el.textContent);
     const permitClass = await page.$eval('[data-testid=result-exempt]', (el) => el.className);
     if (!/Permit valid/.test(permitText) || !/Sighting recorded/.test(permitText)) throw new Error(`permit result for ${plate} was "${permitText}"`);
-    if (!/border-emerald-500/.test(permitClass)) throw new Error('permit result is not green');
+    if (!/border-active\b/.test(permitClass)) throw new Error('permit result is not green (CivicMAPS --status-active)');
     await waitText('Saved · SHA-256');
   }
   await shot('permit-valid');

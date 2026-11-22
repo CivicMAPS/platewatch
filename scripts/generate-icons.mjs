@@ -20,15 +20,15 @@ const svg = (opts = {}) => {
   const T = (v) => (o + v * s) * 512;
   const L = (v) => v * s * 512;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  ${background ? `<rect width="512" height="512" rx="${maskable ? 0 : 112}" fill="#0b1220"/>` : ''}
-  <g fill="none" stroke="#4fd1c5" stroke-width="${L(0.055)}" stroke-linecap="round" stroke-linejoin="round">
+  ${background ? `<rect width="512" height="512" rx="${maskable ? 0 : 112}" fill="#1B2A4A"/>` : ''}
+  <g fill="none" stroke="#D4A843" stroke-width="${L(0.055)}" stroke-linecap="round" stroke-linejoin="round">
     <path d="M${T(0.08)} ${T(0.3)} V${T(0.12)} H${T(0.26)}"/>
     <path d="M${T(0.74)} ${T(0.12)} H${T(0.92)} V${T(0.3)}"/>
     <path d="M${T(0.92)} ${T(0.7)} V${T(0.88)} H${T(0.74)}"/>
     <path d="M${T(0.26)} ${T(0.88)} H${T(0.08)} V${T(0.7)}"/>
   </g>
-  <rect x="${T(0.16)}" y="${T(0.34)}" width="${L(0.68)}" height="${L(0.32)}" rx="${L(0.05)}" fill="#ffffff" stroke="#0f172a" stroke-width="${L(0.018)}"/>
-  <text x="${T(0.5)}" y="${T(0.565)}" text-anchor="middle" font-family="DejaVu Sans Mono, Roboto Mono, monospace" font-weight="700" font-size="${L(0.17)}" fill="#0f172a" letter-spacing="${L(0.01)}">ABC123</text>
+  <rect x="${T(0.16)}" y="${T(0.34)}" width="${L(0.68)}" height="${L(0.32)}" rx="${L(0.05)}" fill="#ffffff" stroke="#111827" stroke-width="${L(0.018)}"/>
+  <text x="${T(0.5)}" y="${T(0.565)}" text-anchor="middle" font-family="JetBrains Mono, DejaVu Sans Mono, monospace" font-weight="700" font-size="${L(0.17)}" fill="#111827" letter-spacing="${L(0.01)}">ABC123</text>
 </svg>`;
 };
 
@@ -89,7 +89,7 @@ try {
   const bg = join(res, 'values', 'ic_launcher_background.xml');
   try {
     const xml = await readFile(bg, 'utf8');
-    await writeFile(bg, xml.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, '<color name="ic_launcher_background">#0B1220</color>'));
+    await writeFile(bg, xml.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, '<color name="ic_launcher_background">#1B2A4A</color>'));
   } catch {
     /* template without background colour resource */
   }

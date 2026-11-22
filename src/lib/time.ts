@@ -61,19 +61,33 @@ export function formatMinutes(mins: number): string {
 }
 
 const timeFmt = new Intl.DateTimeFormat('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-const dateTimeFmt = new Intl.DateTimeFormat('en-AU', {
-  weekday: 'short',
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-});
+const dateFmt = new Intl.DateTimeFormat('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const weekdayFmt = new Intl.DateTimeFormat('en-AU', { weekday: 'short' });
+const zoneNameFmt = new Intl.DateTimeFormat('en-AU', { timeZoneName: 'short' });
 
+/** "10:41:07" (24-hour). */
 export const formatClock = (ms: number) => timeFmt.format(ms);
-export const formatDateTime = (ms: number) => dateTimeFmt.format(ms);
+
+/** "21/11/2026": the CivicMAPS on-screen date format (ISO 8601 stays on the wire). */
+export const formatDate = (ms: number) => dateFmt.format(ms);
+
+/** "Sat 21/11/2026 10:41:07". */
+export const formatDateTime = (ms: number) => `${weekdayFmt.format(ms)} ${formatDate(ms)} ${formatClock(ms)}`;
+
+/** Short zone name for an instant, e.g. "AEDT"; falls back to the UTC offset. */
+export function zoneAbbreviation(ms: number): string {
+  const name = zoneNameFmt.formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value;
+  return name || `UTC${utcOffset(new Date(ms))}`;
+}
+
+/** "21/11/2026 10:41:07 AEDT": capture times shown to the officer (assessment D10). */
+export const formatStamp = (ms: number) => `${formatDate(ms)} ${formatClock(ms)} ${zoneAbbreviation(ms)}`;
+
+/** Stored "YYYY-MM-DD" (permit validity) → "DD/MM/YYYY"; any other text is returned unchanged. */
+export function formatIsoDate(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : v;
+}
 
 /** Parse "HH:MM" (00:00–24:00) into minutes after midnight, or null if invalid. */
 export function parseHhmm(v: string): number | null {

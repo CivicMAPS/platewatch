@@ -24,8 +24,10 @@
     "@capacitor/core": "^8.6.2",
     "@capacitor/filesystem": "^8.1.5",
     "@capacitor/share": "^8.0.3",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "idb": "^8.0.4",
     "lit-html": "^3.3.3",
+    "lucide": "^1.77.0",
     "piexifjs": "^1.0.6",
     "tesseract.js": "^7.0.0"
   },

@@ -285,6 +285,8 @@ export interface Settings {
   diagnostics: boolean;
   /** Home: patrol zone shown (null = all zones, '' = lists without a zone). */
   listZoneFilter: string | null;
+  /** CivicMAPS display theme: light civic surfaces, or the design system's low-light dark theme. */
+  theme: 'light' | 'dark';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -297,4 +299,5 @@ export const DEFAULT_SETTINGS: Settings = {
   // On during the development field-test stage; turn the default off before production.
   diagnostics: true,
   listZoneFilter: null,
+  theme: 'light',
 };

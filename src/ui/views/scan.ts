@@ -40,7 +40,8 @@ import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
 import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction } from '../../lib/types';
 import { effectivePayment, OFFENCE_LABEL, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
 import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
-import { officerNumber } from '../../lib/host';
+import { host, officerNumber } from '../../lib/host';
+import { applyInfringementResult, buildHandoff, canIssueInfringement, formatInfringementNumber } from '../../lib/infringement';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
   RISK_LEVEL_LABELS,
@@ -147,6 +148,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
   let payForm: { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string } = emptyPayForm();
   let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
+  /** Issue infringement hand-off sheet (WF-S31 31a). */
+  let handoffOffer: OffenceOffer | null = null;
   let evidence: Evidence | null = null;
   let clock: number | undefined;
   let unsubGeo: (() => void) | null = null;
@@ -318,6 +321,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     hintSources = null;
     payForm = emptyPayForm();
     topUp = { open: false, paidTo: '', error: '' };
+    handoffOffer = null;
     editing = false;
     confirmError = null;
     pending = null;
@@ -1505,7 +1509,61 @@ export function scanView(params: Record<string, string>, app: App): View {
   };
 
   /** Issue infringement hand-off (WF-S31); hidden without an EnforcementMAPS host (IR-3). */
-  const issueButton = (_offer: OffenceOffer): TemplateResult | typeof nothing => nothing;
+  const issueButton = (offer: OffenceOffer): TemplateResult | typeof nothing => {
+    if (!canIssueInfringement() || !result?.saved || result.saved.infringement?.status === 'issued') return nothing;
+    // IR-7: in a paid space, only once the payment check is saved.
+    if (result.decision.kind === 'timed_new' && isPaidSpace() && !result.saved.payment) return nothing;
+    return html`<button type="button" class="btn-primary mt-3 w-full" data-testid="issue-infringement" @click=${() => { handoffOffer = offer; app.update(); }}>Issue infringement · ${offer.code} →</button>`;
+  };
+
+  /** The timing an offer is about (resighting or a first sighting with its payment check). */
+  const offerTiming = (r: ResultState): Observation | undefined =>
+    r.decision.kind === 'timed_resighting' ? (r.comparison?.observation ?? r.decision.observation) : r.observation;
+
+  /** 31a.4 Start: build the pre-fill and open the EnforcementMAPS wizard; store the result back. */
+  const startInfringement = async () => {
+    const start = host()?.startInfringement;
+    const r = result;
+    const offer = handoffOffer;
+    const obs = r ? offerTiming(r) : undefined;
+    if (!start || !r?.saved || !offer || !obs || !list || list.type !== 'timed') return;
+    phase = 'saving';
+    handoffOffer = null;
+    app.update();
+    try {
+      const firstScan = obs.firstScanId !== r.saved.id ? await getScan(obs.firstScanId) : undefined;
+      const handoff = buildHandoff({ handoffId: crypto.randomUUID(), list, observation: obs, scan: r.saved, firstScan, offer, officerNumber: officerNumber(settings().officerNumber), device: navigator.userAgent });
+      const res = await start(handoff);
+      const out = applyInfringementResult({ scan: r.saved, observation: obs, handoff, result: res });
+      await saveScan(out.scan, out.observation);
+      result = { ...r, saved: out.scan, ...(r.comparison ? { comparison: { ...r.comparison, observation: out.observation, current: out.scan } } : { observation: out.observation }) };
+    } catch (e) {
+      app.toast(`Infringement not started: ${(e as Error).message}`, 'error');
+    }
+    phase = 'result';
+    app.update();
+  };
+
+  /** 31a: what the wizard will receive; nothing is issued until Issue in the wizard. */
+  const handoffSheet = (offer: OffenceOffer) =>
+    decisionSheet({
+      testid: 'handoff-sheet',
+      pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span>`,
+      title: `Start infringement for ${result?.plate ?? ''}`,
+      onClose: () => { handoffOffer = null; app.update(); },
+      body: html`<p>Filled in from this sighting: location, evidence images with their SHA-256, offence, locked time from (<span class="font-plate">${formatClock(offer.timeFrom)}</span>) and the payment check. The infringement number is allocated on this handset when you start.</p>
+        <p class="mt-2 font-semibold">Nothing is issued until you press Issue in the wizard.</p>`,
+      actions: html`<button type="button" class="btn-primary" data-testid="handoff-start" @click=${() => void startInfringement()}>Start infringement</button>
+        <button type="button" class="btn-ghost" @click=${() => { handoffOffer = null; app.update(); }}>Cancel</button>`,
+    });
+
+  /** 31f: issued — persistent, purple; timing closed as issued. */
+  const issuedCard = (rec: NonNullable<ScanRecord['infringement']>): TemplateResult => html`<section class="rounded-md border-2 border-issued bg-issued-bg p-4" data-testid="pin-issued">
+    <span class="inline-flex items-center gap-1 rounded-full border border-issued-border bg-surface px-2.5 py-0.5 text-xs font-semibold tracking-[0.04em] text-issued-strong uppercase">${icon('check', 'h-3.5 w-3.5', 2.5)}${rec.status === 'issued' ? 'PIN issued' : 'Infringement cancelled'}</span>
+    <p class="mt-2 font-plate text-lg font-bold text-neutral-900">${formatInfringementNumber(rec.number)}</p>
+    <p class="mt-1 text-sm text-neutral-800">${rec.offenceCode} · ${rec.issuedAt ? html`issued <span class="font-plate">${formatStamp(rec.issuedAt)}</span> · ` : nothing}officer <span class="font-plate">${rec.officerNumber || '—'}</span>${rec.sync === 'pending' ? ' · sync queued' : ''}</p>
+    ${rec.status === 'issued' ? html`<p class="mt-1 text-sm text-neutral-700">Timing closed as issued.</p>` : nothing}
+  </section>`;
 
   /** Paid parking numbers to check before enforcing; promoted to amber on an overstay (WF-S27 27c.4). */
   const paymentCard = (r: ResultState): TemplateResult | typeof nothing => {
@@ -1530,7 +1588,8 @@ export function scanView(params: Record<string, string>, app: App): View {
         ${r.dismissedReason ? dismissedBanner(r.dismissedReason) : nothing}
         ${decisionPanel(r)}
         ${linkedNote(r)}
-        ${r.dismissedReason && r.dismissedReason !== 'disability_permit' ? nothing : paymentSection(r)}
+        ${r.saved?.infringement ? issuedCard(r.saved.infringement) : nothing}
+        ${r.saved?.infringement?.status === 'issued' || (r.dismissedReason && r.dismissedReason !== 'disability_permit') ? nothing : paymentSection(r)}
         ${r.saved
           ? html`<p class="text-center text-xs text-neutral-600">Saved · SHA-256 <span class="font-plate">${r.saved.sha256.slice(0, 16)}…</span> · <a class="link" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}
@@ -1543,6 +1602,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       ${r.decision.kind === 'timed_flag_check' ? flagSheet(r.decision) : nothing}
       ${r.decision.kind === 'timed_permit' ? permitSheet(r.decision) : nothing}
       ${dismissOpen ? dismissSheet(r) : nothing}
+      ${handoffOffer ? handoffSheet(handoffOffer) : nothing}
     </div>`;
   };
 

@@ -333,6 +333,8 @@ async function main() {
   const elapsed = await page.$eval('[data-testid=elapsed]', (el) => el.textContent);
   // Paid to 23:59 still valid, allowance exceeded → 701 (WF-S30 30d).
   await page.waitForSelector('[data-testid=offence-offer][data-code="701"]', { visible: true });
+  // Development build: no EnforcementMAPS host, so Issue infringement is hidden (WF-S31 IR-3).
+  if (await page.$('[data-testid=issue-infringement]')) throw new Error('Issue infringement shown without an EnforcementMAPS host');
   log(`overstay alert with both evidence images, elapsed ${elapsed}; 701 offered (paid to still valid)`);
   await shot('overstay');
 
@@ -411,6 +413,37 @@ async function main() {
   if (tags !== 0) throw new Error('tag not removed after Dismiss');
   log('next day: known-vehicle check — Confirmed (timed against 2 ×, tag kept), then Dismiss (tag removed, timed as signed); no payment found → 702 offered');
 
+  // WF-S28: A8C123 is a look-alike (8·B) of ABC123, timed on this segment → "Possible earlier
+  // sighting" straight away (no near-match sheet); Next scan stays disabled until a choice.
+  await rescan('A8C123');
+  await page.waitForSelector('[data-testid=result-possible]', { visible: true, timeout: 20000 });
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled during a look-alike decision');
+  await shot('possible-earlier-sighting');
+  await page.click('[data-testid=possible-same]');
+  await page.waitForSelector('[data-testid=lookalike-link]', { visible: true });
+  await waitText('A8C123 read as ABC123');
+  // 8AD999 is a look-alike of the hot-list plate BAD999 → verify interrupt; "Not the hot-list vehicle".
+  await rescan('8AD999');
+  await page.waitForSelector('[data-testid=hot-lookalike]', { visible: true, timeout: 20000 });
+  await shot('hot-lookalike');
+  await page.click('[data-testid=hot-lookalike-not]');
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=offence-offer]', { visible: true });
+  // End the 8AD999 test timing: it is itself a look-alike of BAD999 and would (rightly) route the
+  // next BAD999 scan to "Possible earlier sighting".
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('observations', 'readwrite');
+      const o = tx.objectStore('observations');
+      o.getAll().onsuccess = (ev) => { for (const x of ev.target.result) if (x.plate === '8AD999') o.put({ ...x, status: 'reset' }); };
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
+  log('look-alikes: timed (8·B) → possible earlier sighting → linked as same vehicle; hot-list look-alike → verify → not the hot-list vehicle');
+
   // Hot list alert while working the timed list (manual correction of OCR text).
   await page.click('[data-testid=next-scan]');
   await page.waitForSelector('[data-testid=shutter]:not([disabled])');
@@ -486,6 +519,41 @@ async function main() {
   await page.click('[data-testid=confirm-ok]');
   await waitText('No tagged vehicles');
   log('tagged vehicles: listed and removed in the development build');
+
+  // WF-S31 with a mock EnforcementMAPS host: no payment found → 702 → Issue infringement → hand-off
+  // sheet → the wizard (mocked) issues → PIN shown, timing closed, record locked.
+  await page.goto(timedUrl.replace('#/list/', '#/scan/'));
+  await page.evaluate(() => {
+    window.EnforcementMAPS = {
+      startInfringement: async (h) => { window.__handoff = h; return { status: 'issued', number: '04471261121001836393', offenceCode: h.offence.suggestedCode, issuedAt: Date.now(), sync: 'pending' }; },
+    };
+  });
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 });
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'NOPAY1');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=issue-infringement]', { visible: true });
+  await page.click('[data-testid=issue-infringement]');
+  await page.waitForSelector('[data-testid=handoff-sheet]', { visible: true });
+  await shot('handoff-sheet');
+  await page.click('[data-testid=handoff-start]');
+  await page.waitForSelector('[data-testid=pin-issued]', { visible: true });
+  await waitText('04471 261121 001 8363 93');
+  const handoff = await page.evaluate(() => window.__handoff);
+  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.vehicle.registration !== 'NOPAY1' || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
+    throw new Error(`unexpected hand-off ${JSON.stringify(handoff).slice(0, 300)}`);
+  await shot('pin-issued');
+  await page.evaluate(() => { delete window.EnforcementMAPS; });
+  await click('view record');
+  await page.waitForSelector('[data-testid=record-infringement]', { visible: true });
+  await page.waitForSelector('[data-testid=record-locked]', { visible: true });
+  if (!(await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Delete/.test(b.textContent))?.disabled))) throw new Error('Delete enabled on a record with an issued infringement');
+  log('issue infringement (mock EnforcementMAPS host): 702 → hand-off payload → PIN 04471 261121 001 8363 93 shown, timing closed, record locked');
 
   // Evidence record: EXIF + integrity.
   await page.goto(timedUrl);

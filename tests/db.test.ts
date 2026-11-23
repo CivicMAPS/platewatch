@@ -54,6 +54,19 @@ beforeEach(async () => {
 });
 
 describe('db', () => {
+  it('retention purge keeps scans with an issued infringement and their timing (WF-S31 IR-23)', async () => {
+    const list = timed();
+    await putList(list);
+    const old = at(2026, 1, 1, 9);
+    const obs = { ...newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: old, instance: { restriction: r2P(), start: old, end: old + 3600_000 } }), status: 'issued' as const, closedAt: old };
+    await saveScan({ ...scan('s1', list.id, old, 'o1'), infringement: { status: 'issued', sync: 'synced', pinSource: 'device', handoffId: 'h', number: '04471261121001836393', offenceCode: '701', offenceOverridden: false, timeFrom: old, timeTo: old, officerNumber: '4471' } }, obs);
+    await saveScan(scan('s2', list.id, old));
+    expect(await purgeScansOlderThan(30, at(2026, 11, 1))).toBe(1);
+    expect(await getScan('s1')).toBeDefined();
+    expect(await getScan('s2')).toBeUndefined();
+    expect((await getObservations(list.id)).map((o) => o.id)).toEqual(['o1']);
+  });
+
   it('a disability dismissal keeps the timing running against twice the allowance', async () => {
     const list = timed();
     await putList(list);

@@ -306,6 +306,23 @@ export interface LookalikeLink {
   decidedAt: number;
 }
 
+/** Requirements §11: what PlateWatch stores back after the EnforcementMAPS wizard. */
+export interface InfringementRecord {
+  status: 'allocated' | 'cancelled' | 'issued' | 'void_requested' | 'voided';
+  /** 'pending' while statements wait in the handset queue; 'rejected' if the server refused them. */
+  sync: 'pending' | 'synced' | 'rejected';
+  pinSource: 'device';
+  handoffId: string;
+  /** Infringement number (I-N, 20 digits). */
+  number: string;
+  offenceCode: string;
+  offenceOverridden: boolean;
+  timeFrom: number;
+  timeTo: number;
+  issuedAt?: number;
+  officerNumber: string;
+}
+
 /** Where the officer checked payment (WF-S30). */
 export type PaymentSource = 'easypark' | 'paystay' | 'meter' | 'ticket' | 'other';
 
@@ -329,6 +346,8 @@ export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
   /** Officer's payment check (first sighting in a paid space, WF-S30). */
   payment?: PaymentCheck;
+  /** Infringement issued (or started and cancelled) from this scan, stored back from EnforcementMAPS (WF-S31). */
+  infringement?: InfringementRecord;
   /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
   lookalikes?: LookalikeLink[];
   /** Overstay alert dismissed by the officer after checking the vehicle. */
@@ -386,7 +405,8 @@ export interface DismissedCapture {
 }
 
 /** `dismissed`: an overstay alert the officer dismissed with a reason (see DismissReason). */
-export type ObservationStatus = 'active' | 'expired' | 'reset' | 'dismissed';
+/** `issued`: closed by an infringement issued from this sighting (WF-S31 31f.2). */
+export type ObservationStatus = 'active' | 'expired' | 'reset' | 'dismissed' | 'issued';
 
 /** Why an officer dismissed an overstay alert after checking the vehicle. */
 export type DismissReason = 'disability_permit' | 'emergency_vehicle' | 'permit_displayed';

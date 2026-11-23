@@ -224,14 +224,18 @@ export async function purgeScansOlderThan(days: number, now = Date.now()): Promi
   for (const store of ['scans', 'dismissed'] as const) {
     let cursor = await tx.objectStore(store).index('by-created').openCursor(IDBKeyRange.upperBound(cutoff, true));
     while (cursor) {
-      await cursor.delete();
-      n++;
+      // An infringement's evidence is kept until the PIN's own retention allows (WF-S31 IR-23).
+      const v = cursor.value as ScanRecord | DismissedCapture;
+      if (!('infringement' in v && v.infringement && v.infringement.status !== 'cancelled')) {
+        await cursor.delete();
+        n++;
+      }
       cursor = await cursor.continue();
     }
   }
   const obsStore = tx.objectStore('observations');
   for (const o of await obsStore.getAll()) {
-    if (o.status !== 'active' && (o.closedAt ?? o.startedAt) < cutoff) await obsStore.delete(o.id);
+    if (o.status !== 'active' && o.status !== 'issued' && (o.closedAt ?? o.startedAt) < cutoff) await obsStore.delete(o.id);
   }
   await tx.done;
   return n;

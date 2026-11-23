@@ -1,0 +1,14 @@
+{
+  "schema": "platewatch.backup",
+  "version": 1,
+  "exportedAt": "2026-11-23T00:00:00.000Z",
+  "appVersion": "field-test-pack",
+  "includesScans": false,
+  "lists": [],
+  "observations": [],
+  "scans": [],
+  "flags": [
+    { "key": "PWD111", "plate": "PWD111", "kind": "disability", "createdAt": 1795000000000, "sourceScanId": "field-test", "confirmedDay": "2000-01-01" },
+    { "key": "PWE222", "plate": "PWE222", "kind": "emergency", "createdAt": 1795000000000, "sourceScanId": "field-test", "confirmedDay": "2000-01-01" }
+  ]
+}

@@ -94,6 +94,33 @@ try {
     /* template without background colour resource */
   }
   console.log('[icons] Android launcher icons updated');
+
+  // Splash screens (CivicMAPS design system): Civic Navy with the plate mark, every existing
+  // drawable*/splash.png re-rendered at its own size. Replaces the Capacitor template splash.
+  const { readdir } = await import('node:fs/promises');
+  for (const dir of (await readdir(res)).filter((d) => d.startsWith('drawable'))) {
+    const file = join(res, dir, 'splash.png');
+    let png;
+    try { png = await readFile(file); } catch { continue; }
+    const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+    const mark = Math.round(Math.min(w, h) * 0.42);
+    await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+    await page.setContent(`<html><body style="margin:0;width:${w}px;height:${h}px;background:#1B2A4A;display:flex;align-items:center;justify-content:center">${svg({ maskable: true, background: false }).replace('<svg ', `<svg width="${mark}" height="${mark}" `)}</body></html>`);
+    await writeFile(file, await page.screenshot({ clip: { x: 0, y: 0, width: w, height: h } }));
+  }
+  // Activity theme colours: Civic Navy / dark / Patrol Gold (the template's defaults otherwise).
+  await writeFile(
+    join(res, 'values', 'colors.xml'),
+    `<?xml version="1.0" encoding="utf-8"?>\n<!-- CivicMAPS design system tokens (src/styles/civicmaps/colors_and_type.css). Written by scripts/generate-icons.mjs. -->\n<resources>\n    <color name="colorPrimary">#1B2A4A</color>\n    <color name="colorPrimaryDark">#0F1A32</color>\n    <color name="colorAccent">#D4A843</color>\n</resources>\n`,
+  );
+  // Legacy adaptive background drawable (unused by the launcher, which reads @color): keep it on brand.
+  const legacy = join(res, 'drawable', 'ic_launcher_background.xml');
+  try {
+    await writeFile(legacy, (await readFile(legacy, 'utf8')).replace(/android:fillColor="#26A69A"/i, 'android:fillColor="#1B2A4A"'));
+  } catch {
+    /* not present */
+  }
+  console.log('[icons] Android splash screens and theme colours updated');
 } catch {
   /* no android project yet */
 }

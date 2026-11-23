@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CivicMAPS design system tokens (src/styles/civicmaps/colors_and_type.css). Written by scripts/generate-icons.mjs. -->
+<resources>
+    <color name="colorPrimary">#1B2A4A</color>
+    <color name="colorPrimaryDark">#0F1A32</color>
+    <color name="colorAccent">#D4A843</color>
+</resources>

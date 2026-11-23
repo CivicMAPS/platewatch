@@ -14,6 +14,7 @@ design system is wired in and where each finding in the design-system assessment
 | Fonts | DM Sans (vendored TTF), JetBrains Mono (`@fontsource-variable/jetbrains-mono`, Latin subset) | Both local and precached by the service worker. Plus Jakarta Sans (admin headers only) is not shipped. |
 | Icons | `lucide` package, barrel in `src/ui/components.ts` (`icon()`) | Same glyph set as `lucide-react-native` in EnforcementMAPS. No unicode or emoji icons. |
 | Status | `STATUS`, `statusPill()`, `banner()` in `src/ui/components.ts` | Every status is colour + icon + text. One table maps PlateWatch outcomes to design-system status tokens. |
+| App icon, splash, Android theme | `scripts/generate-icons.mjs` (`CHROME_PATH=… npm run icons`) | Launcher and PWA icons, every `drawable*/splash.png` (Civic Navy + plate mark, replacing the Capacitor template splash) and `values/colors.xml` (colorPrimary Civic Navy, colorPrimaryDark, colorAccent Patrol Gold). |
 | Low-light theme | Settings → Display | Sets `data-theme="dark"`, the design system's dark overrides. The camera is always dark. |
 
 The import screen (`importView.ts`, added on the bulk-import branch) uses the same tokens. Its

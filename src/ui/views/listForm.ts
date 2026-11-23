@@ -28,7 +28,8 @@ import { formatIsoDate } from '../../lib/time';
 import type { App, View } from '../app';
 import { banner, header, icon, LIST_TYPE_META, page, plateBadge, riskPill, typeChip } from '../components';
 import { allowsPaidParking, creatableListTypes, listPermissions, officerSource, policyContext } from '../../lib/listPolicy';
-import { compactVehicle, describeVehicle, EMPTY_VEHICLE, hasVehicle, vehicleOf } from '../../lib/vehicle';
+import { compactVehicle, describeVehicle, EMPTY_VEHICLE, hasVehicle, vehicleComplete, vehicleOf } from '../../lib/vehicle';
+import { parsePermitNumber } from '../../lib/permit';
 import { vehicleFields } from '../vehicleFields';
 
 const SIDES: { value: StreetSide; label: string }[] = [
@@ -92,10 +93,13 @@ interface AllowDraft {
   validTo: string;
   vehicle: VehicleDetails;
   rpa: string;
-  /** Streets for a street-specific permit, separated by ";". */
-  streets: string;
+  /** Issuing council code (com, copp) and CivicMAPS linking ID once onboarded. */
+  council: string;
+  linkingId: string;
+  streetNumber: string;
+  street: string;
 }
-const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '', vehicle: { ...EMPTY_VEHICLE }, rpa: '', streets: '' });
+const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '', vehicle: { ...EMPTY_VEHICLE }, rpa: '', council: '', linkingId: '', streetNumber: '', street: '' });
 
 type HotDraft = Omit<HotEntry, 'id' | 'key' | 'addedAt'> & { id: string | null };
 const emptyHotDraft = (): HotDraft => ({
@@ -535,8 +539,21 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       app.update();
       return;
     }
-    if (allowDraft.validFrom && allowDraft.validTo && allowDraft.validTo < allowDraft.validFrom) {
-      errors = { ...errors, allowPlate: 'Valid-to date is before valid-from.' };
+    // Permit structure (schemas/civicmaps-parking-permit.v1.schema.json): the permit number is
+    // authoritative and gives the types; dates, address, council and vehicle details are required.
+    const d = allowDraft;
+    const permitNo = d.permitNo.trim().toUpperCase();
+    const parts = parsePermitNumber(permitNo);
+    const problems = [
+      !parts ? 'permit number like RPA-2026-0789, RSP-2026-0790/1 or RPA/COMB/FS-2026-0791' : '',
+      !d.validFrom || !d.validTo ? 'valid from and valid to' : d.validTo < d.validFrom ? 'valid to on or after valid from' : '',
+      !d.council.trim() ? 'council (e.g. com)' : '',
+      !d.streetNumber.trim() || !d.street.trim() ? 'street number and street' : '',
+      parts?.types.includes('RPA') && !d.rpa.trim() ? 'parking area (RPA permit)' : '',
+      !vehicleComplete(d.vehicle) ? 'registration type, make, type and colour' : '',
+    ].filter(Boolean);
+    if (problems.length) {
+      errors = { ...errors, allowPlate: `Needed: ${problems.join('; ')}.` };
       app.update();
       return;
     }
@@ -544,17 +561,19 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       id: uid(),
       plate,
       key,
-      label: allowDraft.label.trim(),
-      permitNo: allowDraft.permitNo.trim(),
-      validFrom: allowDraft.validFrom,
-      validTo: allowDraft.validTo,
+      label: d.label.trim(),
+      permitNo,
+      validFrom: d.validFrom,
+      validTo: d.validTo,
       addedAt: Date.now(),
+      permitTypes: parts!.types,
+      council: { code: d.council.trim().toLowerCase(), ...(d.linkingId.trim() ? { linkingId: d.linkingId.trim() } : {}) },
+      address: { streetNumber: d.streetNumber.trim(), street: d.street.trim() },
     };
-    Object.assign(entry, compactVehicle(allowDraft.vehicle));
-    const rpa = allowDraft.rpa.trim();
-    const streets = allowDraft.streets.split(';').map((x) => x.trim()).filter(Boolean);
-    if (rpa) entry.rpa = rpa;
-    if (streets.length) entry.streets = streets;
+    Object.assign(entry, compactVehicle(d.vehicle));
+    if (d.rpa.trim()) entry.rpa = d.rpa.trim().toUpperCase();
+    // RSP / RP apply on the registered address's street.
+    if (parts!.types.some((t) => t === 'RSP' || t === 'RP')) entry.streets = [d.street.trim()];
     const l = list;
     set(() => {
       l.entries = [entry, ...l.entries];
@@ -605,20 +624,25 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
           ${err('allowPlate')}
         </div>
         <div class="grid grid-cols-2 gap-3">
-          ${text({ id: 'allow-label', label: 'Label', value: allowDraft.label, onInput: (v) => (allowDraft.label = v), placeholder: 'e.g. 12 Smith St' })}
-          ${text({ id: 'allow-permit', label: 'Permit no.', value: allowDraft.permitNo, onInput: (v) => (allowDraft.permitNo = v), placeholder: 'Optional', autocap: 'characters' })}
+          ${text({ id: 'allow-permit', label: 'Permit number', value: allowDraft.permitNo, onInput: (v) => (allowDraft.permitNo = v), placeholder: 'RPA-2026-0789', autocap: 'characters', required: true })}
+          ${text({ id: 'allow-council', label: 'Council', value: allowDraft.council, onInput: (v) => (allowDraft.council = v), placeholder: 'e.g. com', required: true, maxlength: 8 })}
+        </div>
+        <p class="-mt-1 text-xs text-neutral-600">Types from the number: RPA (residential parking area), RSP (residential street permit), RP (resident permit, in front of the address), FS (foreshore); a combination lists each with COMB, e.g. RPA/COMB/FS.</p>
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'allow-from', label: 'Valid from', type: 'date', value: allowDraft.validFrom, onInput: (v) => (allowDraft.validFrom = v), required: true })}
+          ${text({ id: 'allow-to', label: 'Valid to', type: 'date', value: allowDraft.validTo, onInput: (v) => (allowDraft.validTo = v), required: true })}
+        </div>
+        <p class="-mt-1 text-xs text-neutral-600">Expires at midnight at the end of the valid-to date.</p>
+        <div class="grid grid-cols-[1fr_2fr] gap-3">
+          ${text({ id: 'allow-street-number', label: 'Street no.', value: allowDraft.streetNumber, onInput: (v) => (allowDraft.streetNumber = v), placeholder: '12', required: true, maxlength: 12 })}
+          ${text({ id: 'allow-street', label: 'Street (registered address)', value: allowDraft.street, onInput: (v) => (allowDraft.street = v), placeholder: 'e.g. Gladstone Street', required: true })}
         </div>
         <div class="grid grid-cols-2 gap-3">
-          ${text({ id: 'allow-from', label: 'Valid from', type: 'date', value: allowDraft.validFrom, onInput: (v) => (allowDraft.validFrom = v) })}
-          ${text({ id: 'allow-to', label: 'Valid to', type: 'date', value: allowDraft.validTo, onInput: (v) => (allowDraft.validTo = v) })}
+          ${text({ id: 'allow-rpa', label: 'Parking area (RPA)', value: allowDraft.rpa, onInput: (v) => (allowDraft.rpa = v), placeholder: 'e.g. 7, 4B, 15A', maxlength: 4, autocap: 'characters' })}
+          ${text({ id: 'allow-label', label: 'Holder / label', value: allowDraft.label, onInput: (v) => (allowDraft.label = v), placeholder: 'Optional' })}
         </div>
         <p class="field-label -mb-1">Vehicle details</p>
-        ${vehicleFields({ id: 'allow', value: allowDraft.vehicle, onChange: (patch) => set(() => (allowDraft.vehicle = { ...allowDraft.vehicle, ...patch })) })}
-        <div class="grid grid-cols-2 gap-3">
-          ${text({ id: 'allow-rpa', label: 'Permit area (RPA)', value: allowDraft.rpa, onInput: (v) => (allowDraft.rpa = v), placeholder: 'e.g. 12', maxlength: 12 })}
-          ${text({ id: 'allow-streets', label: 'Streets', value: allowDraft.streets, onInput: (v) => (allowDraft.streets = v), placeholder: 'e.g. Smith St; Gore St' })}
-        </div>
-        <p class="-mt-1 text-xs text-neutral-600">Where the permit applies, as the council holds it: an area, a street or both. Blank: it applies wherever this list is linked.</p>
+        ${vehicleFields({ id: 'allow', value: allowDraft.vehicle, required: true, onChange: (patch) => set(() => (allowDraft.vehicle = { ...allowDraft.vehicle, ...patch })) })}
         <button type="submit" class="btn-secondary">${icon('plus')} Add to list</button>
       </form>
       <button type="button" class="btn-ghost text-sm" @click=${() => set(() => (showBulk = !showBulk))}>${showBulk ? 'Hide bulk import' : 'Bulk import (paste)'}</button>

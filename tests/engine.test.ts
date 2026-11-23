@@ -14,9 +14,9 @@ function observe(plate: string, startedAt: number, patch: Partial<Observation> =
 const base = { list, hotLists: [], allowLists: [allow(['RES001'])], observations: [] as Observation[] };
 
 describe('timed list workflow', () => {
-  it('a plate on a linked allow list raises the permit pop-up as in area; the officer decides', () => {
+  it('a plate on a linked allow list raises the permit pop-up (valid, applies); the officer decides', () => {
     const r = evaluate({ ...base, at: MON_0900, plate: 'res 001' });
-    expect(r.decision).toMatchObject({ kind: 'timed_permit', hits: [{ status: 'ACTIVE_IN_AREA', linked: true }], then: { kind: 'timed_new' } });
+    expect(r.decision).toMatchObject({ kind: 'timed_permit', hits: [{ validity: 'valid', scope: 'applies', linked: true }], then: { kind: 'timed_new' } });
   });
 
   it('a permit is shown even when a clock is already running for the plate (the officer can exempt it)', () => {
@@ -25,47 +25,64 @@ describe('timed list workflow', () => {
     expect(r.decision).toMatchObject({ kind: 'timed_permit', then: { kind: 'timed_resighting', overstay: true } });
   });
 
-  it('a permit valid only from today, or only until today, is active all day', () => {
+  it('valid from 00:00 on valid-from until midnight at the end of valid-to', () => {
     const a = allow(['RES001']);
     a.entries[0]!.validFrom = '2026-11-16';
     a.entries[0]!.validTo = '2026-11-16';
-    for (const t of [at(2026, 11, 16, 0, 1), MON_0900, at(2026, 11, 16, 23, 59)])
-      expect(findPermits('RES001', list, [a], t)[0]!.status).toBe('ACTIVE_IN_AREA');
+    for (const t of [at(2026, 11, 16, 0, 0), MON_0900, at(2026, 11, 16, 23, 59, 59)]) expect(findPermits('RES001', list, [a], t)[0]!.validity).toBe('valid');
+    expect(findPermits('RES001', list, [a], at(2026, 11, 17, 0, 0))[0]).toMatchObject({ validity: 'expired', notYetValid: false });
+    expect(findPermits('RES001', list, [a], at(2026, 11, 15, 23, 59))[0]).toMatchObject({ validity: 'expired', notYetValid: true });
   });
 
   it('shows a permit on a list that is not linked, with its scope unknown', () => {
     const r = evaluate({ ...base, list: timed({ allowListIds: [] }), at: MON_0900, plate: 'RES001' });
-    expect(r.decision).toMatchObject({ kind: 'timed_permit', hits: [{ status: 'ACTIVE_SCOPE_UNKNOWN', linked: false }] });
+    expect(r.decision).toMatchObject({ kind: 'timed_permit', hits: [{ validity: 'valid', scope: 'unknown', linked: false }] });
   });
 
-  it('reports an expired or not-yet-active permit as such, never as exempt', () => {
+  it('only two statuses: expired and not yet valid are both "expired", never exempt by themselves', () => {
     const a = allow(['RES001', 'RES002']);
     a.entries[0]!.validTo = '2026-11-15';
     a.entries[1]!.validFrom = '2026-11-17';
-    expect(evaluate({ ...base, allowLists: [a], at: MON_0900, plate: 'RES001' }).decision).toMatchObject({ kind: 'timed_permit', hits: [{ status: 'NOT_ACTIVE_EXPIRED' }], then: { kind: 'timed_new' } });
-    expect(evaluate({ ...base, allowLists: [a], at: MON_0900, plate: 'RES002' }).decision).toMatchObject({ kind: 'timed_permit', hits: [{ status: 'NOT_YET_ACTIVE' }] });
+    expect(evaluate({ ...base, allowLists: [a], at: MON_0900, plate: 'RES001' }).decision).toMatchObject({ kind: 'timed_permit', hits: [{ validity: 'expired' }], then: { kind: 'timed_new' } });
+    expect(evaluate({ ...base, allowLists: [a], at: MON_0900, plate: 'RES002' }).decision).toMatchObject({ kind: 'timed_permit', hits: [{ validity: 'expired', notYetValid: true }] });
   });
 
-  it('compares a permit area or street with the segment (either one matching is in area)', () => {
+  it('permits held without types: an area or a street matching applies (older lists)', () => {
     const l = timed({ allowListIds: [], rpa: 'com-rpa-12' });
     const permit = (patch: Partial<AllowList['entries'][number]>) => { const a = allow(['RES001']); Object.assign(a.entries[0]!, patch); return [a]; };
-    const status = (patch: Partial<AllowList['entries'][number]>, list = l) => {
+    const scope = (patch: Partial<AllowList['entries'][number]>, list = l) => {
       const d = evaluate({ ...base, list, allowLists: permit(patch), at: MON_0900, plate: 'RES001' }).decision;
-      return d.kind === 'timed_permit' ? d.hits[0]!.status : d.kind;
+      return d.kind === 'timed_permit' ? d.hits[0]!.scope : d.kind;
     };
-    expect(status({ rpa: '12' })).toBe('ACTIVE_IN_AREA');
-    expect(status({ rpa: 'RPA 12' })).toBe('ACTIVE_IN_AREA');
-    expect(status({ rpa: '5A' })).toBe('ACTIVE_NOT_IN_AREA');
-    expect(status({ streets: ['Smith St'] })).toBe('ACTIVE_IN_AREA');
-    expect(status({ streets: ['Brunswick Street'] })).toBe('ACTIVE_NOT_IN_AREA');
-    expect(status({ rpa: '5A', streets: ['smith street'] })).toBe('ACTIVE_IN_AREA');
-    // A scoped permit on a linked list still has to match: the link does not widen it.
-    expect(status({ rpa: '5A' }, timed({ rpa: '12' }))).toBe('ACTIVE_NOT_IN_AREA');
+    expect(scope({ rpa: '12' })).toBe('applies');
+    expect(scope({ rpa: 'RPA 12' })).toBe('applies');
+    expect(scope({ rpa: '5A' })).toBe('other_area');
+    expect(scope({ streets: ['Smith St'] })).toBe('applies');
+    expect(scope({ streets: ['Brunswick Street'] })).toBe('other_area');
+    expect(scope({ rpa: '5A', streets: ['smith street'] })).toBe('applies');
+    expect(scope({ rpa: '5A' }, timed({ rpa: '12' }))).toBe('other_area');
   });
 
-  it('shows no permit and records nothing when no restriction is in force', () => {
-    const r = evaluate({ ...base, at: at(2026, 11, 16, 20, 0), plate: 'RES001' });
-    expect(r.decision.kind).toBe('timed_not_in_force');
+  it('permit types: RPA by area (council-scoped), RSP / RP by the registered street, FS only in a foreshore space', () => {
+    const l = timed({ allowListIds: [], rpa: 'com-rpa-7', displayId: 'com-20055', restrictions: [r2P({ description: 'Meter' })] });
+    const hit = (patch: Partial<AllowList['entries'][number]>, list = l) => {
+      const a = allow(['RES001']);
+      Object.assign(a.entries[0]!, { council: { code: 'com' }, address: { streetNumber: '12', street: 'Gladstone Street' }, ...patch });
+      return findPermits('RES001', list, [a], MON_0900, list.restrictions[0])[0]!;
+    };
+    expect(hit({ permitTypes: ['RPA'], rpa: '7' })).toMatchObject({ scope: 'applies', basis: 'RPA' });
+    expect(hit({ permitTypes: ['RPA'], rpa: '7', council: { code: 'copp' } })).toMatchObject({ scope: 'other_area' }); // copp 7 is not com 7
+    expect(hit({ permitTypes: ['RPA'], rpa: '7' }, { ...l, rpa: '919379201-com-rpa7' })).toMatchObject({ scope: 'applies' }); // operational ID
+    expect(hit({ permitTypes: ['RSP'], address: { streetNumber: '12', street: 'Smith Street' } })).toMatchObject({ scope: 'applies', basis: 'RSP' });
+    expect(hit({ permitTypes: ['RP'], address: { streetNumber: '3/45', street: 'Smith St' } })).toMatchObject({ scope: 'applies', basis: 'RP' });
+    expect(hit({ permitTypes: ['RSP'] })).toMatchObject({ scope: 'other_area' });
+    expect(hit({ permitTypes: ['FS'] })).toMatchObject({ scope: 'other_area' }); // not a foreshore space
+    const fore = { ...l, restrictions: [r2P({ description: 'Meter · Foreshore' })] };
+    expect(hit({ permitTypes: ['FS'] }, fore)).toMatchObject({ scope: 'payment_only', basis: 'FS' });
+    expect(hit({ permitTypes: ['FS'], council: { code: 'copp' } }, fore)).toMatchObject({ scope: 'other_area' }); // own municipality only
+    // A combination: RPA in area wins; outside the area its FS still waives payment in a foreshore space.
+    expect(hit({ permitTypes: ['RPA', 'FS'], rpa: '7' }, fore)).toMatchObject({ scope: 'applies', basis: 'RPA' });
+    expect(hit({ permitTypes: ['RPA', 'FS'], rpa: '9' }, fore)).toMatchObject({ scope: 'payment_only', basis: 'FS' });
   });
 
   it('first sighting creates a record with the allowance of the restriction in force', () => {

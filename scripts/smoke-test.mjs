@@ -164,12 +164,25 @@ async function main() {
   await click('Create list');
   await click('Allow list');
   await type('#name', 'Zone 12 residents');
-  await type('#allow-plate', 'RES001');
-  await type('#allow-label', '12 Smith St');
+  // Permits follow the permit structure: number (types), council, dates, registered address, vehicle.
+  const setValue = (sel, v) => page.$eval(sel, (el, val) => { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, v);
+  const fillPermit = async (plate, number, streetNumber) => {
+    await type('#allow-plate', plate);
+    await type('#allow-permit', number);
+    await type('#allow-council', 'com');
+    await setValue('#allow-from', '2026-01-01');
+    await setValue('#allow-to', '2027-12-31');
+    await type('#allow-street-number', streetNumber);
+    await type('#allow-street', 'Smith Street');
+    await page.select('#allow-registrationType', 'private');
+    await type('#allow-make', 'Toyota');
+    await page.select('#allow-bodyType', 'sedan');
+    await page.select('#allow-colour', 'White');
+  };
+  await fillPermit('RES001', 'RSP-2026-0001', '12');
   await click('Add to list');
   // A permit typed but not yet added must still be saved with the list.
-  await type('#allow-plate', 'RES002');
-  await type('#allow-label', '14 Smith St');
+  await fillPermit('RES002', 'RSP-2026-0002', '14');
   await click('Save list');
   await waitText('Allowed plates (2)');
   log('allow list saved, including a permit typed but not yet added');
@@ -183,9 +196,9 @@ async function main() {
   await click('Spitting');
   await click('Extreme risk');
   // Vehicle details in the infringement structure: registration type, make, type, colour.
-  await type('#hot-registrationType', 'Standard');
+  await page.select('#hot-registrationType', 'private');
   await type('#hot-make', 'Toyota');
-  await page.select('#hot-bodyType', 'Wagon');
+  await page.select('#hot-bodyType', 'wagon');
   await page.select('#hot-colour', 'Blue');
   await click('Add vehicle');
   await click('Save list');
@@ -455,7 +468,7 @@ async function main() {
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=hot-alert]', { timeout: 20000 });
   const hotText = await page.$eval('[data-testid=hot-alert]', (el) => el.innerText);
-  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota Wagon · Standard/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
+  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota Wagon · Private/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
   // WF-S29: Next scan stays disabled until the officer acknowledges; needs an officer number.
   await page.waitForSelector('[data-testid=hot-ack-officer-required]', { visible: true });
   if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before acknowledging');
@@ -490,7 +503,7 @@ async function main() {
     await page.click('[data-testid=check]');
     // The permit pop-up shows the permit details; the officer decides it exempts here.
     await page.waitForSelector('[data-testid=permit-sheet]', { visible: true, timeout: 20000 });
-    await page.waitForSelector('[data-testid=permit-hit][data-status=ACTIVE_IN_AREA]');
+    await page.waitForSelector('[data-testid=permit-hit][data-validity=valid][data-scope=applies].permit-valid');
     if (plate === 'RES002') await shot('permit-sheet');
     await page.click('[data-testid=permit-exempt]');
     await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
@@ -501,7 +514,7 @@ async function main() {
     await waitText('Saved · SHA-256');
   }
   await shot('permit-valid');
-  log('linked permit plate: permit pop-up (applies here) → Exempt here → green "Permit valid", recorded; again on re-scan');
+  log('RSP permit on the street: permit pop-up (VALID, solid green, applies here) → Exempt here → green "Permit valid", recorded; again on re-scan');
 
   // Tagged vehicles (development build): an emergency dismissal tags the plate; the tag is removed
   // from Settings → Tagged vehicles (CommandMAPS dashboard once integrated).
@@ -544,9 +557,9 @@ async function main() {
   await page.waitForSelector('[data-testid=handoff-sheet]', { visible: true });
   // Vehicle details in the infringement structure, then the licence plate a second time.
   if (!(await page.$eval('[data-testid=handoff-start]', (b) => b.disabled))) throw new Error('Start enabled before vehicle details');
-  await type('#handoff-registrationType', 'Standard');
+  await page.select('#handoff-registrationType', 'private');
   await type('#handoff-make', 'Holden');
-  await page.select('#handoff-bodyType', 'Hatchback');
+  await page.select('#handoff-bodyType', 'hatchback');
   await page.select('#handoff-colour', 'White');
   await type('[data-testid=handoff-plate-again]', 'N0PAY1');
   await page.waitForSelector('[data-testid=handoff-plate-mismatch]', { visible: true });
@@ -560,7 +573,7 @@ async function main() {
   await page.waitForSelector('[data-testid=pin-issued]', { visible: true });
   await waitText('04471 261121 001 8363 93');
   const handoff = await page.evaluate(() => window.__handoff);
-  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.vehicle.registration !== 'NOPAY1' || handoff.vehicle.make !== 'Holden' || handoff.vehicle.type !== 'Hatchback' || handoff.vehicle.colour !== 'White' || handoff.vehicle.registrationType !== 'Standard' || !handoff.vehicle.plateReentry?.matched || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
+  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.vehicle.registration !== 'NOPAY1' || handoff.vehicle.make !== 'Holden' || handoff.vehicle.type !== 'hatchback' || handoff.vehicle.colour !== 'White' || handoff.vehicle.registrationType !== 'private' || handoff.vehicle.registrationState !== 'VIC' || !handoff.vehicle.plateReentry?.matched || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
     throw new Error(`unexpected hand-off ${JSON.stringify(handoff).slice(0, 300)}`);
   await shot('pin-issued');
   await page.evaluate(() => { delete window.EnforcementMAPS; });

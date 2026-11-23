@@ -1,2 +1,2 @@
-list_name,plate,risk_level,risks,registration_type,make,type,colour,notes
-Officer safety,ABC123,high,Aggressive;Threats / intimidation,Standard,Toyota,Ute,White,Approach with a second officer
+list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes
+Officer safety,ABC123,high,Aggressive;Threats / intimidation,VIC,private,ute,Toyota,White,Approach with a second officer

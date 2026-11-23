@@ -39,7 +39,8 @@ import {
   type VehicleDetails,
   type Weekday,
 } from './types';
-import { compactVehicle, vehicleOf } from './vehicle';
+import { compactVehicle, REGISTRATION_STATES, registrationTypeCode, vehicleOf, vehicleTypeCode } from './vehicle';
+import { parsePermitNumber, permitRecords, permitToEntry, validatePermitRecord } from './permit';
 
 /* ───────────────────────────── Results ───────────────────────────── */
 
@@ -92,6 +93,7 @@ export type ImportKind =
   | 'civicmaps-mixed'
   | 'civicmaps-release'
   | 'area-dataset'
+  | 'permits-json'
   | 'unknown';
 
 export interface ImportResult {
@@ -134,17 +136,17 @@ export const CSV_TEMPLATES = {
   },
   allow: {
     fileName: 'platewatch-allow-list-template.csv',
-    header: 'list_name,plate,label,permit_no,valid_from,valid_to,registration_type,make,type,colour,rpa,streets',
+    header: 'list_name,plate,permit_no,council,linking_id,valid_from,valid_to,parking_area,street_number,street,registration_state,registration_type,type,make,colour,label',
     example: [
-      'RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30,Standard,Toyota,Sedan,White,7,',
-      'RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026,Standard,Mazda,Hatchback,Blue,7,',
-      'Street permits,STR001,Resident,S-310,2026-07-01,2027-06-30,Standard,Kia,Sedan,Silver,,Gladstone St;Smith St',
+      'RPA 7 residents,1AB2CD,RPA-2026-0789,com,,2026-07-01,2027-06-30,7,12,Gladstone Street,VIC,private,sedan,Toyota,White,',
+      'RPA 7 residents,XYZ789,RPA/COMB/FS-2026-0791/1,com,,01/07/2026,31/12/2026,7,3/45,Gladstone Street,VIC,lease,hatchback,Mazda,Blue,',
+      'Street permits,STR001,RSP-2026-0790,com,,2026-07-01,2027-06-30,,8,Smith Street,VIC,private,suv,Kia,Silver,',
     ].join('\n'),
   },
   hot: {
     fileName: 'platewatch-hot-list-template.csv',
-    header: 'list_name,plate,risk_level,risks,registration_type,make,type,colour,notes',
-    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,Standard,Toyota,Ute,White,Approach with a second officer',
+    header: 'list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes',
+    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,VIC,private,ute,Toyota,White,Approach with a second officer',
   },
 } as const;
 
@@ -152,12 +154,25 @@ export const CSV_TEMPLATES = {
  * Vehicle details from a CSV row (registration_type, make, type, colour). Older columns still read:
  * body_type → type, color → colour, and a free-text `vehicle` (older permit files) → make.
  */
-function vehicleColumns(row: Record<string, string | undefined>): Partial<VehicleDetails> {
+function vehicleColumns(row: Record<string, string | undefined>): { vehicle: Partial<VehicleDetails>; problems: string[] } {
+  const problems: string[] = [];
+  // Registration type and vehicle type are fixed lists (codes or labels, any case).
+  const regType = registrationTypeCode(row.registration_type);
+  if (regType === null) problems.push(`registration_type "${row.registration_type}" is not private, commercial, company, lease, diplomatic or other`);
+  const rawType = row.type || row.body_type || '';
+  const type = vehicleTypeCode(rawType);
+  if (type === null) problems.push(`type "${rawType}" is not a vehicle type on the list`);
+  const state = (row.registration_state ?? '').trim().toUpperCase();
+  if (state && !(REGISTRATION_STATES as readonly string[]).includes(state)) problems.push(`registration_state "${state}" is not an Australian state or territory`);
   return {
-    registrationType: row.registration_type ?? '',
-    make: row.make || row.vehicle || '',
-    bodyType: row.type || row.body_type || '',
-    colour: row.colour || row.color || '',
+    vehicle: {
+      registrationType: regType ?? '',
+      make: row.make || row.vehicle || '',
+      bodyType: type ?? '',
+      colour: row.colour || row.color || '',
+      registrationState: state || 'VIC',
+    },
+    problems,
   };
 }
 
@@ -731,13 +746,28 @@ function allowFromCsv(file: string, table: string[][], out: ImportResult): void 
       out.issues.push({ file, row: line, message: 'valid_from / valid_to must be YYYY-MM-DD or DD/MM/YYYY.' });
       continue;
     }
-    const entry: AllowEntry = { id: uid(), plate, key: plateKey(plate), label: row.label ?? '', permitNo: row.permit_no ?? '', validFrom, validTo, addedAt: Date.now() };
-    // Permit details the council holds: vehicle details (infringement structure), area and/or streets.
-    Object.assign(entry, compactVehicle(vehicleColumns(row)));
-    const rpa = (row.rpa ?? '').trim();
-    const streets = (row.streets ?? '').split(/[;|]/).map((x) => x.trim()).filter(Boolean);
+    const { vehicle, problems } = vehicleColumns(row);
+    if (problems.length) {
+      out.issues.push({ file, row: line, message: `${problems.join('; ')}.` });
+      continue;
+    }
+    const permitNo = (row.permit_no ?? '').trim().toUpperCase();
+    const parts = permitNo ? parsePermitNumber(permitNo) : null;
+    const entry: AllowEntry = { id: uid(), plate, key: plateKey(plate), label: row.label ?? '', permitNo, validFrom, validTo, addedAt: Date.now() };
+    // Permit details the council holds: vehicle details (infringement structure), types, area, address.
+    Object.assign(entry, compactVehicle(vehicle));
+    if (parts) entry.permitTypes = parts.types;
+    const council = (row.council ?? '').trim().toLowerCase();
+    if (council) entry.council = { code: council, ...(row.linking_id?.trim() ? { linkingId: row.linking_id.trim() } : {}) };
+    if (row.street?.trim()) entry.address = { streetNumber: (row.street_number ?? '').trim(), street: row.street.trim() };
+    const rpa = (row.parking_area ?? row.rpa ?? '').trim();
+    const streets = [
+      ...(row.streets ?? '').split(/[;|]/).map((x) => x.trim()).filter(Boolean),
+      // RSP / RP apply on the registered address's street.
+      ...(parts?.types.some((t) => t === 'RSP' || t === 'RP') && entry.address ? [entry.address.street] : []),
+    ];
     if (rpa) entry.rpa = rpa;
-    if (streets.length) entry.streets = streets;
+    if (streets.length) entry.streets = [...new Set(streets)];
     const entries = lists.get(row.list_name).list.entries;
     const i = entries.findIndex((e) => e.key === entry.key);
     if (i >= 0) entries[i] = { ...entry, id: entries[i]!.id };
@@ -764,6 +794,11 @@ function hotFromCsv(file: string, table: string[][], out: ImportResult): void {
       out.issues.push({ file, row: line, message: `risk_level "${row.risk_level}" must be caution, high or extreme.` });
       continue;
     }
+    const hotVehicle = vehicleColumns(row);
+    if (hotVehicle.problems.length) {
+      out.issues.push({ file, row: line, message: `${hotVehicle.problems.join('; ')}.` });
+      continue;
+    }
     const risks: RiskTag[] = [];
     const unknown: string[] = [];
     for (const r of (row.risks ?? '').split(/[;|]/).map((x) => x.trim()).filter(Boolean)) {
@@ -781,7 +816,7 @@ function hotFromCsv(file: string, table: string[][], out: ImportResult): void {
       key: plateKey(plate),
       risks: [...new Set(risks)],
       riskLevel: level,
-      ...vehicleOf(vehicleColumns(row)),
+      ...vehicleOf(hotVehicle.vehicle),
       // Model is not part of the vehicle-details structure: an older file's model column goes to notes.
       notes: [row.notes ?? '', row.model?.trim() ? `Model: ${row.model.trim()}` : ''].filter(Boolean).join(' · '),
       addedAt: Date.now(),
@@ -1089,6 +1124,29 @@ function fromAreaDataset(file: string, d: Json, out: ImportResult): void {
 /* ───────────────────────────── Entry point ───────────────────────────── */
 
 /** Read one file (CSV template or CivicMAPS-preview JSON) into drafts, issues and skips. */
+/**
+ * Permit JSON: one permit list per council in the file, "Permits · <council>". Each record is
+ * validated against the permit schema rules; a record with problems is listed and not imported.
+ */
+function permitsFromJson(file: string, records: unknown[], out: ImportResult): void {
+  const lists = new Map<string, AllowDraft>();
+  records.forEach((r, i) => {
+    const errs = validatePermitRecord(r, `permits[${i}].`);
+    if (errs.length) {
+      for (const message of errs) out.issues.push({ file, message });
+      return;
+    }
+    const entry = permitToEntry(r as Record<string, any>, uid());
+    const council = entry.council!.code;
+    let d = lists.get(council);
+    if (!d) lists.set(council, (d = { kind: 'allow', source: file, list: { type: 'allow', name: `Permits · ${council}`, notes: '', entries: [] } }));
+    const i2 = d.list.entries.findIndex((e) => e.key === entry.key && e.permitNo === entry.permitNo);
+    if (i2 >= 0) d.list.entries[i2] = entry;
+    else d.list.entries.push(entry);
+  });
+  out.drafts.push(...lists.values());
+}
+
 export function parseImportFile(text: string, file: string): ImportResult {
   const out: ImportResult = { file, kind: 'unknown', drafts: [], issues: [], skipped: [] };
   const trimmed = text.replace(/^﻿/, '').trim();
@@ -1098,6 +1156,13 @@ export function parseImportFile(text: string, file: string): ImportResult {
       data = JSON.parse(trimmed);
     } catch {
       out.issues.push({ file, message: 'File is not valid JSON.' });
+      return out;
+    }
+    // Residential parking permits (schemas/civicmaps-parking-permit.v1.schema.json).
+    const permits = permitRecords(data);
+    if (permits) {
+      out.kind = 'permits-json';
+      permitsFromJson(file, permits, out);
       return out;
     }
     const docs = Array.isArray(data) ? data.filter(isObj) : isObj(data) ? [data] : [];

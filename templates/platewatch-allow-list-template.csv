@@ -1,4 +1,4 @@
-list_name,plate,label,permit_no,valid_from,valid_to,registration_type,make,type,colour,rpa,streets
-RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30,Standard,Toyota,Sedan,White,7,
-RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026,Standard,Mazda,Hatchback,Blue,7,
-Street permits,STR001,Resident,S-310,2026-07-01,2027-06-30,Standard,Kia,Sedan,Silver,,Gladstone St;Smith St
+list_name,plate,permit_no,council,linking_id,valid_from,valid_to,parking_area,street_number,street,registration_state,registration_type,type,make,colour,label
+RPA 7 residents,1AB2CD,RPA-2026-0789,com,,2026-07-01,2027-06-30,7,12,Gladstone Street,VIC,private,sedan,Toyota,White,
+RPA 7 residents,XYZ789,RPA/COMB/FS-2026-0791/1,com,,01/07/2026,31/12/2026,7,3/45,Gladstone Street,VIC,lease,hatchback,Mazda,Blue,
+Street permits,STR001,RSP-2026-0790,com,,2026-07-01,2027-06-30,,8,Smith Street,VIC,private,suv,Kia,Silver,

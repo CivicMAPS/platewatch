@@ -26,7 +26,8 @@ import {
   uid,
 } from '../../lib/db';
 import { disabilityDoubles, evaluate, isStatutoryRestriction, newObservation, resighting, timingDecision, type Decision, type HotHit, type PermitHit } from '../../lib/engine';
-import { applyDismissal, confirmFlag, DISABILITY_BLOCKED_TEXT, disabilityBlocked, DISMISS_LABEL, DISMISS_REASONS, FLAG_LABEL, FLAG_MESSAGE, PERMIT_STATUS_TEXT } from '../../lib/dismissal';
+import { applyDismissal, confirmFlag, DISABILITY_BLOCKED_TEXT, disabilityBlocked, DISMISS_LABEL, DISMISS_REASONS, FLAG_LABEL, FLAG_MESSAGE, PERMIT_SCOPE_TEXT } from '../../lib/dismissal';
+import { areaId, parseArea, PERMIT_TYPE_LABEL } from '../../lib/permit';
 import { feedback, unlockAudio } from '../../lib/feedback';
 import { accuracyTone, formatLatLng, geo, type GeoState } from '../../lib/geo';
 import { cropCanvas, mapCoverRect, padRect } from '../../lib/image';
@@ -757,7 +758,23 @@ export function scanView(params: Record<string, string>, app: App): View {
   const acceptPermit = (hit: PermitHit) =>
     decide((r, l, at) => {
       const next: Decision = { kind: 'timed_exempt', hit };
-      return continueTiming(r, l, at, next, { exemption: { by: 'permit', permitNo: hit.entry.permitNo, listName: hit.list.name, status: hit.status } });
+      return continueTiming(r, l, at, next, { exemption: { by: 'permit', permitNo: hit.entry.permitNo, listName: hit.list.name, status: `${hit.validity} · ${hit.scope}${hit.basis ? ` · ${hit.basis}` : ''}` } });
+    });
+
+  /**
+   * FS permit in a paid foreshore space: no payment required, time limits apply. The vehicle is
+   * timed as usual; the timing is marked so no payment check is asked and 702 is never offered.
+   */
+  const acceptForeshore = (hit: PermitHit) =>
+    decide(async (r, l, at) => {
+      if (r.decision.kind !== 'timed_permit') return r;
+      const next = await continueTiming(r, l, at, r.decision.then, { exemption: { by: 'permit', permitNo: hit.entry.permitNo, listName: hit.list.name, status: 'valid · payment_only · FS' } });
+      const obsId = next.saved?.observationId;
+      const obs = obsId ? await getObservation(obsId) : undefined;
+      if (!obs) return next;
+      const waived: Observation = { ...obs, paymentWaived: 'foreshore' };
+      await putObservation(waived);
+      return next.comparison ? { ...next, comparison: { ...next.comparison, observation: waived } } : { ...next, observation: waived };
     });
 
   /** Permit pop-up: the permit does not exempt here — time the vehicle as usual. */
@@ -1490,6 +1507,7 @@ export function scanView(params: Record<string, string>, app: App): View {
   const paymentSection = (r: ResultState): TemplateResult | typeof nothing => {
     const at = pending?.meta.capturedAt ?? Date.now();
     if (r.decision.kind === 'timed_new') {
+      if (r.observation?.paymentWaived) return html`<section class="card text-sm" data-testid="payment-waived">${statusPill('permit_valid', 'No payment required')} <span class="ml-1">Foreshore permit displayed — time limits apply.</span></section>`;
       if (r.decision.concession === 'disability' || !isPaidSpace()) return nothing;
       if (!r.saved?.payment) return paymentForm();
       const offer = r.observation ? offenceFor(r.observation, at) : null;
@@ -1499,7 +1517,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       const obs = r.comparison?.observation ?? r.decision.observation;
       const offer = r.dismissedReason && r.dismissedReason !== 'disability_permit' ? null : offenceFor(obs, at);
       return html`${offer ? offerCard(offer) : nothing}${obs.payment ? nothing : paymentCard(r)}
-        ${obs.payment?.status === 'paid' && !obs.concession
+        ${obs.payment?.status === 'paid' && !obs.concession && !obs.paymentWaived
           ? html`<section class="card" data-testid="payment-topup">
               <p class="text-sm">Paid to <span class="font-plate">${obs.payment.paidTo !== undefined ? formatClock(obs.payment.paidTo).slice(0, 5) : '—'}</span> (from the first scan)</p>
               ${topUp.open
@@ -1662,7 +1680,7 @@ export function scanView(params: Record<string, string>, app: App): View {
    * (OQ30-9, as drawn). A displayed disability permit means no payment is required.
    */
   const paymentRequired = (r: ResultState): boolean =>
-    r.decision.kind === 'timed_new' && r.decision.concession !== 'disability' && !!r.saved && !r.saved.payment && isPaidSpace();
+    r.decision.kind === 'timed_new' && r.decision.concession !== 'disability' && !r.observation?.paymentWaived && !!r.saved && !r.saved.payment && isPaidSpace();
 
   /** 30a.5: save the payment check on the scan and carry it to the timing. */
   const savePaymentCheck = async () => {
@@ -1799,44 +1817,47 @@ export function scanView(params: Record<string, string>, app: App): View {
     );
   };
 
-  /** Pill for a permit's status: green when it applies here, amber to check, grey when not valid. */
-  const permitPill = (h: PermitHit) =>
-    h.status === 'ACTIVE_IN_AREA'
-      ? statusPill('permit_valid', PERMIT_STATUS_TEXT[h.status])
-      : h.status === 'ACTIVE_NOT_IN_AREA' || h.status === 'ACTIVE_SCOPE_UNKNOWN'
-        ? statusPill('verify', PERMIT_STATUS_TEXT[h.status])
-        : statusPill('not_valid', PERMIT_STATUS_TEXT[h.status]);
-
-  /** Permit pop-up: the permit details the council holds; the officer decides (as on the systems in use today). */
+  /**
+   * Permit pop-up (owner direction 23/11/2026): valid or expired only, with the same details either
+   * way for the officer to check visually — solid green border when valid, blinking red when expired.
+   */
   const permitSheet = (d: Extract<Decision, { kind: 'timed_permit' }>) => {
-    const active = d.hits.filter((h) => h.status.startsWith('ACTIVE'));
-    const anyInArea = d.hits.some((h) => h.status === 'ACTIVE_IN_AREA');
+    const anyApplies = d.hits.some((h) => h.validity === 'valid' && (h.scope === 'applies' || h.scope === 'payment_only'));
     return decisionSheet({
       testid: 'permit-sheet',
       pill: statusPill('verify', d.hits.length === 1 ? 'Permit on record' : `${d.hits.length} permits on record`),
       title: `${result?.plate ?? ''} holds a permit`,
-      body: html`<p>Exempt only if holding this permit at this location makes the vehicle exempt. If not, continue and the vehicle is timed as usual.</p>
+      body: html`<p>Check the permit against the vehicle. Exempt only if holding this permit at this location makes the vehicle exempt; otherwise continue and the vehicle is timed as usual.</p>
         <ul class="mt-3 grid gap-3">
-          ${d.hits.map(
-            (h) => html`<li class="rounded-md border border-neutral-200 bg-surface-sunken p-3" data-testid="permit-hit" data-status=${h.status}>
-              <div class="flex flex-wrap items-center gap-2">${plateBadge(h.entry.plate, 'sm')}${permitPill(h)}</div>
-              <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-                ${hasVehicle(h.entry) ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${describeVehicle(h.entry)}</dd>` : nothing}
-                ${h.entry.rpa ? html`<dt class="text-neutral-600">Area</dt><dd>RPA <span class="font-plate">${h.entry.rpa}</span>${list?.type === 'timed' && list.rpa ? html` <span class="text-neutral-600">(here: ${list.rpa})</span>` : nothing}</dd>` : nothing}
-                ${h.entry.streets?.length ? html`<dt class="text-neutral-600">Streets</dt><dd>${h.entry.streets.join(', ')}</dd>` : nothing}
-                ${h.entry.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${h.entry.permitNo}</dd>` : nothing}
-                ${h.entry.label ? html`<dt class="text-neutral-600">Holder</dt><dd>${h.entry.label}</dd>` : nothing}
-                <dt class="text-neutral-600">Valid</dt><dd>${h.entry.validFrom ? formatIsoDate(h.entry.validFrom) : 'any time'} to ${h.entry.validTo ? formatIsoDate(h.entry.validTo) : 'no end date'}</dd>
+          ${d.hits.map((h) => {
+            const e = h.entry;
+            const valid = h.validity === 'valid';
+            return html`<li class="rounded-md bg-surface p-3 ${valid ? 'permit-valid' : 'permit-expired'}" data-testid="permit-hit" data-validity=${h.validity} data-scope=${h.scope}>
+              <div class="flex flex-wrap items-center gap-2">
+                ${plateBadge(e.plate, 'sm')}
+                <span class="text-sm font-bold tracking-[0.06em] uppercase ${valid ? 'permit-status-valid' : 'permit-status-expired'}" data-testid="permit-validity">${valid ? 'Valid' : 'Expired'}</span>
+              </div>
+              <p class="mt-1 text-sm font-semibold text-neutral-900" data-testid="permit-scope">${PERMIT_SCOPE_TEXT[h.scope]}${h.basis ? ` (${h.basis})` : ''}</p>
+              <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+                ${e.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">${e.permitNo}</dd>` : nothing}
+                ${e.permitTypes?.length ? html`<dt class="text-neutral-600">Type</dt><dd>${e.permitTypes.map((t) => `${t} · ${PERMIT_TYPE_LABEL[t]}`).join(' + ')}</dd>` : nothing}
+                ${e.rpa ? html`<dt class="text-neutral-600">Area</dt><dd class="font-plate">${e.council ? areaId(e.council, parseArea(e.rpa).area) : `RPA ${e.rpa}`}${list?.type === 'timed' && list.rpa ? html` <span class="font-sans text-neutral-600">(here: ${list.rpa})</span>` : nothing}</dd>` : nothing}
+                ${e.address ? html`<dt class="text-neutral-600">Address</dt><dd>${[e.address.streetNumber, e.address.street].filter(Boolean).join(' ')}</dd>` : e.streets?.length ? html`<dt class="text-neutral-600">Streets</dt><dd>${e.streets.join(', ')}</dd>` : nothing}
+                <dt class="text-neutral-600">Valid</dt><dd><span class="font-plate">${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'}</span> to <span class="font-plate">${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</span>${h.notYetValid ? ' (not started)' : ''}</dd>
+                <dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${describeVehicle(e) || '—'}</dd>
+                ${e.council ? html`<dt class="text-neutral-600">Council</dt><dd class="font-plate">${e.council.code}</dd>` : nothing}
+                ${e.label ? html`<dt class="text-neutral-600">Holder</dt><dd>${e.label}</dd>` : nothing}
                 <dt class="text-neutral-600">List</dt><dd>${h.list.name}${h.linked ? ' · linked to this segment' : ''}</dd>
               </dl>
-              ${h.status.startsWith('ACTIVE')
-                ? html`<button type="button" class=${`${h.status === 'ACTIVE_IN_AREA' ? 'btn-primary' : 'btn-secondary'} mt-3 w-full`} data-testid="permit-exempt" @click=${() => void acceptPermit(h)}>${icon('check')} Exempt here${h.entry.permitNo ? ` — permit #${h.entry.permitNo}` : ''}</button>`
-                : nothing}
-            </li>`,
-          )}
+              ${valid && h.scope === 'payment_only'
+                ? html`<button type="button" class="btn-primary mt-3 w-full" data-testid="permit-foreshore" @click=${() => void acceptForeshore(h)}>${icon('check')} No payment (foreshore) — time limits apply</button>`
+                : valid
+                  ? html`<button type="button" class=${`${h.scope === 'applies' ? 'btn-primary' : 'btn-secondary'} mt-3 w-full`} data-testid="permit-exempt" @click=${() => void acceptPermit(h)}>${icon('check')} Exempt here${e.permitNo ? ` — ${e.permitNo}` : ''}</button>`
+                  : nothing}
+            </li>`;
+          })}
         </ul>`,
-      actions: html`<button type="button" class=${anyInArea ? 'btn-secondary' : 'btn-primary'} data-testid="permit-continue" @click=${() => void declinePermit()}>
-        ${active.length ? 'Not exempt here — continue' : 'Permit not valid — continue'}</button>`,
+      actions: html`<button type="button" class=${anyApplies ? 'btn-secondary' : 'btn-primary'} data-testid="permit-continue" @click=${() => void declinePermit()}>Not exempt here — continue</button>`,
     });
   };
 

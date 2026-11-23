@@ -35,3 +35,16 @@ accepted values is confirmed.
 - **EnforcementMAPS:** the four-step wizard, I-N allocation and signing, print, void and reissue (31b–31m). PlateWatch calls `window.EnforcementMAPS.startInfringement(handoff)` and `sendHotListAlert(event)`; the contract is `src/lib/host.ts`.
 - **All-day paid parking (30f):** needs a paid-only restriction model (OQ30-10): `limitMinutes` is required and the release schema requires a maximum stay for metered / ticket rules.
 - **Open owner questions** carried as drawn: OQ28-3 (no auto-resolution), OQ29-1/3/5/7–10, OQ30-1/5/6/9 (payment check mandatory as drawn), OQ31-2/4/5/6/12/13.
+
+## Permit schema (owner decisions 23/11/2026)
+
+- `schemas/civicmaps-parking-permit.v1.schema.json`: no vehicle model; colour required;
+  `validFrom` / `validTo` (expiry midnight at the end of `validTo`); street number and street
+  required; the permit number is authoritative (types RPA / RSP / RP / FS, COMB combinations);
+  plates up to 10 characters; fixed registration-type and vehicle-type lists; council code plus
+  CivicMAPS linking ID (`com-rpa7` on screen, `919379201-com-rpa7` operationally).
+- Permit pop-up: only valid / expired, same details either way; solid green / red blinking border.
+  Scope by type (`docs/PERMITS-AND-EXEMPTIONS.md`); FS waives payment in foreshore spaces only.
+- Imports: permit JSON (schema), allow-list CSV with the new columns; the add-permit form enforces
+  the same required fields. IndexedDB v6 migrates stored vehicle details to the codes.
+- Hand-off payload adds `vehicle.registrationState`.

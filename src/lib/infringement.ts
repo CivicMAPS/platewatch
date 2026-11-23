@@ -126,6 +126,7 @@ export function buildHandoff(args: {
     },
     vehicle: {
       registration: scan.plate,
+      registrationState: args.vehicle.registrationState || 'VIC',
       registrationType: args.vehicle.registrationType.trim(),
       make: args.vehicle.make.trim(),
       type: args.vehicle.bodyType.trim(),

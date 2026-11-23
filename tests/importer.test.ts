@@ -212,7 +212,7 @@ describe('bays CSV', () => {
 
 describe('allow and hot list CSV templates', () => {
   it('builds allow lists by name with permits and Australian or ISO dates', () => {
-    const csv = [CSV_TEMPLATES.allow.header, 'RPA 12 residents,1ab 2cd,Resident,P-1001,01/07/2026,30/06/2027', 'RPA 12 residents,XYZ789,Visitor,,2026-07-01,'].join('\n');
+    const csv = ['list_name,plate,label,permit_no,valid_from,valid_to', 'RPA 12 residents,1ab 2cd,Resident,P-1001,01/07/2026,30/06/2027', 'RPA 12 residents,XYZ789,Visitor,,2026-07-01,'].join('\n');
     const r = parseImportFile(csv, 'permits.csv');
     expect(r.kind).toBe('allow-csv');
     const [d] = r.drafts;
@@ -225,16 +225,16 @@ describe('allow and hot list CSV templates', () => {
   });
 
   it('builds hot lists with risk level and risk labels or keys', () => {
-    const csv = [CSV_TEMPLATES.hot.header, 'Officer safety,ABC123,high,Aggressive; weapon_sighted,Standard,Toyota,Ute,White,Seen near market'].join('\n');
+    const csv = [CSV_TEMPLATES.hot.header, 'Officer safety,ABC123,high,Aggressive; weapon_sighted,VIC,private,Ute,Toyota,White,Seen near market'].join('\n');
     const r = parseImportFile(csv, 'hot.csv');
     expect(r.kind).toBe('hot-csv');
     const e = (r.drafts[0] as HotDraft).list.entries[0]!;
-    expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], registrationType: 'Standard', make: 'Toyota', bodyType: 'Ute', colour: 'White', notes: 'Seen near market' });
+    expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], registrationType: 'private', registrationState: 'VIC', make: 'Toyota', bodyType: 'ute', colour: 'White', notes: 'Seen near market' });
   });
 
   it('reads older hot-list and permit columns into the vehicle-details structure (model → notes)', () => {
     const hot = parseImportFile(['list_name,plate,risk_level,risks,make,model,body_type,colour,notes', 'Officer safety,ABC123,high,Aggressive,Toyota,Hilux,Ute,White,Seen near market'].join('\n'), 'hot.csv');
-    expect((hot.drafts[0] as HotDraft).list.entries[0]).toMatchObject({ make: 'Toyota', bodyType: 'Ute', colour: 'White', registrationType: '', notes: 'Seen near market · Model: Hilux' });
+    expect((hot.drafts[0] as HotDraft).list.entries[0]).toMatchObject({ make: 'Toyota', bodyType: 'ute', colour: 'White', registrationType: '', notes: 'Seen near market · Model: Hilux' });
     const allow = parseImportFile(['list_name,plate,label,permit_no,valid_from,valid_to,vehicle,rpa,streets', 'RPA 7,RES001,Resident,P1,,,White Toyota Corolla,7,'].join('\n'), 'allow.csv');
     expect((allow.drafts[0] as AllowDraft).list.entries[0]).toMatchObject({ make: 'White Toyota Corolla', rpa: '7' });
   });
@@ -359,7 +359,7 @@ describe('planImport', () => {
       id: 'a1', type: 'allow', name: 'RPA 12 residents', notes: '', createdAt: 0, updatedAt: 0,
       entries: [{ id: 'e1', plate: 'XYZ789', key: 'XYZ789', label: 'Old', permitNo: '', validFrom: '', validTo: '', addedAt: 0 }],
     };
-    const csv = [CSV_TEMPLATES.allow.header, 'rpa 12 residents,XYZ789,Visitor,V-9,,', 'RPA 12 residents,NEW111,Resident,,,'].join('\n');
+    const csv = ['list_name,plate,label,permit_no,valid_from,valid_to', 'rpa 12 residents,XYZ789,Visitor,V-9,,', 'RPA 12 residents,NEW111,Resident,,,'].join('\n');
     const plan = planImport(parseImportFile(csv, 'p.csv').drafts, [existingAllow], { updateExisting: true });
     const merged = plan.updated[0] as AllowList;
     expect(merged.id).toBe('a1');

@@ -28,6 +28,7 @@ const KIND_LABEL: Record<ImportResult['kind'], string> = {
   'civicmaps-mixed': 'CivicMAPS (several kinds)',
   'civicmaps-release': 'civicmaps.kerbside_release',
   'area-dataset': 'Area dataset (street segments)',
+  'permits-json': 'Residential parking permits (JSON)',
   unknown: 'Not recognised',
 };
 

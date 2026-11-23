@@ -40,12 +40,25 @@ export interface BaseList {
  * wherever PlateWatch holds a vehicle description (hot lists, permits, the infringement hand-off).
  */
 export interface VehicleDetails {
+  /** Code from REGISTRATION_TYPES (private, commercial, company, lease, diplomatic, other). */
   registrationType: string;
   make: string;
-  /** Body type, shown as "Type" (e.g. Sedan, Wagon, Ute). */
+  /** Vehicle type (body type) code from VEHICLE_TYPES, shown as "Type". */
   bodyType: string;
   colour: string;
+  /** State or territory of registration; VIC when not given. */
+  registrationState?: string;
 }
+
+/**
+ * Residential permit types (owner direction 23/11/2026):
+ * - RPA — residential parking area: any time-restricted or paid space within the area.
+ * - RSP — residential street permit: anywhere on the street segment of the registered address.
+ * - RP  — resident permit: directly in front of the registered address.
+ * - FS  — foreshore: free parking in paid foreshore spaces in the council area; time limits apply.
+ * A combination (prefix with COMB, e.g. RPA/COMB/FS) holds every listed type.
+ */
+export type PermitType = 'RPA' | 'RSP' | 'RP' | 'FS';
 
 /* ───────────────────────────── Allow list ───────────────────────────── */
 
@@ -68,6 +81,13 @@ export interface AllowEntry {
   make?: string;
   bodyType?: string;
   colour?: string;
+  registrationState?: string;
+  /** Permit types from the permit number prefix (RPA, RSP, RP, FS; COMB for a combination). */
+  permitTypes?: PermitType[];
+  /** Issuing council: user-facing code (com) and, once onboarded, the CivicMAPS linking ID. */
+  council?: { code: string; linkingId?: string };
+  /** Registered address the permit is tied to (RSP: its street segment; RP: in front of it). */
+  address?: { streetNumber: string; street: string };
   /** Residential parking area the permit applies to, as the issuing council holds it (e.g. "12"). */
   rpa?: string;
   /** Streets a street-specific resident permit applies to. */
@@ -480,6 +500,8 @@ export interface Observation {
   dismissReason?: DismissReason;
   /** Scans that joined this timing through a look-alike link ("Same vehicle", WF-S28). */
   linkedScanIds?: string[];
+  /** A valid FS permit in a paid foreshore space: no payment required (no payment check, never 702); time limits apply. */
+  paymentWaived?: 'foreshore';
   /** Payment check result carried forward from the first scan so a re-scan can compare (WF-S30). */
   payment?: { status: 'paid' | 'not_found'; paidTo?: number };
   /**

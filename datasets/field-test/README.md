@@ -10,10 +10,11 @@ own test vehicles before importing. Checked on every build by `tests/fieldTestPa
 
 | # | File | Load with | Gives you |
 |---|---|---|---|
-| 1 | `01-timed-segments.csv` | Home → Import (⇧) | 8 timed lists on real Patrol Area 10 segments (South Melbourne), names start `FT` |
-| 2 | `02-permits.csv` | Home → Import (⇧) | 3 permit (allow) lists, 6 permits |
+| 1 | `01-timed-segments.csv` | Home → Import (⇧) | 9 timed lists (8 on real Patrol Area 10 segments in South Melbourne, plus a foreshore space), names start `FT` |
+| 2 | `02-permits.csv` | Home → Import (⇧) | 5 permit (allow) lists, 10 permits: RPA, RSP, RP, FS, COMB, another council |
 | 3 | `03-hot-list.csv` | Home → Import (⇧) | Hot list `FT Officer safety`, 3 entries |
 | 4 | `04-tagged-vehicles.backup.json` | Settings → Import backup → **Merge** | 2 tagged vehicles (disability, emergency) |
+| 5 | `05-permits.json` (optional) | Home → Import (⇧) | 2 permits in the CivicMAPS permit JSON schema, list `Permits · copp` |
 | — | `../copp-patrol-area-10.release.json` | Home → Import (optional, first) | All 55 Area 10 segments as "Restrictions to enter" placeholders. Rows in file 1 for a whole segment fill the matching placeholder (keeping its name); one-side rows are added beside it |
 
 Before testing hot lists: **Settings → Officer → Officer number** (any number, e.g. `4471`).
@@ -32,16 +33,24 @@ holding only the tags, so **Merge** keeps everything else on the device.
 | FT Woodgate St LZ 30 (statutory) | LZ 30 | Red sign: no permit pop-up, no tag; only "Emergency services vehicle" on dismissal |
 | FT Normanby Rd N 2P DIS | 2P, disability permit holders only | Prescribed time: "Disability permit displayed" not offered |
 | FT Normanby Rd S Police only (statutory) | P5, Police vehicles only | Red sign recognised from the description |
+| FT Beaconsfield Pde P10 Foreshore (quick test) | P10 Ticket, Foreshore, PayStay 338800003001 | FS permit: no payment, time limit still applies (701 after 10 min) |
 
 ## Plates and what to expect
 
+All permits are council `copp` unless noted. Every permit shows the same details; **valid** = solid
+green border, **expired** = red blinking border.
+
 | Plate | Where held | Scan on | Expect |
 |---|---|---|---|
-| `PWP101` | FT RPA 7 residents (RPA 7) | FT Gladstone St N | Permit pop-up · **Active · applies here** → Exempt here |
-| `PWP505` | FT RPA 5A residents | FT Gladstone St N | Permit pop-up · **Active · for another area or street** |
-| `PWP606` | FT Street permits (Gladstone St) | FT Gladstone St N or S | Permit pop-up · applies here (street match) |
-| `PWP303` | FT RPA 7 residents (expired 2025) | FT Gladstone St N | Permit pop-up · **Expired**, no Exempt button |
-| `PWP404` | FT RPA 7 residents (from 2027) | FT Gladstone St N | Permit pop-up · **Not yet valid** |
+| `PWP101` | RPA 7 (`RPA-2026-0101`) | FT Gladstone St N | **Valid · Applies here** → Exempt here |
+| `PWP505` | RPA 5A | FT Gladstone St N | **Valid · For another area, street or council** |
+| `PWP606` | RSP, 40 Gladstone Street | FT Gladstone St N or S | **Valid · Applies here** (street of the address) |
+| `PWP707` | RP, 21 Buckhurst Street (NSW plate) | FT Buckhurst St N | **Valid · Applies here** — check it is in front of no. 21; on Gladstone St: another street |
+| `PWP808` | FS | FT Beaconsfield Pde | **Valid · No payment required here (foreshore)** → No payment, timing runs, 701 after 10 min |
+| `PWP909` | RPA/COMB/FS, RPA 7 | FT Gladstone St N; FT Beaconsfield Pde | Applies here (RPA); on the foreshore: no payment (FS) |
+| `PWP110` | council `com` RPA 7 (`919379201-com-rpa7`) | FT Gladstone St N | **Valid · For another area, street or council** (com 7 is not copp 7) |
+| `PWP303` | RPA 7, expired 2025 | FT Gladstone St N | **EXPIRED** (red blinking), no Exempt button |
+| `PWP404` | RPA 7, from 2027 | FT Gladstone St N | **EXPIRED · not yet valid**, no Exempt button |
 | `PWP2F7` (read) | look-alike of permit `PWP2E7` (F·E) | link FT RPA 7 residents to the list first (Edit list → linked allow lists) | Similar permit plate sheet → "Permit plate confirmed — edit plate" or "Not a match" |
 | `PWH801` | FT Officer safety (extreme) | any list | Hot list match → **Acknowledge** required before Next scan; entry log |
 | `PWHB01` (read) | look-alike of hot `PWH801` (B·8) | any timed list | Hot-list verify interrupt → Same vehicle / Not the hot-list vehicle |

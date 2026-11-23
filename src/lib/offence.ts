@@ -37,14 +37,15 @@ export interface OffenceOffer {
   secondary?: { code: OffenceCode; basis: OffenceBasis; timeFrom: number };
 }
 
-type Timing = Pick<Observation, 'startedAt' | 'limitMinutes' | 'graceMinutes' | 'concession' | 'payment'>;
+type Timing = Pick<Observation, 'startedAt' | 'limitMinutes' | 'graceMinutes' | 'concession' | 'payment' | 'paymentWaived'>;
 
 /** The offence the scan at `at` supports for a timing, or null. */
 export function offenceFor(o: Timing, at: number): OffenceOffer | null {
   const offers: OffenceOffer[] = [];
   const allowanceAt = o.startedAt + (o.limitMinutes + o.graceMinutes) * 60_000;
   if (at >= allowanceAt) offers.push({ code: '701', basis: 'allowance_exceeded', timeFrom: o.startedAt, reachedAt: allowanceAt });
-  if (!o.concession && o.payment) {
+  // Disability permit (2 × allowance) or FS permit in a foreshore space: no payment required.
+  if (!o.concession && !o.paymentWaived && o.payment) {
     if (o.payment.status === 'not_found') offers.push({ code: '702', basis: 'no_payment_found', timeFrom: o.startedAt, reachedAt: o.startedAt });
     else if (o.payment.paidTo !== undefined) {
       const graceEnds = o.payment.paidTo + PAID_TO_GRACE_MINUTES * 60_000;

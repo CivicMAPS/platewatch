@@ -173,12 +173,12 @@ describe('plate tags in backups', () => {
 
   it('keeps permit vehicle details, area and streets on allow entries and drops malformed ones', () => {
     const entries = [
-      { id: 'e1', plate: 'RES1', registrationType: 'Standard', make: 'Toyota', bodyType: 'Sedan', colour: 'White', rpa: '7', streets: ['Smith St', 3, ''] },
+      { id: 'e1', plate: 'RES1', registrationType: 'private', registrationState: 'NSW', make: 'Toyota', bodyType: 'sedan', colour: 'White', rpa: '7', streets: ['Smith St', 3, ''], permitTypes: ['RSP', 'XX'], council: { code: 'copp' }, address: { streetNumber: '12', street: 'Smith Street' } },
       { id: 'e2', plate: 'RES2', make: 9, rpa: '', streets: 'Smith St' },
     ];
     const [l] = parseBackup(file([{ id: 'a', type: 'allow', name: 'P', notes: '', createdAt: 0, updatedAt: 0, entries }])).lists;
     const [a, b] = (l as unknown as { entries: Record<string, unknown>[] }).entries;
-    expect(a).toMatchObject({ registrationType: 'Standard', make: 'Toyota', bodyType: 'Sedan', colour: 'White', rpa: '7', streets: ['Smith St'] });
+    expect(a).toMatchObject({ registrationType: 'private', registrationState: 'NSW', make: 'Toyota', bodyType: 'sedan', colour: 'White', rpa: '7', streets: ['Smith St'], permitTypes: ['RSP'], council: { code: 'copp' }, address: { streetNumber: '12', street: 'Smith Street' } });
     expect(b).not.toHaveProperty('make');
     expect(b).not.toHaveProperty('rpa');
     expect(b).not.toHaveProperty('streets');

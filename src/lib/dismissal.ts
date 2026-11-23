@@ -12,7 +12,7 @@
  * overstay for one therefore re-times the vehicle against 2 × the allowance rather than closing
  * the timing; if it is over even that, the overstay stands.
  */
-import { disabilityDoubles, isDisabilityOnlyRestriction, withDisabilityConcession, type PermitStatus } from './engine';
+import { disabilityDoubles, isDisabilityOnlyRestriction, withDisabilityConcession, type PermitScope } from './engine';
 import { localDateString } from './time';
 import type { DismissReason, Observation, PlateFlag, PlateFlagKind, ScanRecord } from './types';
 import { plateKey } from './plate';
@@ -36,12 +36,12 @@ export const FLAG_LABEL: Record<PlateFlagKind, string> = {
   disability: 'Disability permit vehicle',
 };
 
-export const PERMIT_STATUS_TEXT: Record<PermitStatus, string> = {
-  ACTIVE_IN_AREA: 'Active · applies here',
-  ACTIVE_NOT_IN_AREA: 'Active · for another area or street',
-  ACTIVE_SCOPE_UNKNOWN: 'Active · area not held — check where it applies',
-  NOT_ACTIVE_EXPIRED: 'Expired',
-  NOT_YET_ACTIVE: 'Not yet valid',
+/** Where a permit applies here, for the permit pop-up. */
+export const PERMIT_SCOPE_TEXT: Record<PermitScope, string> = {
+  applies: 'Applies here',
+  payment_only: 'No payment required here (foreshore) — time limits apply',
+  other_area: 'For another area, street or council',
+  unknown: 'No area or street held — check where it applies',
 };
 
 /** Why "Disability permit displayed" cannot clear this overstay, or null when it can. */

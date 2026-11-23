@@ -39,8 +39,11 @@ and the number plate itself (white plate, black characters).
 A system list (imported; read-only in EnforcementMAPS, OQ26-5) carries a neutral `SYSTEM` tag
 with a lock icon: it is provenance, not a status. See `docs/LIST-RULES.md`.
 
-Red (`--status-emergency`) is never used: it is reserved for Code 1. Destructive actions use a
-red outline only inside confirmation dialogs (OQ26-3).
+Red (`--status-emergency`) is otherwise reserved for Code 1. Destructive actions use a
+red outline only inside confirmation dialogs (OQ26-3). **Owner-approved exception (23/11/2026):**
+an expired permit in the permit pop-up has a red blinking border (`.permit-expired`; steady under
+`prefers-reduced-motion`), with the word EXPIRED beside it; a valid permit has a solid green
+`--status-active` border (`.permit-valid`).
 
 ## Assessment findings
 

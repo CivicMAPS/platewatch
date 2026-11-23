@@ -133,7 +133,16 @@ export function parseBackup(text: string): {
         .map((e) => {
           const out: Record<string, unknown> = { ...e, key: plateKey(str(e.plate)) };
           // Permit details: strings only; streets a list of strings.
-          for (const k of ['vehicle', 'rpa', 'registrationType', 'make', 'bodyType', 'colour'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
+          for (const k of ['vehicle', 'rpa', 'registrationType', 'make', 'bodyType', 'colour', 'registrationState'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
+          // Permit details (schemas/civicmaps-parking-permit.v1.schema.json).
+          if (Array.isArray(out.permitTypes)) out.permitTypes = (out.permitTypes as unknown[]).filter((t) => t === 'RPA' || t === 'RSP' || t === 'RP' || t === 'FS');
+          if (!Array.isArray(out.permitTypes) || !(out.permitTypes as unknown[]).length) delete out.permitTypes;
+          const c = out.council as Record<string, unknown> | undefined;
+          if (isObj(c) && typeof c.code === 'string' && c.code) out.council = { code: c.code, ...(typeof c.linkingId === 'string' && c.linkingId ? { linkingId: c.linkingId } : {}) };
+          else delete out.council;
+          const ad = out.address as Record<string, unknown> | undefined;
+          if (isObj(ad) && typeof ad.street === 'string' && ad.street) out.address = { streetNumber: typeof ad.streetNumber === 'string' ? ad.streetNumber : '', street: ad.street };
+          else delete out.address;
           if (Array.isArray(out.streets)) out.streets = (out.streets as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim());
           if (!Array.isArray(out.streets) || !(out.streets as string[]).length) delete out.streets;
           return out;

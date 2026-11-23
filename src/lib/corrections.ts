@@ -25,7 +25,7 @@ export async function correctRecord(id: string, input: string, expectedPlate: st
   // otherwise the timing behind it applies.
   let decision = result.decision;
   while (decision.kind === 'timed_permit' || decision.kind === 'timed_flag_check')
-    decision = decision.kind === 'timed_permit' && decision.hits[0]?.status === 'ACTIVE_IN_AREA' ? { kind: 'timed_exempt', hit: decision.hits[0] } : decision.then;
+    decision = decision.kind === 'timed_permit' && decision.hits[0]?.validity === 'valid' && decision.hits[0].scope === 'applies' ? { kind: 'timed_exempt', hit: decision.hits[0] } : decision.then;
   let target: Observation | undefined;
   if (decision.kind === 'timed_resighting') target = histories.find(o => o.id === decision.observation.id);
   if ((decision.kind === 'timed_new' || decision.kind === 'timed_possible') && list.type === 'timed') {

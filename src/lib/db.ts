@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { registrationTypeCode, vehicleTypeCode } from './vehicle';
 import {
   DEFAULT_SETTINGS,
   type AllowList,
@@ -14,7 +15,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -39,24 +40,28 @@ interface PlateWatchDB extends DBSchema {
 
 /** Vehicle details in the infringement structure (DB v5, backups): no model, no free-text vehicle. */
 export function migrateVehicleDetails(l: PlateList): PlateList {
+  /** Registration type / type as codes where the value is on the list (kept as entered otherwise). */
+  const codes = <T extends { registrationType?: string; bodyType?: string }>(e: T): T => {
+    const rt = e.registrationType ? registrationTypeCode(e.registrationType) : e.registrationType;
+    const bt = e.bodyType ? vehicleTypeCode(e.bodyType) : e.bodyType;
+    return { ...e, ...(rt ? { registrationType: rt } : {}), ...(bt ? { bodyType: bt } : {}) };
+  };
   if (l.type === 'hot') {
-    if (!l.entries.some((e) => e.model || e.registrationType === undefined)) return l;
     return {
       ...l,
       entries: l.entries.map((e) => {
         const { model, ...rest } = e;
         const notes = model?.trim() && !rest.notes.includes(`Model: ${model.trim()}`) ? [rest.notes, `Model: ${model.trim()}`].filter(Boolean).join(' · ') : rest.notes;
-        return { ...rest, registrationType: rest.registrationType ?? '', notes };
+        return codes({ ...rest, registrationType: rest.registrationType ?? '', notes });
       }),
     };
   }
   if (l.type === 'allow') {
-    if (!l.entries.some((e) => 'vehicle' in e)) return l;
     return {
       ...l,
       entries: l.entries.map((e) => {
         const { vehicle, ...rest } = e as typeof e & { vehicle?: unknown };
-        return typeof vehicle === 'string' && vehicle.trim() && !rest.make ? { ...rest, make: vehicle.trim() } : rest;
+        return codes(typeof vehicle === 'string' && vehicle.trim() && !rest.make ? { ...rest, make: vehicle.trim() } : rest);
       }),
     };
   }
@@ -91,13 +96,13 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
         ev.createIndex('by-entry', 'hotListEntryId');
         ev.createIndex('by-at', 'at');
       }
-      if (oldVersion >= 1 && oldVersion < 5) {
-        // Version 5: vehicle details in the infringement structure (registration type, make, type,
-        // colour). Hot-list model → notes; a permit's free-text vehicle → make.
+      if (oldVersion >= 1 && oldVersion < 6) {
+        // Versions 5–6: vehicle details in the infringement structure (registration type, make,
+        // type, colour). Hot-list model → notes; a permit's free-text vehicle → make; registration
+        // type and type values → the fixed lists' codes.
         void tx.objectStore('lists').getAll().then(async (lists) => {
           for (const l of lists) {
-            const next = migrateVehicleDetails(l);
-            if (next !== l) await tx.objectStore('lists').put(next);
+            if (l.type !== 'timed') await tx.objectStore('lists').put(migrateVehicleDetails(l));
           }
         });
       }

@@ -105,13 +105,22 @@ found are listed on the Import screen.
 | Column | Required | Example | Notes |
 |---|---|---|---|
 | `list_name` | ✔ | `RPA 7 residents` | Rows with the same name (any case) form one list; an existing list of that name is added to. |
-| `plate` | ✔ | `1AB2CD` | Spaces and dashes are removed. A plate already on the list is updated. |
+| `plate` | ✔ | `1AB2CD` | Up to 10 characters; spaces and dashes are removed. A plate already on the list is updated. |
+| `permit_no` | | `RPA-2026-0789`, `RSP-2026-0790/1`, `RPA/COMB/FS-2026-0791` | Authoritative: types (RPA, RSP, RP, FS; COMB for combinations), issue year, sequential ID, amendment. A number in another format is kept as text with no types. |
+| `council`, `linking_id` | | `com`, `919379201` | Issuing council code and its CivicMAPS linking ID (optional until onboarded). |
+| `valid_from`, `valid_to` | | `2026-07-01` or `01/07/2026` | Valid from 00:00 on `valid_from` to midnight at the end of `valid_to`. |
+| `parking_area` | RPA | `7`, `4B`, `com-rpa7` | Residential parking area (`rpa` also read). |
+| `street_number`, `street` | | `12`, `Gladstone Street` | Registered address. RSP / RP permits apply on this street. |
+| `registration_state` | | `VIC` | VIC, NSW, QLD, SA, WA, TAS, ACT, NT (blank = VIC). |
+| `registration_type` | | `private` | private, commercial, company, lease, diplomatic, other. |
+| `type` | | `sedan` | sedan, hatchback, suv, wagon, coupe, convertible, ute, van, people_mover, light_truck, truck, bus, motorcycle, scooter, other (`body_type` also read). |
+| `make`, `colour` | | `Toyota`, `White` | An older `vehicle` column is read into `make`. |
 | `label` | | `Resident` | |
-| `permit_no` | | `P-1001` | |
-| `valid_from`, `valid_to` | | `2026-07-01` or `01/07/2026` | Inclusive; blank = no limit. |
-| `registration_type`, `make`, `type`, `colour` | | `Standard`, `Toyota`, `Sedan`, `White` | Vehicle details in the infringement-issuance structure (licence plate is `plate`); shown in the permit pop-up. An older `vehicle` column is read into `make`. |
-| `rpa` | | `7` | Residential parking area the permit applies to. |
-| `streets` | | `Gladstone St;Smith St` | Street-specific permits; separate streets with `;`. An area, a street or both may be given: either one matching the segment shows the permit as applying here. |
+| `streets` | | `Smith St;Clarendon St` | Optional extra streets for permits held without types. |
+
+A code not on its list is reported as an import issue. Permits can also be imported as JSON in
+the CivicMAPS permit schema (`schemas/civicmaps-parking-permit.v1.schema.json`): a single permit,
+an array, or `{ "permits": [...] }`; each council's permits form a list named `Permits · <council>`.
 
 Link an allow list to timed lists from each timed list's *Edit* screen.
 
@@ -123,7 +132,7 @@ Link an allow list to timed lists from each timed list's *Edit* screen.
 | `plate` | ✔ | `ABC123` | |
 | `risk_level` | | `caution` (default), `high`, `extreme` | |
 | `risks` | | `Aggressive;Threats / intimidation` | Separated by `;`: Aggressive, Previous assault, Spitting, Verbal abuse, Threats / intimidation, Weapon sighted, Flees / evades, Other. |
-| `registration_type`, `make`, `type`, `colour` | | `Standard`, `Toyota`, `Ute`, `White` | Vehicle details in the infringement-issuance structure. Older files: `body_type` is read as `type`; `model` (not part of the structure) is added to the notes. |
+| `registration_state`, `registration_type`, `type`, `make`, `colour` | | `VIC`, `private`, `ute`, `Toyota`, `White` | Vehicle details in the infringement-issuance structure; codes as for the allow list. Older files: `body_type` is read as `type`; `model` (not part of the structure) is added to the notes. |
 | `notes` | | | |
 
 The example rows in each template are illustrations to overwrite. Restrictions marked

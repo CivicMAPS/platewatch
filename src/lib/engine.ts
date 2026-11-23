@@ -9,7 +9,8 @@
 import { comparePlates, plateKey, type MatchStrength } from './plate';
 import { restrictionInForce, nextRestrictionStart, type RestrictionInstance } from './restriction';
 import { localDateString } from './time';
-import type { AllowEntry, AllowList, DismissReason, HotEntry, HotList, Observation, PlateFlag, PlateList, TimedList } from './types';
+import type { AllowEntry, AllowList, DismissReason, HotEntry, HotList, Observation, PermitType, PlateFlag, PlateList, TimedList } from './types';
+import { parseArea, permitValidity } from './permit';
 
 export interface HotHit {
   list: HotList;
@@ -23,18 +24,26 @@ export interface AllowHit {
 }
 
 /**
- * A permit held for the plate, with the reason it does or does not exempt here
- * (CIVICMAPS-PARK-ARCH-001 §5). The officer decides; the status only informs.
+ * A permit held for the plate (CIVICMAPS-PARK-ARCH-001 §5, owner direction 23/11/2026). The officer
+ * sees only valid / expired — valid from 00:00 on valid-from until midnight at the end of valid-to —
+ * with the same details either way, and where the permit applies here:
+ *   applies       RPA: the area matches · RSP / RP: the registered address's street is this segment
+ *                 (RP: the officer checks it is directly in front of the street number) · or, for a
+ *                 permit with no area or street held, its list is linked to this segment
+ *   payment_only  FS: a paid foreshore space in the permit's council — no payment, time limits apply
+ *   other_area    held for another area / street / council
+ *   unknown       no area or street held and the list is not linked here — the officer checks
+ * The officer decides; nothing here exempts on its own.
  */
-export type PermitStatus =
-  | 'ACTIVE_IN_AREA' // valid today and its area or street is this segment's (or on a list linked to it)
-  | 'ACTIVE_NOT_IN_AREA' // valid today, but for another area / street
-  | 'ACTIVE_SCOPE_UNKNOWN' // valid today; no area or street held and its list is not linked here
-  | 'NOT_ACTIVE_EXPIRED'
-  | 'NOT_YET_ACTIVE';
+export type PermitScope = 'applies' | 'payment_only' | 'other_area' | 'unknown';
 
 export interface PermitHit extends AllowHit {
-  status: PermitStatus;
+  validity: 'valid' | 'expired';
+  /** Expired because valid-from is still to come. */
+  notYetValid: boolean;
+  scope: PermitScope;
+  /** The permit type the scope came from (absent for permits held without types). */
+  basis?: PermitType;
   /** Linked to this segment through the timed list's allow lists. */
   linked: boolean;
 }
@@ -147,35 +156,58 @@ export function isStatutoryRestriction(code: string): boolean {
   );
 }
 
-const areaKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(com|copp|[a-z]{2,5})?rpa/, '');
 const STREET_TYPES = /\b(street|st|road|rd|avenue|ave|place|pl|lane|ln|parade|pde|drive|dr|crescent|cres|terrace|tce|boulevard|blvd|highway|hwy|way|close|cl|court|ct)\b\.?/g;
 const streetKey = (v: string) => v.toLowerCase().replace(STREET_TYPES, '').replace(/[^a-z0-9]/g, '');
 
-/** Every permit held for the plate on any allow list (exact plate only), with its status here. */
-export function findPermits(plate: string, list: TimedList, allowLists: readonly AllowList[], at: number): PermitHit[] {
+/** A foreshore space (FS permits): "Foreshore" in the restriction's sign code or description. */
+export const isForeshoreRestriction = (code: string, description = '') => /foreshore/i.test(`${code} ${description}`);
+
+/** The council a timed list belongs to, from its owner-prefixed ID (com-20055 → com), if known. */
+function listCouncil(l: TimedList): string | undefined {
+  const m = /^(?:\d+-)?([a-z]{2,8})-/.exec(l.displayId ?? l.externalId ?? '');
+  return m?.[1];
+}
+
+/**
+ * Every permit held for the plate on any allow list (exact plate only), with its validity and where
+ * it applies here. `restriction` is the one in force (FS needs a foreshore space).
+ */
+export function findPermits(plate: string, list: TimedList, allowLists: readonly AllowList[], at: number, restriction?: { code: string; description: string }): PermitHit[] {
   const key = plateKey(plate);
-  const today = localDateString(at);
+  const council = listCouncil(list);
+  const listArea = list.rpa?.trim() ? parseArea(list.rpa) : null;
+  const segStreet = streetKey(list.segment.street);
   const hits: PermitHit[] = [];
   for (const a of allowLists) {
     const linked = list.allowListIds.includes(a.id);
     for (const entry of a.entries) {
       if (plateKey(entry.plate) !== key) continue;
-      let status: PermitStatus;
-      if (entry.validFrom && today < entry.validFrom) status = 'NOT_YET_ACTIVE';
-      else if (entry.validTo && today > entry.validTo) status = 'NOT_ACTIVE_EXPIRED';
-      else {
-        const streets = (entry.streets ?? []).map(streetKey).filter(Boolean);
-        const hasScope = !!entry.rpa?.trim() || streets.length > 0;
-        // A permit for an area, a street or both: either one matching makes it in area.
-        const inArea = !!entry.rpa?.trim() && !!list.rpa?.trim() && areaKey(entry.rpa) === areaKey(list.rpa);
-        const onStreet = streets.includes(streetKey(list.segment.street));
-        status = inArea || onStreet ? 'ACTIVE_IN_AREA' : hasScope ? 'ACTIVE_NOT_IN_AREA' : linked ? 'ACTIVE_IN_AREA' : 'ACTIVE_SCOPE_UNKNOWN';
+      const { status: validity, notYetValid } = permitValidity(entry, at);
+      // Areas and foreshore rights are council-scoped: com 7 is not copp 7 (§13).
+      const sameCouncil = !entry.council || !council || entry.council.code === council;
+      const permitArea = entry.rpa?.trim() ? parseArea(entry.rpa) : null;
+      const inArea = !!permitArea && !!listArea && permitArea.area === listArea.area && sameCouncil && (!listArea.council || !entry.council || listArea.council === entry.council.code);
+      const streets = [...(entry.streets ?? []), ...(entry.address ? [entry.address.street] : [])].map(streetKey).filter(Boolean);
+      const onStreet = streets.includes(segStreet) && sameCouncil;
+      const types = entry.permitTypes ?? [];
+      let scope: PermitScope;
+      let basis: PermitType | undefined;
+      if (types.length) {
+        if (types.includes('RPA') && inArea) [scope, basis] = ['applies', 'RPA'];
+        else if (types.includes('RSP') && onStreet) [scope, basis] = ['applies', 'RSP'];
+        else if (types.includes('RP') && onStreet) [scope, basis] = ['applies', 'RP'];
+        else if (types.includes('FS') && sameCouncil && restriction && isForeshoreRestriction(restriction.code, restriction.description)) [scope, basis] = ['payment_only', 'FS'];
+        else scope = 'other_area';
+      } else {
+        // Held without types (older lists): an area, a street or both; either matching applies.
+        const hasScope = !!permitArea || streets.length > 0;
+        scope = inArea || onStreet ? 'applies' : hasScope ? 'other_area' : linked ? 'applies' : 'unknown';
       }
-      hits.push({ list: a, entry, status, linked });
+      hits.push({ list: a, entry, validity, notYetValid, scope, ...(basis ? { basis } : {}), linked });
     }
   }
-  const rank: Record<PermitStatus, number> = { ACTIVE_IN_AREA: 0, ACTIVE_SCOPE_UNKNOWN: 1, ACTIVE_NOT_IN_AREA: 2, NOT_YET_ACTIVE: 3, NOT_ACTIVE_EXPIRED: 4 };
-  return hits.sort((a, b) => rank[a.status] - rank[b.status]);
+  const rank: Record<PermitScope, number> = { applies: 0, payment_only: 1, unknown: 2, other_area: 3 };
+  return hits.sort((x, y) => (x.validity === y.validity ? 0 : x.validity === 'valid' ? -1 : 1) || rank[x.scope] - rank[y.scope]);
 }
 
 /** Restriction code a timing decision is about (for the statutory check). */
@@ -242,7 +274,7 @@ function decideTimed(input: EngineInput, list: TimedList, expireIds: Set<string>
   const description = list.restrictions.find((r) => r.id === restrictionId)?.description ?? '';
   // The sign may be in the code ("NSEGCV 15") or the description ("Except authorised vehicles").
   const statutory = isStatutoryRestriction(code) || isStatutoryRestriction(description);
-  const permits = statutory ? [] : findPermits(plate, list, input.allowLists, at);
+  const permits = statutory ? [] : findPermits(plate, list, input.allowLists, at, { code, description });
   const afterFlag: Decision = permits.length ? { kind: 'timed_permit', hits: permits, then: rest } : rest;
 
   const flag = statutory ? undefined : input.flags?.find((f) => f.key === key);

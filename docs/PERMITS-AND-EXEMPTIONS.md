@@ -26,24 +26,39 @@ Code: `src/lib/engine.ts` (`decideTimed`, `findPermits`, `isStatutoryRestriction
 Officers today enter a plate and, if a permit is linked, a pop-up shows its details. PlateWatch
 does the same on every scan of a timed list:
 
-- Shows plate, **vehicle description**, **area** (RPA) and/or **streets**, permit number, holder,
-  validity and the list it is on.
-- Status, as in the architecture's permit states:
+- Every permit held for the plate is shown with the **same details whatever its status**, so the
+  officer checks them against the vehicle: plate, vehicle (colour, make, type, registration type,
+  state), permit number and types, area (`com-rpa7`), registered address, valid from / to, council,
+  holder and list.
+- **Status is only `valid` or `expired`.** Valid from 00:00 on *valid from* until midnight at the
+  end of *valid to*; a permit not yet started shows as expired ("not yet valid"). A **valid**
+  permit has a **solid green border**; an **expired** one a **red blinking border** (steady when
+  the device asks for reduced motion — an owner-approved exception to the Code 1-only red rule,
+  `docs/DESIGN-SYSTEM.md`).
+- Where it applies here, from the permit types in the permit number:
 
-  | Status | Meaning |
-  |---|---|
-  | `ACTIVE_IN_AREA` | Valid today; its area or one of its streets is this segment's, or it has neither and its list is linked to this segment |
-  | `ACTIVE_NOT_IN_AREA` | Valid today, for another area or street |
-  | `ACTIVE_SCOPE_UNKNOWN` | Valid today, no area or street held, list not linked here — check where it applies |
-  | `NOT_ACTIVE_EXPIRED` / `NOT_YET_ACTIVE` | Outside its validity dates; no *Exempt* button |
+  | Type | Applies | Here |
+  |---|---|---|
+  | `RPA` residential parking area | Any time or paid space in its area (same council) | *Applies here* when the segment's area matches |
+  | `RSP` residential street permit | Anywhere on the street segment of the registered address | *Applies here* when the segment's street is the address street |
+  | `RP` resident permit | Directly in front of the registered address | *Applies here* on the address street — the officer checks the house number |
+  | `FS` foreshore | Paid foreshore spaces in its own municipality; time limits still apply | *No payment required here (foreshore)* in a foreshore space (restriction description contains "Foreshore") |
+  | `COMB` combination, e.g. `RPA/COMB/FS` | Each listed type | The widest that applies (RPA area first, else FS in a foreshore space) |
 
-- **Exempt here** (any active permit) → green *Permit valid*, recorded with the permit, no timer.
-- **Not exempt here — continue** → timed as usual (new sighting or the running timing).
-- Area codes compare without council prefixes or the word "RPA" (`com-rpa-12` = `RPA 12` = `12`);
-  streets compare without the street type (`Smith St` = `smith street`).
+  Otherwise *For another area, street or council*. Permits without types (older lists) use their
+  area / streets, or the linked list: *No area or street held — check where it applies*.
+- Buttons: valid and applies → **Exempt here** (recorded with validity, scope and type, no timer);
+  valid FS in a foreshore space → **No payment (foreshore) — time limits apply** (timing runs, the
+  payment check and 702 are skipped, 701 still applies); expired → no exempt button.
+  **Not exempt here — continue** is always offered.
+- Councils: each council has a user-facing code (`com`, `copp`) and a CivicMAPS linking ID used
+  operationally: area 7 is `com-rpa7` on screen and `919379201-com-rpa7` in data. Area codes
+  compare across these forms (`7`, `RPA 7`, `com-rpa-7`, `919379201-com-rpa7`), but never across
+  councils. Streets compare without the street type (`Smith St` = `smith street`).
 
-Permit details come from allow lists: the add-permit form, or the CSV template columns
-`vehicle`, `rpa`, `streets` (`docs/IMPORT-TEMPLATES.md`).
+Permit data follows `schemas/civicmaps-parking-permit.v1.schema.json` (the permit number is
+authoritative; issue year, sequential ID and amendment are derived from it). Load it as JSON, the
+allow-list CSV template, or the add-permit form (`docs/IMPORT-TEMPLATES.md`).
 
 ## Dismissing an overstay alert
 

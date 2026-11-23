@@ -247,3 +247,27 @@
   box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.55);
 }
 
+
+/* Permit status (owner direction 23/11/2026): valid = solid green border; expired = blinking red
+   border. Red here is an owner exception to the Code-1-only rule, limited to expired permits. Reduced
+   motion: steady red border. */
+.permit-valid {
+  border: 4px solid var(--status-active);
+}
+.permit-expired {
+  border: 4px solid var(--status-emergency);
+  animation: permit-expired-blink 1s steps(1, end) infinite;
+}
+@keyframes permit-expired-blink {
+  0%, 49% { border-color: var(--status-emergency); }
+  50%, 100% { border-color: var(--status-emergency-border); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .permit-expired { animation: none; }
+}
+.permit-status-valid {
+  color: var(--status-active-strong);
+}
+.permit-status-expired {
+  color: var(--status-emergency-text);
+}

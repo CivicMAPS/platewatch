@@ -14,6 +14,7 @@ import { scanView } from './ui/views/scan';
 import { settingsView } from './ui/views/settings';
 import { textReaderView } from './ui/views/textReader';
 import { tagsView } from './ui/views/tags';
+import { hotLogView } from './ui/views/hotLog';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app root missing');
@@ -29,6 +30,7 @@ const app = new App(root)
   .route('/text', textReaderView)
   .route('/dismissed', dismissedView)
   .route('/tags', tagsView)
+  .route('/hotlog/:entryId', hotLogView)
   .route('/import', importView)
   .route('/settings', settingsView);
 

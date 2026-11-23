@@ -51,6 +51,23 @@ function lookalikeCard(s: ScanRecord, linked: ScanRecord[] = []): TemplateResult
   </section>`;
 }
 
+const PAY_SOURCE: Record<NonNullable<ScanRecord['payment']>['source'], string> = { easypark: 'EasyPark', paystay: 'PayStay', meter: 'Meter', ticket: 'Ticket', other: 'Other' };
+
+/** 30g.2: the officer's payment check, with earlier paid-to values (top-ups) as history. */
+function paymentRecord(p: NonNullable<ScanRecord['payment']>): TemplateResult {
+  return html`<section class="card mt-3 text-sm" data-testid="record-payment">
+    <h2 class="section-title flex items-center gap-2">Payment check ${p.status === 'paid' ? statusPill('permit_valid', 'Paid') : statusPill('not_in_force', 'Not found')}</h2>
+    <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+      <dt class="text-neutral-600">Method</dt><dd>${PAY_SOURCE[p.source]}${p.sourceRef ? html` <span class="font-plate">${p.sourceRef}</span>` : nothing}</dd>
+      ${p.paidFrom !== undefined ? html`<dt class="text-neutral-600">Paid from</dt><dd class="font-plate">${formatStamp(p.paidFrom)}</dd>` : nothing}
+      ${p.paidTo !== undefined ? html`<dt class="text-neutral-600">Paid to</dt><dd class="font-plate">${formatStamp(p.paidTo)}</dd>` : nothing}
+      <dt class="text-neutral-600">Entered by</dt><dd class="font-plate">${p.checkedBy || '—'}</dd>
+      <dt class="text-neutral-600">Entered at</dt><dd class="font-plate">${formatStamp(p.checkedAt)}</dd>
+      ${(p.history ?? []).map((h) => html`<dt class="text-neutral-600">Earlier paid to</dt><dd><span class="font-plate">${formatStamp(h.paidTo)}</span> · <span class="font-plate">${h.checkedBy || '—'}</span></dd>`)}
+    </dl>
+  </section>`;
+}
+
 /** Timing status; "overdue" matches OVERDUE on the list once allowance + grace has run out. */
 function timingLine(o: Observation): TemplateResult {
   const now = Date.now();
@@ -209,6 +226,7 @@ export function recordView(params: Record<string, string>, app: App): View {
         ${page(html`
           <a href=${urls.get(s.image)} target="_blank" rel="noopener"><img src=${urls.get(s.image)} alt="Evidence image" class="w-full rounded-md border border-neutral-200 bg-black" /></a>
           <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome, s)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
+          ${s.payment ? paymentRecord(s.payment) : nothing}
           ${lookalikeCard(s, observation?.firstScanId === s.id ? timeline.filter((t) => observation?.linkedScanIds?.includes(t.id)) : [])}
           ${draft === null
             ? html`<button type="button" class="btn-secondary mt-3 w-full" @click=${() => { draft = s.plate; draftError = ''; app.update(); }}>${icon('edit')} Edit plate</button>`

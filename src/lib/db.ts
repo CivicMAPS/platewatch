@@ -325,10 +325,16 @@ export async function replaceAll(data: {
   dismissed?: DismissedCapture[];
   /** Only when the backup includes plate tags; otherwise tags on the device are untouched. */
   flags?: PlateFlag[];
+  /** Only when the backup includes hot-list events; otherwise the device's log is untouched. */
+  hotEvents?: HotListEvent[];
   merge: boolean;
 }): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed', 'flags'], 'readwrite');
+  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed', 'flags', 'hotEvents'], 'readwrite');
+  if (data.hotEvents) {
+    if (!data.merge) await tx.objectStore('hotEvents').clear();
+    for (const e of data.hotEvents) await tx.objectStore('hotEvents').put(e);
+  }
   if (data.flags) {
     if (!data.merge) await tx.objectStore('flags').clear();
     for (const f of data.flags) await tx.objectStore('flags').put(f);

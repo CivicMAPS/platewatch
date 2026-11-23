@@ -273,10 +273,20 @@ async function main() {
   await shot('confirm');
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
-  // Payment to check is the restriction's own PayStay zone with its meter.
-  await waitText('Check payment before enforcing · 2P');
-  await waitText('PayStay ParkingZone 338851200001 · Meter ID GLP1');
-  log('first sighting → scan record created with time allowance; payment check for the restriction in force');
+  // WF-S30: a first sighting in a paid space needs the payment check before Next scan. The
+  // numbers offered are the restriction's own PayStay zone and its meter.
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true });
+  await waitText('PayStay 338851200001');
+  await waitText('Meter GLP1');
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before the payment check');
+  await shot('payment-check');
+  await page.click('[data-testid=pay-found]');
+  await click('PayStay 338851200001');
+  await page.$eval('[data-testid=pay-to]', (el) => { el.value = '23:59'; el.dispatchEvent(new Event('input')); });
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=payment-saved]', { visible: true });
+  await waitText('Paid');
+  log('first sighting → recorded; payment check (paid session, PayStay zone of the restriction, paid to) saved before Next scan');
   await shot('recorded');
 
   // Scan 2 (within allowance)
@@ -321,7 +331,9 @@ async function main() {
   const over = await page.$eval('[data-testid=comparison]', (el) => el.innerText);
   if (!/overstay/i.test(over)) throw new Error('expected overstay');
   const elapsed = await page.$eval('[data-testid=elapsed]', (el) => el.textContent);
-  log(`overstay alert with both evidence images, elapsed ${elapsed}`);
+  // Paid to 23:59 still valid, allowance exceeded → 701 (WF-S30 30d).
+  await page.waitForSelector('[data-testid=offence-offer][data-code="701"]', { visible: true });
+  log(`overstay alert with both evidence images, elapsed ${elapsed}; 701 offered (paid to still valid)`);
   await shot('overstay');
 
   // Dismiss the offence alert after checking the vehicle: disability permit displayed. The scan is
@@ -388,9 +400,16 @@ async function main() {
   await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
   await page.click('[data-testid=flag-dismiss]');
   await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
+  // Timed as signed in a paid space: payment check; no payment found → 702 at the first scan (WF-S30 30c).
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=offence-offer][data-code="702"]', { visible: true });
+  await shot('702-no-payment');
   const tags = await page.evaluate(() => new Promise((res) => { indexedDB.open('platewatch').onsuccess = (e) => { e.target.result.transaction('flags').objectStore('flags').count().onsuccess = (c) => res(c.target.result); }; }));
   if (tags !== 0) throw new Error('tag not removed after Dismiss');
-  log('next day: known-vehicle check — Confirmed (timed against 2 ×, tag kept), then Dismiss (tag removed, timed as signed)');
+  log('next day: known-vehicle check — Confirmed (timed against 2 ×, tag kept), then Dismiss (tag removed, timed as signed); no payment found → 702 offered');
 
   // Hot list alert while working the timed list (manual correction of OCR text).
   await page.click('[data-testid=next-scan]');

@@ -65,3 +65,29 @@ export async function trySendAlert(e: HotListEvent, now = Date.now()): Promise<H
 export function canSendAlerts(): boolean {
   return !!host()?.sendHotListAlert;
 }
+
+/** One row of a hot-list entry log (29d), newest first. */
+export type HotLogRow =
+  | { kind: 'sighting'; at: number; scanId: string; plate: string }
+  | { kind: 'acknowledged'; at: number; event: HotListEvent }
+  | { kind: 'not_matched'; at: number; event: HotListEvent };
+
+/**
+ * The entry log: sightings (the `hot_sighting` scans of this plate on its hot list) and the
+ * device's events for the entry (acknowledgements, look-alike "not the hot-list vehicle").
+ */
+export function hotLogRows(
+  entry: Pick<HotEntry, 'id' | 'key'>,
+  sightings: readonly { id: string; key: string; outcome: string; plate: string; meta: { capturedAt: number }; lookalikes?: { candidateId: string; choice: string }[] }[],
+  events: readonly HotListEvent[],
+): HotLogRow[] {
+  const rows: HotLogRow[] = [
+    ...sightings
+      .filter((s) => s.outcome === 'hot_sighting' && (s.key === entry.key || s.lookalikes?.some((l) => l.candidateId === entry.id && l.choice === 'hot_confirmed')))
+      .map((s) => ({ kind: 'sighting' as const, at: s.meta.capturedAt, scanId: s.id, plate: s.plate })),
+    ...events
+      .filter((e) => e.hotListEntryId === entry.id)
+      .map((e) => (e.kind === 'acknowledged' ? { kind: 'acknowledged' as const, at: e.at, event: e } : { kind: 'not_matched' as const, at: e.at, event: e })),
+  ];
+  return rows.sort((a, b) => b.at - a.at);
+}

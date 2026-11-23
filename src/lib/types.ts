@@ -306,8 +306,29 @@ export interface LookalikeLink {
   decidedAt: number;
 }
 
+/** Where the officer checked payment (WF-S30). */
+export type PaymentSource = 'easypark' | 'paystay' | 'meter' | 'ticket' | 'other';
+
+/** The officer's payment check on a first sighting in a paid space (WF-S30). */
+export interface PaymentCheck {
+  status: 'paid' | 'not_found';
+  source: PaymentSource;
+  /** The number checked, e.g. "7514" (EasyPark area) or a meter ID. */
+  sourceRef?: string;
+  /** Epoch ms; paidTo required when status is 'paid'. */
+  paidFrom?: number;
+  paidTo?: number;
+  checkedAt: number;
+  /** Officer number. */
+  checkedBy: string;
+  /** Earlier paid-to values when updated at a later scan (top-up, OQ30-1). */
+  history?: { paidTo: number; checkedAt: number; checkedBy: string }[];
+}
+
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
+  /** Officer's payment check (first sighting in a paid space, WF-S30). */
+  payment?: PaymentCheck;
   /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
   lookalikes?: LookalikeLink[];
   /** Overstay alert dismissed by the officer after checking the vehicle. */
@@ -418,6 +439,8 @@ export interface Observation {
   dismissReason?: DismissReason;
   /** Scans that joined this timing through a look-alike link ("Same vehicle", WF-S28). */
   linkedScanIds?: string[];
+  /** Payment check result carried forward from the first scan so a re-scan can compare (WF-S30). */
+  payment?: { status: 'paid' | 'not_found'; paidTo?: number };
   /**
    * Disability permit displayed: the allowance is twice the signed time (timed and paid + timed
    * spaces). `limitMinutes` / `allowanceEndsAt` hold the doubled values; this keeps the signed one.

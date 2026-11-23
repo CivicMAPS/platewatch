@@ -16,6 +16,7 @@ import {
   putFlag,
   getAllowLists,
   getHotLists,
+  getObservation,
   putHotEvent,
   getList,
   getScan,
@@ -36,7 +37,8 @@ import { formatClock, formatDateTime, formatDuration, formatIsoDate, formatMinut
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
-import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, TimedRestriction } from '../../lib/types';
+import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction } from '../../lib/types';
+import { effectivePayment, OFFENCE_LABEL, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
 import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
 import { officerNumber } from '../../lib/host';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
@@ -93,9 +95,15 @@ interface ResultState {
   hotScanIds?: Record<string, string>;
   /** Hot-list acknowledgements for this scan; Next scan stays disabled until present (29a.5). */
   hotAcks?: HotListEvent[];
+  /** The timing after a first-scan payment check (WF-S30), for the 702 offer. */
+  observation?: Observation;
 }
 
 
+
+const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', error: '' }) as { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string };
+const SOURCE_LABEL: Record<PaymentSource, string> = { easypark: 'EasyPark', paystay: 'PayStay', meter: 'Meter', ticket: 'Ticket', other: 'Other' };
 
 /** A capture's GPS fix as stored on hot-list events and payment checks. */
 function fixOf(loc: GeoFix | null | undefined): { lat: number; lng: number; accuracyM: number } | null {
@@ -136,6 +144,9 @@ export function scanView(params: Record<string, string>, app: App): View {
   let result: ResultState | null = null;
   /** "Dismiss offence alert" reasons sheet open. */
   let dismissOpen = false;
+  /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
+  let payForm: { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string } = emptyPayForm();
+  let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
   let evidence: Evidence | null = null;
   let clock: number | undefined;
   let unsubGeo: (() => void) | null = null;
@@ -305,6 +316,8 @@ export function scanView(params: Record<string, string>, app: App): View {
     permitDecided = false;
     lookalikePrompt = null;
     hintSources = null;
+    payForm = emptyPayForm();
+    topUp = { open: false, paidTo: '', error: '' };
     editing = false;
     confirmError = null;
     pending = null;
@@ -1226,7 +1239,10 @@ export function scanView(params: Record<string, string>, app: App): View {
    */
   const hotAckPanel = (r: ResultState): TemplateResult => {
     const acks = r.hotAcks;
-    const logLinks = nothing;
+    const entryIds = [...new Set(r.hotHits.filter((h) => h.strength === 'exact').map((h) => h.entry.id))];
+    const logLinks = html`<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">${entryIds.map(
+      (id) => html`<a class="link text-sm" data-testid="hot-log-link" href="#/hotlog/${encodeURIComponent(id)}">View entry log${entryIds.length > 1 ? ` · ${r.hotHits.find((h) => h.entry.id === id)?.entry.plate}` : ''}</a>`,
+    )}</div>`;
     if (!acks?.length) {
       const officer = officerNumber(settings().officerNumber);
       return html`<section class="card border-2 border-alert" data-testid="hot-ack">
@@ -1407,6 +1423,90 @@ export function scanView(params: Record<string, string>, app: App): View {
     }
   };
 
+  /** 701 / 702 offer: amber, with the offence code chip and the locked time from (WF-S30). */
+  const offerCard = (offer: OffenceOffer): TemplateResult => html`<section class="rounded-md border-2 border-alert bg-alert-bg p-4" data-testid="offence-offer" data-code=${offer.code}>
+    <div class="flex flex-wrap items-center gap-2">${statusPill('overstay', `${offer.code} eligible`)}
+      <span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong" data-testid="offence-chip">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span></div>
+    <p class="mt-2 text-sm text-neutral-800">${offer.basis === 'no_payment_found' ? 'No payment found at the first scan.' : offer.basis === 'paid_to_passed' ? `Paid to passed (grace ${PAID_TO_GRACE_MINUTES} min ended).` : 'Allowance exceeded.'}
+      Offence from <span class="font-plate">${formatClock(offer.timeFrom)}</span>.</p>
+    ${offer.secondary ? html`<p class="mt-1 text-xs text-neutral-700" data-testid="offence-secondary">Also reached: <span class="font-plate">${offer.secondary.code}</span> · ${OFFENCE_LABEL[offer.secondary.code]} (from <span class="font-plate">${formatClock(offer.secondary.timeFrom)}</span>)</p>` : nothing}
+    ${issueButton(offer)}
+  </section>`;
+
+  /** Saved payment check block (30b.3, 30c.2). */
+  const paymentBlock = (p: PaymentCheck): TemplateResult => html`<section class="rounded-md border border-neutral-200 bg-surface p-4 shadow-sm" data-testid="payment-saved">
+    ${p.status === 'paid' ? statusPill('permit_valid', 'Paid') : statusPill('not_in_force', 'Not found')}
+    <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+      <dt class="text-neutral-600">Checked in</dt><dd>${SOURCE_LABEL[p.source]}${p.sourceRef ? html` <span class="font-plate">${p.sourceRef}</span>` : nothing}</dd>
+      ${p.paidFrom !== undefined || p.paidTo !== undefined ? html`<dt class="text-neutral-600">Paid</dt><dd class="font-plate">${p.paidFrom !== undefined ? formatClock(p.paidFrom).slice(0, 5) : '—'} → ${p.paidTo !== undefined ? formatClock(p.paidTo).slice(0, 5) : '—'}</dd>` : nothing}
+      <dt class="text-neutral-600">Entered</dt><dd><span class="font-plate">${p.checkedBy || '—'}</span> · <span class="font-plate">${formatClock(p.checkedAt)}</span></dd>
+    </dl>
+  </section>`;
+
+  /** 30a: the payment check form on a first sighting in a paid space. */
+  const paymentForm = (): TemplateResult => {
+    const pay = pending?.meta.payment;
+    const chips: { kind: PaymentSource; ref?: string; label: string }[] = [
+      ...(pay?.easyPark ?? []).filter(Boolean).map((ref) => ({ kind: 'easypark' as const, ref, label: `EasyPark ${ref}` })),
+      ...[...new Set((pay?.payStay ?? []).map((z) => z.zone).filter(Boolean))].map((ref) => ({ kind: 'paystay' as const, ref, label: `PayStay ${ref}` })),
+      ...(pay?.meters ?? []).filter((m) => m.id).map((m) => ({ kind: 'meter' as const, ref: m.id, label: `Meter ${m.id}` })),
+      { kind: 'meter', label: 'Meter' },
+      { kind: 'ticket', label: 'Ticket' },
+      { kind: 'other', label: 'Other' },
+    ];
+    const f = payForm;
+    const set = (patch: Partial<typeof payForm>) => { payForm = { ...payForm, ...patch, error: '' }; app.update(); };
+    const r0 = result?.decision.kind === 'timed_new' ? result.decision.instance.restriction : undefined;
+    return html`<section class="rounded-md border-2 border-alert bg-surface p-4" data-testid="payment-check-form">
+      <div class="flex flex-wrap items-center gap-2">${statusPill('verify', 'Required')}<h2 class="font-semibold text-neutral-900">Payment check${r0 ? html` · <span class="font-plate">${r0.code}</span>` : nothing}</h2></div>
+      <div class="mt-3 grid grid-cols-2 gap-2" role="group" aria-label="Payment found">
+        <button type="button" class="chip-button justify-center" aria-pressed=${f.status === 'paid'} data-testid="pay-found" @click=${() => set({ status: 'paid', paidFrom: f.paidFrom || (pending ? hhmm(pending.meta.capturedAt) : '') })}>Paid session found</button>
+        <button type="button" class="chip-button justify-center" aria-pressed=${f.status === 'not_found'} data-testid="pay-not-found" @click=${() => set({ status: 'not_found' })}>No payment found</button>
+      </div>
+      <p class="mt-3 field-label">Checked in</p>
+      <div class="flex flex-wrap gap-2">${chips.map((c) => html`<button type="button" class="chip-button" aria-pressed=${f.source?.kind === c.kind && f.source?.ref === c.ref} data-testid="pay-source" @click=${() => set({ source: { kind: c.kind, ref: c.ref } })}>${c.label}</button>`)}</div>
+      ${f.status === 'paid'
+        ? html`<div class="mt-3 grid grid-cols-2 gap-3">
+            <label><span class="field-label">Paid from</span><input type="time" class="field font-plate" data-testid="pay-from" .value=${f.paidFrom} @input=${(e: Event) => (payForm = { ...payForm, paidFrom: (e.target as HTMLInputElement).value })} /></label>
+            <label><span class="field-label">Paid to</span><input type="time" class="field font-plate" data-testid="pay-to" required .value=${f.paidTo} @input=${(e: Event) => (payForm = { ...payForm, paidTo: (e.target as HTMLInputElement).value })} /></label>
+          </div>`
+        : nothing}
+      ${f.error ? html`<div class="mt-3">${banner('alert', f.error)}</div>` : nothing}
+      <button type="button" class="btn-primary mt-3 w-full" data-testid="pay-save" ?disabled=${phase === 'saving'} @click=${() => void savePaymentCheck()}>${icon('check')} Save payment check</button>
+    </section>`;
+  };
+
+  /** Payment and offences on the result (WF-S30). */
+  const paymentSection = (r: ResultState): TemplateResult | typeof nothing => {
+    const at = pending?.meta.capturedAt ?? Date.now();
+    if (r.decision.kind === 'timed_new') {
+      if (r.decision.concession === 'disability' || !isPaidSpace()) return nothing;
+      if (!r.saved?.payment) return paymentForm();
+      const offer = r.observation ? offenceFor(r.observation, at) : null;
+      return html`${offer ? offerCard(offer) : nothing}${paymentBlock(r.saved.payment)}`;
+    }
+    if (r.decision.kind === 'timed_resighting') {
+      const obs = r.comparison?.observation ?? r.decision.observation;
+      const offer = r.dismissedReason && r.dismissedReason !== 'disability_permit' ? null : offenceFor(obs, at);
+      return html`${offer ? offerCard(offer) : nothing}${obs.payment ? nothing : paymentCard(r)}
+        ${obs.payment?.status === 'paid' && !obs.concession
+          ? html`<section class="card" data-testid="payment-topup">
+              <p class="text-sm">Paid to <span class="font-plate">${obs.payment.paidTo !== undefined ? formatClock(obs.payment.paidTo).slice(0, 5) : '—'}</span> (from the first scan)</p>
+              ${topUp.open
+                ? html`<div class="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
+                    <label><span class="field-label">New paid to</span><input type="time" class="field font-plate" data-testid="topup-to" .value=${topUp.paidTo} @input=${(e: Event) => (topUp = { ...topUp, paidTo: (e.target as HTMLInputElement).value })} /></label>
+                    <button type="button" class="btn-primary" data-testid="topup-save" @click=${() => void saveTopUp()}>Save</button>
+                  </div>${topUp.error ? html`<div class="mt-2">${banner('alert', topUp.error)}</div>` : nothing}`
+                : html`<button type="button" class="btn-secondary mt-2 w-full" data-testid="topup-open" @click=${() => { topUp = { open: true, paidTo: '', error: '' }; app.update(); }}>Payment extended — update paid to</button>`}
+            </section>`
+          : nothing}`;
+    }
+    return paymentCard(r);
+  };
+
+  /** Issue infringement hand-off (WF-S31); hidden without an EnforcementMAPS host (IR-3). */
+  const issueButton = (_offer: OffenceOffer): TemplateResult | typeof nothing => nothing;
+
   /** Paid parking numbers to check before enforcing; promoted to amber on an overstay (WF-S27 27c.4). */
   const paymentCard = (r: ResultState): TemplateResult | typeof nothing => {
     const lines = paymentLines(pending?.meta.payment);
@@ -1430,7 +1530,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         ${r.dismissedReason ? dismissedBanner(r.dismissedReason) : nothing}
         ${decisionPanel(r)}
         ${linkedNote(r)}
-        ${r.dismissedReason ? nothing : paymentCard(r)}
+        ${r.dismissedReason && r.dismissedReason !== 'disability_permit' ? nothing : paymentSection(r)}
         ${r.saved
           ? html`<p class="text-center text-xs text-neutral-600">Saved · SHA-256 <span class="font-plate">${r.saved.sha256.slice(0, 16)}…</span> · <a class="link" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}
@@ -1448,7 +1548,77 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /** A decision the officer must make before moving on (WF-S28 28b.6, 28g.4). */
   const openDecision = (r: ResultState): boolean =>
-    r.decision.kind === 'timed_possible' || r.decision.kind === 'timed_permit' || r.decision.kind === 'timed_flag_check' || mustAcknowledge(r);
+    r.decision.kind === 'timed_possible' || r.decision.kind === 'timed_permit' || r.decision.kind === 'timed_flag_check' || mustAcknowledge(r) || paymentRequired(r);
+
+  /** Paid space: the numbers to check at this scan. */
+  const isPaidSpace = (): boolean => paymentLines(pending?.meta.payment).length > 0;
+
+  /**
+   * WF-S30 30a.6: a first sighting in a paid space needs the payment check before Next scan
+   * (OQ30-9, as drawn). A displayed disability permit means no payment is required.
+   */
+  const paymentRequired = (r: ResultState): boolean =>
+    r.decision.kind === 'timed_new' && r.decision.concession !== 'disability' && !!r.saved && !r.saved.payment && isPaidSpace();
+
+  /** 30a.5: save the payment check on the scan and carry it to the timing. */
+  const savePaymentCheck = async () => {
+    if (!result?.saved || !pending || phase === 'saving') return;
+    const scanAt = pending.meta.capturedAt;
+    const f = payForm;
+    if (!f.status) return void ((payForm = { ...f, error: 'Choose Paid session found or No payment found.' }), app.update());
+    if (!f.source) return void ((payForm = { ...f, error: 'Choose where you checked.' }), app.update());
+    let paidFrom: number | undefined;
+    let paidTo: number | undefined;
+    if (f.status === 'paid') {
+      paidFrom = timeOnDay(scanAt, f.paidFrom || hhmm(scanAt)) ?? undefined;
+      paidTo = timeOnDay(scanAt, f.paidTo) ?? undefined;
+      if (paidTo === undefined) return void ((payForm = { ...f, error: 'Enter paid to (HH:MM).' }), app.update());
+      if (paidFrom !== undefined && paidTo < paidFrom) return void ((payForm = { ...f, error: 'Paid to is before paid from.' }), app.update());
+    }
+    const check: PaymentCheck = {
+      status: f.status,
+      source: f.source.kind,
+      ...(f.source.ref ? { sourceRef: f.source.ref } : {}),
+      ...(paidFrom !== undefined ? { paidFrom } : {}),
+      ...(paidTo !== undefined ? { paidTo } : {}),
+      checkedAt: Date.now(),
+      checkedBy: officerNumber(settings().officerNumber),
+    };
+    phase = 'saving';
+    app.update();
+    try {
+      const scan = { ...result.saved, payment: check };
+      const obs = scan.observationId ? await getObservation(scan.observationId) : undefined;
+      const updatedObs = obs ? { ...obs, payment: effectivePayment(check, scanAt) } : undefined;
+      await saveScan(scan, updatedObs);
+      result = { ...result, saved: scan, observation: updatedObs };
+      feedback(updatedObs && offenceFor(updatedObs, scanAt) ? 'warn' : 'ok', settings());
+    } catch (e) {
+      app.toast(`Save failed: ${(e as Error).message}`, 'error');
+    }
+    phase = 'result';
+    app.update();
+  };
+
+  /** 30e.4: the driver topped up — the officer enters the new paid to; earlier values kept as history. */
+  const saveTopUp = async () => {
+    const obs = result?.comparison?.observation;
+    if (!result || !obs || !pending || obs.payment?.status !== 'paid') return;
+    const scanAt = pending.meta.capturedAt;
+    const paidTo = timeOnDay(scanAt, topUp.paidTo);
+    if (paidTo === null) return void ((topUp = { ...topUp, error: 'Enter paid to (HH:MM).' }), app.update());
+    const first = await getScan(obs.firstScanId);
+    const now = Date.now();
+    const by = officerNumber(settings().officerNumber);
+    const updatedObs: Observation = { ...obs, payment: { status: 'paid', paidTo } };
+    if (first?.payment) {
+      const p = first.payment;
+      await saveScan({ ...first, payment: { ...p, paidTo, history: [...(p.history ?? []), ...(p.paidTo !== undefined ? [{ paidTo: p.paidTo, checkedAt: p.checkedAt, checkedBy: p.checkedBy }] : [])], checkedAt: now, checkedBy: by } }, updatedObs);
+    } else await putObservation(updatedObs);
+    topUp = { open: false, paidTo: '', error: '' };
+    result = { ...result, comparison: { ...result.comparison!, observation: updatedObs } };
+    app.update();
+  };
 
   /** A hot-list match not yet acknowledged (WF-S29 29a.5). */
   const mustAcknowledge = (r: ResultState): boolean => r.hotHits.some((h) => h.strength === 'exact') && !r.hotAcks?.length;

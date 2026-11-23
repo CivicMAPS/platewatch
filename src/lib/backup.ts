@@ -1,9 +1,9 @@
 /** JSON backup / restore. Images are embedded as base64 data URLs when included. */
-import { getAllObservations, getAllScans, getDismissed, getFlags, getLists, replaceAll } from './db';
+import { getAllHotEvents, getAllObservations, getAllScans, getDismissed, getFlags, getLists, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
 import { normalisePayment, prunePaidBy } from './payment';
-import type { DismissedCapture, Observation, PaidBy, PaymentAreas, PlateFlag, PlateList, ScanRecord } from './types';
+import type { DismissedCapture, HotListEvent, Observation, PaidBy, PaymentAreas, PlateFlag, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
 export const BACKUP_VERSION = 1;
@@ -25,6 +25,8 @@ export interface BackupFile {
   dismissed?: SerialDismissed[];
   /** Plate record tags (known disability / emergency vehicles); exported with scan records. */
   flags?: PlateFlag[];
+  /** Hot-list entry log events (acknowledgements, look-alike decisions); exported with scan records. */
+  hotEvents?: HotListEvent[];
 }
 
 export interface BackupOptions {
@@ -65,7 +67,7 @@ export async function createBackup(includeScans: boolean, appVersion: string, op
     scans,
     includesDismissed: !!options.includeDismissed,
     dismissed,
-    ...(includeScans ? { flags: await getFlags() } : {}),
+    ...(includeScans ? { flags: await getFlags(), hotEvents: await getAllHotEvents() } : {}),
   };
   return new Blob([JSON.stringify(file)], { type: 'application/json' });
 }
@@ -107,6 +109,7 @@ export function parseBackup(text: string): {
   /** Undefined when the backup does not include the Dismissed list. */
   dismissed?: DismissedCapture[];
   flags?: PlateFlag[];
+  hotEvents?: HotListEvent[];
 } {
   let raw: unknown;
   try {
@@ -221,7 +224,13 @@ export function parseBackup(text: string): {
           confirmedDay: typeof f.confirmedDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f.confirmedDay) ? f.confirmedDay : '',
         }))
     : undefined;
-  return { lists, observations, scans, dismissed, ...(flags ? { flags } : {}) };
+  const hotEvents = Array.isArray(raw.hotEvents)
+    ? (raw.hotEvents as unknown[]).filter(
+        (e): e is HotListEvent =>
+          isObj(e) && typeof e.id === 'string' && (e.kind === 'acknowledged' || e.kind === 'lookalike_not_matched') && typeof e.hotListEntryId === 'string' && typeof e.at === 'number',
+      )
+    : undefined;
+  return { lists, observations, scans, dismissed, ...(flags ? { flags } : {}), ...(hotEvents ? { hotEvents } : {}) };
 }
 
 export async function restoreBackup(text: string, merge: boolean): Promise<{ lists: number; scans: number; dismissed: number }> {

@@ -11,11 +11,45 @@ import { shareFile } from '../../lib/files';
 import { formatLatLng, mapUrl } from '../../lib/geo';
 import { sha256Hex } from '../../lib/hash';
 import { formatClock, formatDateTime, formatDuration, formatMinutes, formatStamp } from '../../lib/time';
-import type { Observation, PlateList, ScanRecord } from '../../lib/types';
+import type { LookalikeLink, Observation, PlateList, ScanRecord } from '../../lib/types';
+import { sameVehicleLink } from '../../lib/lookalike';
 import type { App, View } from '../app';
 import { banner, header, icon, nearMatchSheet, page, plateBadge, statusPill, UrlBag } from '../components';
 import { outcomeChip } from './listDetail';
 import { DISMISS_LABEL } from '../../lib/dismissal';
+
+const CHOICE_TEXT: Record<LookalikeLink['choice'], string> = {
+  same: 'Same vehicle — linked to this timing',
+  different: 'Different vehicle — recorded new',
+  hot_confirmed: 'Same vehicle — hot list sighting',
+  not_hot: 'Not the hot-list vehicle',
+  permit_plate: 'Permit plate confirmed — plate edited',
+  not_permit: 'Not the permit plate — checked as read',
+};
+const SOURCE_TEXT: Record<LookalikeLink['source'], string> = { timed: 'timed on this segment', hot: 'hot list', allow: 'permit list' };
+
+/** Neutral dashed chip: a look-alike link is not a status (WF-S28). */
+const lookalikeChip = (): TemplateResult =>
+  html`<span class="chip border-dashed border-neutral-400 bg-surface text-xs font-semibold tracking-[0.04em] text-neutral-700 uppercase" data-testid="lookalike-chip">${icon('link', 'h-3.5 w-3.5')} Look-alike link</span>`;
+
+/**
+ * 28h.2: look-alike decisions on this scan (every candidate shown, with the choice and time), and
+ * on a timing's first scan the scans that were linked to it.
+ */
+function lookalikeCard(s: ScanRecord, linked: ScanRecord[] = []): TemplateResult | typeof nothing {
+  const links = s.lookalikes ?? [];
+  if (!links.length && !linked.length) return nothing;
+  return html`<section class="card mt-3 border-2 border-dashed border-neutral-400 text-sm" data-testid="lookalike-card">
+    <h2 class="section-title flex items-center gap-2">${icon('link', 'h-4 w-4')} Look-alike</h2>
+    <ul class="grid gap-2">
+      ${links.map(
+        (l) => html`<li><span class="font-plate">${l.readAs}</span> read · similar to <span class="font-plate">${l.candidatePlate}</span> (${SOURCE_TEXT[l.source]})<br />
+          <span class="font-semibold">${CHOICE_TEXT[l.choice]}</span> · <span class="font-plate">${formatStamp(l.decidedAt)}</span></li>`,
+      )}
+      ${linked.map((t) => html`<li>Linked: <span class="font-plate">${t.plate}</span> at <span class="font-plate">${formatClock(t.meta.capturedAt)}</span></li>`)}
+    </ul>
+  </section>`;
+}
 
 /** Timing status; "overdue" matches OVERDUE on the list once allowance + grace has run out. */
 function timingLine(o: Observation): TemplateResult {
@@ -175,6 +209,7 @@ export function recordView(params: Record<string, string>, app: App): View {
         ${page(html`
           <a href=${urls.get(s.image)} target="_blank" rel="noopener"><img src=${urls.get(s.image)} alt="Evidence image" class="w-full rounded-md border border-neutral-200 bg-black" /></a>
           <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome, s)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
+          ${lookalikeCard(s, observation?.firstScanId === s.id ? timeline.filter((t) => observation?.linkedScanIds?.includes(t.id)) : [])}
           ${draft === null
             ? html`<button type="button" class="btn-secondary mt-3 w-full" @click=${() => { draft = s.plate; draftError = ''; app.update(); }}>${icon('edit')} Edit plate</button>`
             : html`<form class="card mt-3" @submit=${async (event: Event) => { event.preventDefault(); await saveDraft(); }}>
@@ -217,9 +252,9 @@ export function recordView(params: Record<string, string>, app: App): View {
                       <a href="#/record/${t.id}" class="flex items-center gap-3 rounded-md p-2 ${t.id === s.id ? 'bg-surface-sunken' : ''}">
                         <img src=${urls.get(t.thumb)} alt="" class="h-12 w-16 rounded-md object-cover" />
                         <div class="min-w-0 flex-1 text-sm">
-                          <p class="font-semibold">Scan ${i + 1} · <span class="font-plate">${formatClock(t.meta.capturedAt)}</span></p>
+                          <p class="font-semibold">Scan ${i + 1} · <span class="font-plate">${formatClock(t.meta.capturedAt)}</span> · <span class="font-plate">${t.plate}</span></p>
                           <p class="text-xs text-neutral-600">${i === 0 ? 'First sighting' : `+${formatDuration(t.meta.capturedAt - observation!.startedAt)} after scan 1`}</p>
-                          <div class="mt-1 flex flex-wrap gap-1">${outcomeChip(t.outcome, t)}</div>
+                          <div class="mt-1 flex flex-wrap gap-1">${outcomeChip(t.outcome, t)}${sameVehicleLink(t.lookalikes) ? lookalikeChip() : nothing}</div>
                         </div>
                       </a>
                     </li>`,

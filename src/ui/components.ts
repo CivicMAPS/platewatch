@@ -3,6 +3,7 @@ import {
   Activity,
   Archive,
   ArrowLeft,
+  ArrowLeftRight,
   Camera,
   Car,
   Check,
@@ -41,6 +42,7 @@ import type { ListType, RiskLevel } from '../lib/types';
 
 const ICONS = {
   back: ArrowLeft,
+  link: ArrowLeftRight,
   plus: Plus,
   search: Search,
   camera: Camera,

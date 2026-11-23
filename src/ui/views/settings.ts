@@ -256,6 +256,14 @@ export function settingsView(_p: Record<string, string>, app: App): View {
             <p class="text-xs text-neutral-500">Diagnostics include number plates, OCR text and locations. They stay on this device unless you export them.</p>
           </section>
 
+          <section class="card mt-4 grid gap-3" data-testid="officer">
+            <h2 class="section-title">Officer</h2>
+            <label class="block"><span class="field-label">Officer number</span>
+              <input class="field font-plate" data-testid="officer-number" inputmode="numeric" maxlength="12" autocomplete="off" .value=${s.officerNumber}
+                @change=${(e: Event) => void app.updateSettings({ officerNumber: (e.target as HTMLInputElement).value.trim() })} /></label>
+            <p class="text-xs text-neutral-600">Required to acknowledge hot-list alerts. Development build only: inside EnforcementMAPS the officer number comes from your sign-in.</p>
+          </section>
+
           <section class="card mt-4 grid gap-3" data-testid="list-rules">
             <h2 class="section-title">List rules</h2>
             ${policyContext().mode === 'development'

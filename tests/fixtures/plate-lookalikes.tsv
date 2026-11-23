@@ -1,0 +1,20 @@
+# Shared look-alike vectors (WF-S28): run by tests/plate.test.ts and PlateRulesTest.java.
+# Columns (tab-separated): plate A, plate B, expected: possible = OCR look-alike; none = not; exact = same plate after removing spaces and case.
+# 1UP6YF / 1UR6YF / 1UD6YF and the other plates are real readings from tests/fixtures/plate-readings.tsv.
+1UP6YF	1UR6YF	possible
+1UD6YF	1UR6YF	none
+1UD6YF	1UP6YF	none
+DA8B99	DA8899	possible
+DABB99	DA8899	possible
+2AF402	ZAF402	possible
+2FE707	2FE70T	possible
+DT5512	DTS512	possible
+ABO123	AB0123	possible
+1XA5PL	1X45PL	possible
+2FF2NR	2EF2NR	possible
+ABC123	ABC789	none
+1UR6YF	2FE70T	none
+MNO123	NNO123	possible
+ZAF402	1XA5PL	none
+ABC1OO	ABC100	possible
+abc 123	ABC123	exact

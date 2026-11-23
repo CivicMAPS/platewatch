@@ -402,7 +402,27 @@ async function main() {
   await page.waitForSelector('[data-testid=hot-alert]', { timeout: 20000 });
   const hotText = await page.$eval('[data-testid=hot-alert]', (el) => el.innerText);
   if (!/Extreme risk/i.test(hotText) || !/Blue Toyota/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
-  log('hot-list match raises officer-safety alert (risk, make, type, colour)');
+  // WF-S29: Next scan stays disabled until the officer acknowledges; needs an officer number.
+  await page.waitForSelector('[data-testid=hot-ack-officer-required]', { visible: true });
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before acknowledging');
+  // Set the officer number (development build), scan the plate again and acknowledge.
+  await page.goto(`${ORIGIN}/#/settings`);
+  await type('[data-testid=officer-number]', '4471');
+  await page.$eval('[data-testid=officer-number]', (el) => el.dispatchEvent(new Event('change')));
+  await sleep(300);
+  await page.goto(timedUrl.replace('#/list/', '#/scan/'));
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 });
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'BAD999');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=hot-acknowledge]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=hot-acknowledge]');
+  await page.waitForSelector('[data-testid=hot-ack-queued]', { visible: true });
+  await waitText('4471');
+  await shot('hot-acknowledged');
+  if (await page.$eval('[data-testid=next-scan]', (b) => b.disabled)) throw new Error('Next scan still disabled after acknowledging');
+  log('hot-list match raises officer-safety alert; Next scan blocked until acknowledged (time, GPS, officer 4471; soft Code 1 queued)');
   await shot('hot-alert');
 
   // Permit holder on a linked allow list: recorded, green "Permit valid", and still valid when

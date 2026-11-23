@@ -287,8 +287,29 @@ export type ScanOutcome =
   | 'permit_valid' // officer confirmed a permit exempts the vehicle here — sighting recorded, no allowance clock
   | 'flag_confirmed'; // known disability / emergency vehicle confirmed on check — recorded, no allowance clock
 
+/** Where a look-alike candidate came from (WF-S28). */
+export type LookalikeSource = 'timed' | 'hot' | 'allow';
+/** The officer's choice on a look-alike candidate (WF-S28). */
+export type LookalikeChoice = 'same' | 'different' | 'hot_confirmed' | 'not_hot' | 'permit_plate' | 'not_permit';
+
+/**
+ * A look-alike candidate shown to the officer and what they chose (WF-S28). Every candidate shown
+ * is kept (OQ28-7); `readAs` is always the plate as read on this scan.
+ */
+export interface LookalikeLink {
+  readAs: string;
+  candidatePlate: string;
+  source: LookalikeSource;
+  /** Timed: observation id; hot: hot-list entry id; allow: allow entry id. */
+  candidateId: string;
+  choice: LookalikeChoice;
+  decidedAt: number;
+}
+
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
+  /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
+  lookalikes?: LookalikeLink[];
   /** Overstay alert dismissed by the officer after checking the vehicle. */
   alertDismissal?: { reason: DismissReason; at: number };
   /** Known-vehicle check on this scan: confirmed (tag kept) or not confirmed (tag removed). */
@@ -395,6 +416,8 @@ export interface Observation {
   scanCount: number;
   /** Set when status is `dismissed`. */
   dismissReason?: DismissReason;
+  /** Scans that joined this timing through a look-alike link ("Same vehicle", WF-S28). */
+  linkedScanIds?: string[];
   /**
    * Disability permit displayed: the allowance is twice the signed time (timed and paid + timed
    * spaces). `limitMinutes` / `allowanceEndsAt` hold the doubled values; this keeps the signed one.
@@ -419,6 +442,11 @@ export interface Settings {
   listZoneFilter: string | null;
   /** CivicMAPS display theme: light civic surfaces, or the design system's low-light dark theme. */
   theme: 'light' | 'dark';
+  /**
+   * Officer number for hot-list acknowledgements and payment checks (WF-S29 OQ29-4). Development
+   * build only: EnforcementMAPS supplies it from the operating context. Empty until set.
+   */
+  officerNumber: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -432,4 +460,49 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnostics: true,
   listZoneFilter: null,
   theme: 'light',
+  officerNumber: '',
 };
+
+/* ─────────────────────────── Hot-list entry log (WF-S29) ─────────────────────────── */
+
+/** Who a soft Code 1 (hot-list sighting) alert goes to in CommandMAPS (OQ29-6). */
+export type HotAlertRecipient = 'dispatch' | 'compliance_coordinator';
+
+/**
+ * One event on a hot-list entry's log, saved on the device (sightings are the `hot_sighting`
+ * scan records themselves):
+ * - `acknowledged`: the officer acknowledged a hot-list alert (date, time, location, officer
+ *   number) — raises a soft Code 1 with dispatch and the compliance coordinator (queued; sent only
+ *   by the EnforcementMAPS build).
+ * - `lookalike_not_matched`: the officer decided a look-alike was not the hot-list vehicle (WF-S28 28e.5).
+ */
+export interface HotListEvent {
+  id: string;
+  kind: 'acknowledged' | 'lookalike_not_matched';
+  /** Hot-list entry plate. */
+  plate: string;
+  key: string;
+  hotListId: string;
+  hotListEntryId: string;
+  /** The scan this event belongs to (the hot_sighting record for an acknowledgement). */
+  scanId: string | null;
+  /** Epoch ms (device clock). */
+  at: number;
+  /** ISO 8601 with offset, e.g. 2026-11-21T10:41:07.402+11:00. */
+  atLocal: string;
+  officerNumber: string;
+  location: { lat: number; lng: number; accuracyM: number } | null;
+  device: string;
+  /** Plate as read, for a look-alike decision. */
+  readAs?: string;
+  /** Soft Code 1 notification for an acknowledgement (OQ29-2). */
+  notification?: {
+    severity: 'soft_code1';
+    recipients: HotAlertRecipient[];
+    /** `queued` until EnforcementMAPS accepts it; the development build has no connection. */
+    status: 'queued' | 'sent';
+    attempts: number;
+    lastAttemptAt?: number;
+    sentAt?: number;
+  };
+}

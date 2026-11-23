@@ -4,6 +4,7 @@ import {
   type AllowList,
   type DismissedCapture,
   type HotList,
+  type HotListEvent,
   type Observation,
   type PlateFlag,
   type PlateList,
@@ -13,7 +14,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -32,6 +33,8 @@ interface PlateWatchDB extends DBSchema {
   dismissed: { key: string; value: DismissedCapture; indexes: { 'by-created': number } };
   /** Version 3: plate record tags (known disability / emergency vehicles), keyed by plate key. */
   flags: { key: string; value: PlateFlag };
+  /** Version 4: hot-list entry log events (acknowledgements, look-alike decisions), WF-S29. */
+  hotEvents: { key: string; value: HotListEvent; indexes: { 'by-entry': string; 'by-at': number } };
 }
 
 let dbPromise: Promise<IDBPDatabase<PlateWatchDB>> | null = null;
@@ -56,6 +59,11 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
       }
       if (oldVersion < 3) {
         database.createObjectStore('flags', { keyPath: 'key' });
+      }
+      if (oldVersion < 4) {
+        const ev = database.createObjectStore('hotEvents', { keyPath: 'id' });
+        ev.createIndex('by-entry', 'hotListEntryId');
+        ev.createIndex('by-at', 'at');
       }
     },
     blocked() {
@@ -291,6 +299,20 @@ export async function dismissOverstay(args: { scan: ScanRecord; observation: Obs
   await tx.objectStore('observations').put(args.observation);
   if (args.flag) await tx.objectStore('flags').put(args.flag);
   await tx.done;
+}
+
+/* ───────────────────────────── Hot-list entry log ───────────────────────────── */
+
+export async function putHotEvent(e: HotListEvent): Promise<void> {
+  await (await db()).put('hotEvents', e);
+}
+
+export async function getHotEventsForEntry(entryId: string): Promise<HotListEvent[]> {
+  return (await (await db()).getAllFromIndex('hotEvents', 'by-entry', entryId)).sort((a, b) => b.at - a.at);
+}
+
+export async function getAllHotEvents(): Promise<HotListEvent[]> {
+  return (await db()).getAll('hotEvents');
 }
 
 /* ───────────────────────────── Backup ───────────────────────────── */

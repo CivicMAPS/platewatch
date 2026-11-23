@@ -16,6 +16,7 @@ import {
   putFlag,
   getAllowLists,
   getHotLists,
+  putHotEvent,
   getList,
   getScan,
   putObservation,
@@ -35,7 +36,10 @@ import { formatClock, formatDateTime, formatDuration, formatIsoDate, formatMinut
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
-import type { DismissReason, GeoFix, TimedRestriction } from '../../lib/types';
+import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, TimedRestriction } from '../../lib/types';
+import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
+import { officerNumber } from '../../lib/host';
+import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
   RISK_LEVEL_LABELS,
   RISK_TAG_LABELS,
@@ -85,14 +89,18 @@ interface ResultState {
   possibleFirsts: Map<string, ScanRecord>;
   /** Set once the officer dismissed this scan's overstay alert. */
   dismissedReason?: DismissReason;
+  /** hot_sighting record per hot-list entry hit (WF-S29: the acknowledgement references it). */
+  hotScanIds?: Record<string, string>;
+  /** Hot-list acknowledgements for this scan; Next scan stays disabled until present (29a.5). */
+  hotAcks?: HotListEvent[];
 }
 
-/** Replace the timing decision behind any permit / known-vehicle pop-ups. */
-function withTiming(d: Decision, f: (inner: Decision) => Decision): Decision {
-  if (d.kind === 'timed_permit' || d.kind === 'timed_flag_check') return { ...d, then: withTiming(d.then, f) };
-  return f(d);
-}
 
+
+/** A capture's GPS fix as stored on hot-list events and payment checks. */
+function fixOf(loc: GeoFix | null | undefined): { lat: number; lng: number; accuracyM: number } | null {
+  return loc ? { lat: loc.latitude, lng: loc.longitude, accuracyM: loc.accuracy } : null;
+}
 
 /** The restriction a timed decision is about: the one in force for a new sighting, or the observation's. */
 function restrictionFor(l: TimedList, d: Decision): TimedRestriction | undefined {
@@ -201,6 +209,19 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   let suggestions: string[] = [];
   let dismissed = '';
+  /* Look-alikes (WF-S28), per capture. Every candidate shown and the officer's choice is logged
+     on each record the capture produces (OQ28-7). */
+  let lookalikes: LookalikeLink[] = [];
+  /** Hot-list entries the officer confirmed as this vehicle / decided are not. */
+  const hotConfirmed = new Set<string>();
+  const hotDeclined = new Set<string>();
+  /** Permit look-alike decided for this capture (plate confirmed or not a match). */
+  let permitDecided = false;
+  /** Open look-alike prompt before anything is recorded: hot list first, then permit. */
+  let lookalikePrompt: { kind: 'hot'; items: HotLookalike[] } | { kind: 'permit'; items: PermitLookalike[] } | null = null;
+  /** Plates held, for the confirm-screen hint (28a); loaded once per capture. */
+  let hintSources: { hotLists: HotList[]; allowLists: AllowList[]; observations: Observation[] } | null = null;
+  let hintLoading = false;
   let editing = false;
   /** Blocking problem on the confirm screen: a persistent banner, not a toast (assessment D6). */
   let confirmError: { title: string; body?: string; field?: 'plate' } | null = null;
@@ -278,6 +299,12 @@ export function scanView(params: Record<string, string>, app: App): View {
     fromPatrol = false;
     suggestions = [];
     dismissed = '';
+    lookalikes = [];
+    hotConfirmed.clear();
+    hotDeclined.clear();
+    permitDecided = false;
+    lookalikePrompt = null;
+    hintSources = null;
     editing = false;
     confirmError = null;
     pending = null;
@@ -438,6 +465,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       thumb: ev.thumb,
       sha256: ev.sha256,
       createdAt: Date.now(),
+      ...(lookalikes.length ? { lookalikes: [...lookalikes] } : {}),
       ...extra,
     };
   };
@@ -446,11 +474,14 @@ export function scanView(params: Record<string, string>, app: App): View {
     plate: string,
     d: Extract<Decision, { kind: 'timed_resighting' }>,
     extra: Partial<ScanRecord> = {},
+    /** Joined through a look-alike link: the timing records the scan (WF-S28). */
+    linked = false,
   ): Promise<{ saved: ScanRecord; comparison: Comparison | null }> => {
     const obs = d.observation;
     const saved = await makeRecord(plate, obs.listId, d.overstay ? 'overstay' : 'within_allowance', obs.id, extra);
     const updated: Observation = {
       ...obs,
+      ...(linked ? { linkedScanIds: [...(obs.linkedScanIds ?? []), saved.id] } : {}),
       lastScanId: saved.id,
       scanCount: obs.scanCount + 1,
       overstayFlaggedAt: d.overstay ? (obs.overstayFlaggedAt ?? saved.meta.capturedAt) : obs.overstayFlaggedAt,
@@ -555,22 +586,38 @@ export function scanView(params: Record<string, string>, app: App): View {
       // Evaluate against the shutter time, not the moment the officer pressed "Check".
       const at = pending.meta.capturedAt;
       const res = evaluate({ at, plate, list: l, hotLists, allowLists, observations, flags });
-      const core = timingDecision(res.decision);
-      const candidates = [...hotLists, ...allowLists.filter(a => l.type === 'allow' ? a.id === l.id : l.type === 'timed' && l.allowListIds.includes(a.id))]
-        .flatMap(source => source.entries.filter(entry => comparePlates(plate, entry.plate) === 'possible').map(entry => entry.plate + ' · ' + source.name));
-      if (core.kind === 'timed_possible') candidates.push(...core.candidates.map(o => o.plate + ' · ' + l.name));
-      if (candidates.length && dismissed !== plate) {
-        suggestions = [...new Set(candidates)];
+      /* Look-alikes routed by source (WF-S28): hot list → permit → timed. */
+      // 1. Hot list: never dropped; the officer confirms or rejects each candidate first.
+      for (const h of res.hotHits) if (h.strength === 'possible' && hotConfirmed.has(h.entry.id)) h.strength = 'exact';
+      res.hotHits = res.hotHits.filter((h) => h.strength === 'exact' || !hotDeclined.has(h.entry.id));
+      const openHot = hotLookalikes(plate, hotLists).filter((x) => !hotConfirmed.has(x.entry.id) && !hotDeclined.has(x.entry.id));
+      if (openHot.length) {
+        lookalikePrompt = { kind: 'hot', items: openHot };
+        phase = 'confirm';
+        feedback('alarm', settings());
+        app.update();
+        return;
+      }
+      if (l.type === 'hot' && res.decision.kind === 'hot_match' && !res.hotHits.some((h) => h.list.id === l.id)) res.decision = { kind: 'hot_none' };
+      // 2. Permit: a similar permit plate never exempts; the officer checks the displayed permit.
+      const openPermit = l.type === 'timed' && !permitDecided ? permitLookalikes(plate, l, allowLists) : [];
+      if (openPermit.length) {
+        lookalikePrompt = { kind: 'permit', items: openPermit };
+        phase = 'confirm';
+        feedback('warn', settings());
+        app.update();
+        return;
+      }
+      // 3. Timed: the engine returns timed_possible → "Possible earlier sighting" (no sheet first).
+      // The near-match sheet (26e) stays only for a selected allow list.
+      const allowNear = l.type === 'allow' ? l.entries.filter((e) => comparePlates(plate, e.plate) === 'possible').map((e) => `${e.plate} · ${l.name}`) : [];
+      if (allowNear.length && dismissed !== plate) {
+        suggestions = [...new Set(allowNear)];
         phase = 'confirm';
         app.update();
         return;
       }
-      if (dismissed === plate) {
-        res.hotHits = res.hotHits.filter(h => h.strength === 'exact');
-        res.decision = withTiming(res.decision, (x) => (x.kind === 'timed_possible' ? { kind: 'timed_new', instance: x.instance } : x));
-        if (res.decision.kind === 'hot_match' && !res.hotHits.some(h => h.list.id === l.id)) res.decision = {kind:'hot_none'};
-        if (res.decision.kind === 'allow_none') res.decision.possible = [];
-      }
+      if (dismissed === plate && res.decision.kind === 'allow_none') res.decision.possible = [];
       await expireObservations(res.expireObservationIds, at);
       // Payment to check, and to keep with the evidence: the numbers tied to the restriction in force.
       if (l.type === 'timed' && l.payment) pending.meta.payment = paymentFor(l.payment, restrictionFor(l, timingDecision(res.decision)));
@@ -580,9 +627,11 @@ export function scanView(params: Record<string, string>, app: App): View {
       let possibleFirsts = new Map<string, ScanRecord>();
 
       // Officer-safety evidence: record exact hot-list sightings.
+      const hotScanIds: Record<string, string> = {};
       for (const hit of res.hotHits.filter((h) => h.strength === 'exact')) {
         const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null);
         await saveScan(rec);
+        hotScanIds[hit.entry.id] = rec.id;
         if (hit.list.id === l.id) saved = rec;
       }
 
@@ -594,7 +643,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       }
       dismissOpen = false;
 
-      result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts };
+      result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts, hotScanIds };
       phase = 'result';
       const s = settings();
       if (res.hotHits.length) feedback('alarm', s);
@@ -729,7 +778,11 @@ export function scanView(params: Record<string, string>, app: App): View {
       return { ...r, decision, saved: out.scan, comparison, dismissedReason: reason };
     });
 
-  /** Officer resolved a fuzzy re-sighting candidate. */
+  /**
+   * "Possible earlier sighting" (WF-S28 28b/28c): the officer links the scan to one running timing
+   * ("Same vehicle") or records a new one ("Different vehicle"). Every candidate shown is logged
+   * with the choice; the scan keeps the plate as read and the timing records the linked scan.
+   */
   const resolvePossible = async (obs: Observation | null) => {
     if (!result || !list || list.type !== 'timed' || result.decision.kind !== 'timed_possible' || !pending) return;
     const d = result.decision;
@@ -738,14 +791,16 @@ export function scanView(params: Record<string, string>, app: App): View {
     app.update();
     try {
       const at = pending.meta.capturedAt;
+      const now = Date.now();
+      for (const o of d.candidates) lookalikes.push(logChoice(result.plate, { source: 'timed', observation: o }, obs?.id === o.id ? 'same' : 'different', now));
       if (obs) {
         const r = resighting(obs, at);
-        const { saved, comparison } = await recordResighting(result.plate, r);
+        const { saved, comparison } = await recordResighting(result.plate, r, {}, true);
         result = { ...result, decision: r, saved, comparison };
         feedback(r.overstay ? 'warn' : 'info', settings());
       } else {
         const saved = await recordNew(result.plate, l, at, d.instance, {}, d.concession);
-        result = { ...result, decision: { kind: 'timed_new', instance: d.instance }, saved };
+        result = { ...result, decision: { kind: 'timed_new', instance: d.instance, concession: d.concession }, saved };
         feedback('ok', settings());
       }
       phase = 'result';
@@ -754,6 +809,50 @@ export function scanView(params: Record<string, string>, app: App): View {
       phase = 'result';
     }
     app.update();
+  };
+
+  /** Hot-list look-alike (28e): this is the hot-list vehicle — recorded as a hot-list sighting. */
+  const confirmHotLookalike = (x: HotLookalike) => {
+    if (!pending) return;
+    hotConfirmed.add(x.entry.id);
+    lookalikes.push(logChoice(normalisePlate(plateInput), x, 'hot_confirmed'));
+    lookalikePrompt = null;
+    void check();
+  };
+
+  /** Hot-list look-alike (28e): not the hot-list vehicle — logged on the entry log, check continues as read. */
+  const declineHotLookalike = async (x: HotLookalike) => {
+    if (!pending) return;
+    const readAs = normalisePlate(plateInput);
+    hotDeclined.add(x.entry.id);
+    lookalikes.push(logChoice(readAs, x, 'not_hot'));
+    const at = Date.now();
+    await putHotEvent({
+      id: uid(), kind: 'lookalike_not_matched', plate: x.entry.plate, key: x.entry.key, hotListId: x.list.id, hotListEntryId: x.entry.id,
+      scanId: null, at, atLocal: toLocalIso(at), officerNumber: settings().officerNumber, location: fixOf(pending.meta.location), device: navigator.userAgent, readAs,
+    }).catch(() => undefined);
+    lookalikePrompt = lookalikePrompt?.kind === 'hot' && lookalikePrompt.items.length > 1 ? { kind: 'hot', items: lookalikePrompt.items.filter((y) => y !== x) } : null;
+    if (!lookalikePrompt) void check();
+    else app.update();
+  };
+
+  /** Permit look-alike (28f): the displayed permit shows the permit plate — re-check as that plate. */
+  const confirmPermitPlate = (x: PermitLookalike) => {
+    lookalikes.push(logChoice(normalisePlate(plateInput), x, 'permit_plate'));
+    permitDecided = true;
+    lookalikePrompt = null;
+    plateInput = x.entry.plate;
+    void check();
+  };
+
+  /** Permit look-alike (28f): not a match — check as read. */
+  const declinePermitLookalike = () => {
+    if (lookalikePrompt?.kind !== 'permit') return;
+    const readAs = normalisePlate(plateInput);
+    for (const x of lookalikePrompt.items) lookalikes.push(logChoice(readAs, x, 'not_permit'));
+    permitDecided = true;
+    lookalikePrompt = null;
+    void check();
   };
 
   /** Vehicle has moved since the first sighting: close the old chalk and restart from this scan. */
@@ -928,6 +1027,103 @@ export function scanView(params: Record<string, string>, app: App): View {
     </dl>`;
   };
 
+  /** Load the plates held, once per capture, for the look-alike hint (28a). */
+  const loadHintSources = async () => {
+    if (hintSources || hintLoading || !list) return;
+    hintLoading = true;
+    try {
+      const [hotLists, allowLists, observations] = await Promise.all([getHotLists(), getAllowLists(), list.type === 'timed' ? getActiveObservations(list.id) : Promise.resolve([] as Observation[])]);
+      hintSources = { hotLists, allowLists, observations };
+    } finally {
+      hintLoading = false;
+      app.update();
+    }
+  };
+
+  /**
+   * 28a: amber strip while the plate field is a look-alike of a plate held. Does not block Check.
+   * A hot-list candidate is named only as "a hot-list plate" until Check (OQ28-8).
+   */
+  const lookalikeHint = (): TemplateResult | typeof nothing => {
+    if (!hintSources) {
+      void loadHintSources();
+      return nothing;
+    }
+    const plate = normalisePlate(plateInput);
+    const x = firstLookalike(plate, { ...hintSources, list: list?.type === 'timed' ? list : null });
+    if (!x) return nothing;
+    const text =
+      x.source === 'hot'
+        ? html`Look-alike of a hot-list plate — Check will ask you to verify`
+        : x.source === 'allow'
+          ? html`Look-alike of permit plate <span class="font-plate">${x.entry.plate}</span> · ${x.list.name}`
+          : html`Look-alike of <span class="font-plate">${x.observation.plate}</span> — timed on this segment · since <span class="font-plate">${formatClock(x.observation.startedAt)}</span>`;
+    return html`<div class="mt-4 flex items-start gap-2 rounded-md border-2 border-alert bg-alert-bg p-3 text-sm text-neutral-900" role="status" data-testid="lookalike-hint">
+      <span class="text-alert-strong">${icon('question', 'h-5 w-5')}</span><p>${text}</p>
+    </div>`;
+  };
+
+  /** 28e: hot-list look-alike in verify form. The officer must choose; it is never dropped. */
+  const hotLookalikeSheet = (items: HotLookalike[]) => {
+    const read = normalisePlate(plateInput);
+    return html`<div class="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" role="alertdialog" aria-modal="true" aria-labelledby="hot-verify-title" data-testid="hot-lookalike">
+      <section class="max-h-[92vh] w-full max-w-md overflow-auto rounded-t-xl border-4 border-alert bg-surface pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-xl sm:rounded-xl sm:pb-4">
+        <div class="flex items-center gap-3 bg-alert px-4 py-3 text-alert-text">
+          ${icon('question', 'h-8 w-8', 1.75)}
+          <div><p class="text-xs font-bold tracking-[0.08em] uppercase">Officer safety · verify plate</p><p id="hot-verify-title" class="text-lg font-bold">Possible hot list match</p></div>
+        </div>
+        <div class="p-4">
+          <p class="text-sm text-neutral-800">Check the plate on the vehicle from a safe position. A look-alike is never treated as a match until you choose.</p>
+          ${items.map(
+            (x) => html`<div class="mt-3 rounded-md border border-alert-border bg-alert-bg p-3" data-testid="hot-lookalike-item">
+              <div class="grid grid-cols-2 gap-3">
+                <div><p class="text-xs font-semibold text-neutral-700">This scan</p>
+                  ${cropUrl || frameUrl ? html`<img src=${cropUrl || frameUrl} alt="This scan" class="mt-1 aspect-[3/1] w-full rounded-md bg-black object-contain" />` : nothing}
+                  <div class="mt-1">${plateBadge(read, 'md')}</div></div>
+                <div><p class="text-xs font-semibold text-neutral-700">Hot list</p>
+                  <p class="mt-1 flex aspect-[3/1] items-center justify-center rounded-md border border-dashed border-neutral-300 text-xs text-neutral-600">No image held</p>
+                  <div class="mt-1">${plateBadge(x.entry.plate, 'md')}</div></div>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">${riskPill(x.entry.riskLevel, RISK_LEVEL_LABELS[x.entry.riskLevel])}
+                <span class="text-sm font-semibold text-neutral-900">${[x.entry.colour, x.entry.make, x.entry.model, x.entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</span></div>
+              <div class="mt-3 grid gap-2">
+                <button type="button" class="btn-primary" data-testid="hot-lookalike-same" @click=${() => confirmHotLookalike(x)}>${icon('shield')} Same vehicle — hot list sighting</button>
+                <button type="button" class="btn-secondary" data-testid="hot-lookalike-not" @click=${() => void declineHotLookalike(x)}>Not the hot-list vehicle</button>
+              </div>
+            </div>`,
+          )}
+        </div>
+      </section>
+    </div>`;
+  };
+
+  /** 28f: a similar permit plate never exempts; the officer checks the vehicle's displayed permit. */
+  const permitLookalikeSheet = (items: PermitLookalike[]) =>
+    decisionSheet({
+      testid: 'permit-lookalike',
+      pill: statusPill('verify', 'Similar permit plate'),
+      title: 'Check the vehicle’s displayed permit',
+      body: html`<p>The plate as read is similar to a permit plate. A similar plate never exempts: only the permit plate itself can.</p>
+        <ul class="mt-3 grid gap-3">
+          ${items.map(
+            (x) => html`<li class="rounded-md border border-neutral-200 bg-surface-sunken p-3" data-testid="permit-lookalike-item">
+              <div class="grid grid-cols-2 gap-3">
+                <div><p class="text-xs font-semibold text-neutral-700">This capture</p><div class="mt-1">${plateBadge(normalisePlate(plateInput), 'md')}</div></div>
+                <div><p class="text-xs font-semibold text-neutral-700">Permit held</p><div class="mt-1">${plateBadge(x.entry.plate, 'md')}</div></div>
+              </div>
+              <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                <dt class="text-neutral-600">List</dt><dd>${x.list.name}</dd>
+                ${x.entry.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${x.entry.permitNo}</dd>` : nothing}
+                ${x.entry.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${x.entry.vehicle}</dd>` : nothing}
+                ${x.entry.validTo ? html`<dt class="text-neutral-600">Valid to</dt><dd>${formatIsoDate(x.entry.validTo)}</dd>` : nothing}
+              </dl>
+              <button type="button" class="btn-primary mt-3 w-full" data-testid="permit-lookalike-confirm" @click=${() => confirmPermitPlate(x)}>${icon('edit')} Permit plate confirmed — edit plate</button>
+            </li>`,
+          )}
+        </ul>`,
+      actions: html`<button type="button" class="btn-secondary" data-testid="permit-lookalike-not" @click=${declinePermitLookalike}>Not a match — check as read</button>`,
+    });
+
   const confirmPanel = (): TemplateResult => {
     const p = pending!;
     const busy = phase === 'saving';
@@ -952,7 +1148,10 @@ export function scanView(params: Record<string, string>, app: App): View {
             onNotMatch: () => { suggestions = []; dismissed = normalisePlate(plateInput); void check(); },
           })
         : nothing}
+      ${lookalikePrompt?.kind === 'hot' ? hotLookalikeSheet(lookalikePrompt.items) : nothing}
+      ${lookalikePrompt?.kind === 'permit' ? permitLookalikeSheet(lookalikePrompt.items) : nothing}
       ${confirmError ? html`<div class="mt-4">${banner('alert', confirmError.title, confirmError.body, 'confirm-error')}</div>` : nothing}
+      ${fromPatrol ? nothing : lookalikeHint()}
       <form class="card mt-4" @submit=${(e: Event) => { e.preventDefault(); void check(); }}>
         <label for="plate" class="field-label">Number plate (editable)</label>
         <input ${ref(plateInputRef)} id="plate" name="plate" data-testid="plate-input"
@@ -1019,6 +1218,44 @@ export function scanView(params: Record<string, string>, app: App): View {
     <p class="mt-1 font-plate text-sm text-neutral-900">${formatClock(s.meta.capturedAt)}</p>
     <p class="text-xs text-neutral-600">${s.meta.location ? `±${Math.round(s.meta.location.accuracy)} m` : 'no GPS'}</p>
   </figure>`;
+
+  /**
+   * WF-S29: Acknowledge (29a), Acknowledged (29b) and Queued (29c). Acknowledging is required before
+   * Next scan; it raises a soft Code 1 with dispatch and the compliance coordinator, who expect a
+   * radio response from the officer.
+   */
+  const hotAckPanel = (r: ResultState): TemplateResult => {
+    const acks = r.hotAcks;
+    const logLinks = nothing;
+    if (!acks?.length) {
+      const officer = officerNumber(settings().officerNumber);
+      return html`<section class="card border-2 border-alert" data-testid="hot-ack">
+        <p class="text-sm text-neutral-800">Acknowledging records the time, your location and officer number on this plate’s hot-list entry log, and raises a <strong>soft Code 1</strong> with dispatch and the compliance coordinator. Expect a radio call.</p>
+        ${officer
+          ? html`<button type="button" class="btn-primary mt-3 w-full py-4 text-md" data-testid="hot-acknowledge" ?disabled=${phase === 'saving'} @click=${() => void acknowledgeHot()}>${icon('check')} Acknowledge</button>`
+          : html`<div class="mt-3">${banner('alert', 'Officer number required', html`Set it in <a class="link" href="#/settings">Settings → Officer</a> to acknowledge hot-list alerts.`, 'hot-ack-officer-required')}</div>`}
+      </section>`;
+    }
+    const a = acks[0]!;
+    const sent = acks.every((e) => e.notification?.status === 'sent');
+    const where = a.location ? html`<span class="font-plate">${a.location.lat.toFixed(5)}, ${a.location.lng.toFixed(5)} ±${Math.round(a.location.accuracyM)} m</span>` : 'no GPS fix';
+    return html`<section class="rounded-md border-2 ${sent ? 'border-active bg-active-bg' : 'border-pending bg-pending-bg'} p-4" data-testid=${sent ? 'hot-acked' : 'hot-ack-queued'}>
+      ${sent ? statusPill('permit_valid', 'Acknowledged') : statusPill('timing', 'Queued')}
+      <p class="mt-2 font-bold text-neutral-900">${sent ? 'Soft Code 1 raised' : 'Acknowledged · alert not sent yet'}</p>
+      <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+        <dt class="text-neutral-600">When</dt><dd class="font-plate">${formatStamp(a.at)}</dd>
+        <dt class="text-neutral-600">Where</dt><dd>${where}</dd>
+        <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber}</dd>
+        <dt class="text-neutral-600">Alerted</dt><dd>${sent ? 'Dispatch · compliance coordinator' : html`Dispatch · compliance coordinator — <span class="text-pending-strong">queued, attempt ${a.notification?.attempts ?? 0}</span>`}</dd>
+      </dl>
+      ${sent
+        ? nothing
+        : html`<p class="mt-2 text-xs text-neutral-700">${canSendAlerts() ? 'Saved on this device; it will be sent when the connection returns.' : 'Development build: alerts reach CommandMAPS only inside EnforcementMAPS. The acknowledgement is saved on this device.'}</p>
+            <button type="button" class="btn-secondary mt-3 w-full" data-testid="hot-retry" @click=${() => void retryHotAlerts()}>${icon('refresh')} Retry now</button>`}
+      <div class="mt-3">${banner('alert', sent ? 'Respond by radio' : 'Tell dispatch by radio', sent ? 'Dispatch will call you on the radio. Answer them; with no answer the soft Code 1 can be escalated to a Code 1.' : 'Until the alert is sent, dispatch and the compliance coordinator do not know about this sighting.', 'hot-radio')}</div>
+      ${logLinks}
+    </section>`;
+  };
 
   /** Re-sighting: within allowance = Pending blue (passive), overstay = amber (officer must act). */
   const comparisonPanel = (c: Comparison): TemplateResult => {
@@ -1117,25 +1354,37 @@ export function scanView(params: Record<string, string>, app: App): View {
       }
       case 'timed_resighting':
         return r.comparison ? comparisonPanel(r.comparison) : statusCard(d.overstay ? 'overstay' : 'within_allowance', 'Re-sighting', `Elapsed ${formatDuration(d.elapsedMs)}.`, 'result-resighting');
-      case 'timed_possible':
+      case 'timed_possible': {
+        // WF-S28 28b/28c: this scan and each candidate's scan 1 side by side, one row per candidate.
+        const here = cropUrl || frameUrl;
+        const n = d.candidates.length;
         return html`<section class="rounded-md border-2 ${TONE_PANEL.alert} p-4" data-testid="result-possible" data-tone="alert">
-          ${statusPill('verify')}
+          ${statusPill('verify', n > 1 ? `Verify · ${n} candidates` : 'Verify')}
           <p class="mt-2 text-lg font-bold text-neutral-900">Possible earlier sighting</p>
-          <p class="mt-1 text-sm text-neutral-800">${r.plate} is similar to a tracked plate. Compare the images and confirm.</p>
+          <p class="mt-1 text-sm text-neutral-800"><span class="font-plate">${r.plate}</span> looks like ${n > 1 ? 'plates' : 'a plate'} being timed here. Compare the plates and choose; nothing is recorded until you do.</p>
+          <figure class="mt-3">
+            <figcaption class="mb-1 text-xs font-semibold text-neutral-700">This scan</figcaption>
+            ${here ? html`<img src=${here} alt="This scan" class="aspect-[3/1] w-full rounded-md border border-neutral-200 bg-black object-contain" />` : nothing}
+            <div class="mt-1 flex items-center justify-between gap-2">${plateBadge(r.plate, 'md')}<span class="font-plate text-xs text-neutral-700">${pending ? formatClock(pending.meta.capturedAt) : ''}</span></div>
+          </figure>
           <ul class="mt-3 grid gap-3">
             ${d.candidates.map((o) => {
               const s = r.possibleFirsts.get(o.id);
-              return html`<li class="rounded-md border border-neutral-200 bg-surface p-3">
-                <div class="flex items-center gap-3">
-                  ${s ? html`<img src=${urls.get(s.thumb)} alt="" class="h-16 w-24 rounded-md object-cover" />` : nothing}
-                  <div>${plateBadge(o.plate, 'sm')}<p class="mt-1 text-xs text-neutral-700">First seen <span class="font-plate">${formatClock(o.startedAt)}</span></p></div>
+              return html`<li class="rounded-md border border-neutral-200 bg-surface p-3" data-testid="possible-candidate">
+                <p class="mb-1 text-xs font-semibold text-neutral-700">Scan 1 of timing</p>
+                ${s ? html`<img src=${urls.get(s.thumb)} alt="Scan 1 of ${o.plate}" class="aspect-[3/1] w-full rounded-md border border-neutral-200 bg-black object-contain" />` : nothing}
+                <div class="mt-1 flex flex-wrap items-center justify-between gap-2">
+                  ${plateBadge(o.plate, 'md')}
+                  <span class="text-xs text-neutral-700">First seen <span class="font-plate">${formatClock(o.startedAt)}</span> · ${formatDuration((pending?.meta.capturedAt ?? Date.now()) - o.startedAt)} ago</span>
                 </div>
-                <button type="button" class="btn-primary mt-3 w-full" @click=${() => void resolvePossible(o)}>Same vehicle</button>
+                <button type="button" class="btn-primary mt-3 w-full" data-testid="possible-same" @click=${() => void resolvePossible(o)}>${icon('check')} Same vehicle — link to this timing</button>
               </li>`;
             })}
           </ul>
-          <button type="button" class="btn-secondary mt-3 w-full" @click=${() => void resolvePossible(null)}>Different vehicle — record new</button>
+          <button type="button" class="btn-secondary mt-3 w-full" data-testid="possible-different" @click=${() => void resolvePossible(null)}>Different vehicle — record new</button>
+          <button type="button" class="btn-ghost mt-1 w-full" data-testid="possible-edit" @click=${editFromResult}>${icon('edit')} Edit plate</button>
         </section>`;
+      }
       case 'hot_match':
         return statusCard('hot_sighting', 'Sighting recorded', 'Evidence image with location and time saved to this hot list.', 'result-hot');
       case 'hot_none':
@@ -1173,19 +1422,21 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   const resultPanel = (): TemplateResult => {
     const r = result!;
-    return html`${header({ title: 'Result', subtitle: list?.name, back: () => app.navigate(`/list/${listId}`), actions: html`<span class="pr-2">${plateBadge(r.plate, 'md')}</span>` })}
+    return html`${header({ title: 'Result', subtitle: list?.name, back: mustAcknowledge(r) ? undefined : () => app.navigate(`/list/${listId}`), actions: html`<span class="pr-2">${plateBadge(r.plate, 'md')}</span>` })}
       <div class="mx-auto max-w-xl px-4 pt-4 pb-32">
       <div class="grid gap-4">
         ${r.hotHits.length ? hotAlert(r.hotHits) : nothing}
+        ${r.hotHits.some((h) => h.strength === 'exact') ? hotAckPanel(r) : nothing}
         ${r.dismissedReason ? dismissedBanner(r.dismissedReason) : nothing}
         ${decisionPanel(r)}
+        ${linkedNote(r)}
         ${r.dismissedReason ? nothing : paymentCard(r)}
         ${r.saved
           ? html`<p class="text-center text-xs text-neutral-600">Saved · SHA-256 <span class="font-plate">${r.saved.sha256.slice(0, 16)}…</span> · <a class="link" href="#/record/${r.saved.id}">view record</a></p>`
           : nothing}
       </div>
       <div class="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-surface px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-lg">
-        <button type="button" class="btn-primary mx-auto flex w-full max-w-xl py-4 text-md" data-testid="next-scan" ?disabled=${phase === 'saving'} @click=${resetToLive}>
+        <button type="button" class="btn-primary mx-auto flex w-full max-w-xl py-4 text-md" data-testid="next-scan" ?disabled=${phase === 'saving' || openDecision(r)} @click=${resetToLive}>
           ${icon('camera', 'h-6 w-6', 1.75)} Next scan
         </button>
       </div>
@@ -1193,6 +1444,75 @@ export function scanView(params: Record<string, string>, app: App): View {
       ${r.decision.kind === 'timed_permit' ? permitSheet(r.decision) : nothing}
       ${dismissOpen ? dismissSheet(r) : nothing}
     </div>`;
+  };
+
+  /** A decision the officer must make before moving on (WF-S28 28b.6, 28g.4). */
+  const openDecision = (r: ResultState): boolean =>
+    r.decision.kind === 'timed_possible' || r.decision.kind === 'timed_permit' || r.decision.kind === 'timed_flag_check' || mustAcknowledge(r);
+
+  /** A hot-list match not yet acknowledged (WF-S29 29a.5). */
+  const mustAcknowledge = (r: ResultState): boolean => r.hotHits.some((h) => h.strength === 'exact') && !r.hotAcks?.length;
+
+  /** 29a.4: acknowledge every hot-list hit on this scan; saved on the device, alert queued. */
+  const acknowledgeHot = async () => {
+    if (!result || !pending || phase === 'saving') return;
+    const officer = officerNumber(settings().officerNumber);
+    if (!officer) return;
+    phase = 'saving';
+    app.update();
+    try {
+      const at = Date.now();
+      const location = ackLocation(geo.bestRecent(at), pending.meta.location, at);
+      const r = result;
+      const events: HotListEvent[] = [];
+      for (const h of r.hotHits.filter((x) => x.strength === 'exact')) {
+        let e = acknowledgementEvent({ id: uid(), list: h.list, entry: h.entry, scanId: r.hotScanIds?.[h.entry.id] ?? null, at, officerNumber: officer, location, device: navigator.userAgent });
+        await putHotEvent(e); // saved first: never depends on the network
+        e = await trySendAlert(e);
+        await putHotEvent(e);
+        events.push(e);
+      }
+      result = { ...r, hotAcks: events };
+      feedback('ok', settings());
+    } catch (e) {
+      app.toast(`Acknowledge failed: ${(e as Error).message}`, 'error');
+    }
+    phase = 'result';
+    app.update();
+  };
+
+  /** 29c.2: retry a queued alert now. */
+  const retryHotAlerts = async () => {
+    if (!result?.hotAcks) return;
+    const next: HotListEvent[] = [];
+    for (const e of result.hotAcks) {
+      const sent = await trySendAlert(e);
+      await putHotEvent(sent);
+      next.push(sent);
+    }
+    result = { ...result, hotAcks: next };
+    if (!canSendAlerts()) app.toast('No CommandMAPS connection in this build. Tell dispatch by radio.', 'warn');
+    app.update();
+  };
+
+  /** "Edit plate" from a look-alike decision: back to the confirm screen with the plate field focused. */
+  const editFromResult = () => {
+    result = null;
+    lookalikes = [];
+    phase = 'confirm';
+    editing = true;
+    app.update();
+    requestAnimationFrame(() => plateInputRef.value?.focus());
+  };
+
+  /** "⇄ Linked look-alike" note on a result reached through "Same vehicle" (28d.3). */
+  const linkedNote = (r: ResultState): TemplateResult | typeof nothing => {
+    const link = sameVehicleLink(r.saved?.lookalikes);
+    if (!link) return nothing;
+    return html`<section class="rounded-md border-2 border-dashed border-neutral-400 bg-surface p-3 text-sm" data-testid="lookalike-link">
+      <p class="flex items-center gap-2 font-semibold text-neutral-900">${icon('link', 'h-4 w-4')} Linked look-alike</p>
+      <p class="mt-1 text-neutral-800"><span class="font-plate">${link.readAs}</span> read as <span class="font-plate">${link.candidatePlate}</span> · Same vehicle chosen <span class="font-plate">${formatClock(link.decidedAt)}</span> · plate kept as read</p>
+    </section>`;
   };
 
   const dismissedBanner = (reason: DismissReason) => {

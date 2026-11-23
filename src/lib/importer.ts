@@ -36,8 +36,10 @@ import {
   type TimedList,
   type TimedRestriction,
   type UntimedControl,
+  type VehicleDetails,
   type Weekday,
 } from './types';
+import { compactVehicle, vehicleOf } from './vehicle';
 
 /* ───────────────────────────── Results ───────────────────────────── */
 
@@ -132,19 +134,32 @@ export const CSV_TEMPLATES = {
   },
   allow: {
     fileName: 'platewatch-allow-list-template.csv',
-    header: 'list_name,plate,label,permit_no,valid_from,valid_to,vehicle,rpa,streets',
+    header: 'list_name,plate,label,permit_no,valid_from,valid_to,registration_type,make,type,colour,rpa,streets',
     example: [
-      'RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30,White Toyota Corolla,7,',
-      'RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026,Blue Mazda 3,7,',
-      'Street permits,STR001,Resident,S-310,2026-07-01,2027-06-30,Silver Kia Cerato,,Gladstone St;Smith St',
+      'RPA 7 residents,1AB2CD,Resident,P-1001,2026-07-01,2027-06-30,Standard,Toyota,Sedan,White,7,',
+      'RPA 7 residents,XYZ789,Visitor,V-2044,01/07/2026,31/12/2026,Standard,Mazda,Hatchback,Blue,7,',
+      'Street permits,STR001,Resident,S-310,2026-07-01,2027-06-30,Standard,Kia,Sedan,Silver,,Gladstone St;Smith St',
     ].join('\n'),
   },
   hot: {
     fileName: 'platewatch-hot-list-template.csv',
-    header: 'list_name,plate,risk_level,risks,make,model,body_type,colour,notes',
-    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,Toyota,Hilux,Ute,White,Approach with a second officer',
+    header: 'list_name,plate,risk_level,risks,registration_type,make,type,colour,notes',
+    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,Standard,Toyota,Ute,White,Approach with a second officer',
   },
 } as const;
+
+/**
+ * Vehicle details from a CSV row (registration_type, make, type, colour). Older columns still read:
+ * body_type → type, color → colour, and a free-text `vehicle` (older permit files) → make.
+ */
+function vehicleColumns(row: Record<string, string | undefined>): Partial<VehicleDetails> {
+  return {
+    registrationType: row.registration_type ?? '',
+    make: row.make || row.vehicle || '',
+    bodyType: row.type || row.body_type || '',
+    colour: row.colour || row.color || '',
+  };
+}
 
 export const templateCsv = (kind: keyof typeof CSV_TEMPLATES) => `${CSV_TEMPLATES[kind].header}\n${CSV_TEMPLATES[kind].example}\n`;
 
@@ -717,11 +732,10 @@ function allowFromCsv(file: string, table: string[][], out: ImportResult): void 
       continue;
     }
     const entry: AllowEntry = { id: uid(), plate, key: plateKey(plate), label: row.label ?? '', permitNo: row.permit_no ?? '', validFrom, validTo, addedAt: Date.now() };
-    // Permit details the council holds: vehicle description, residential area and/or streets.
-    const vehicle = (row.vehicle ?? '').trim();
+    // Permit details the council holds: vehicle details (infringement structure), area and/or streets.
+    Object.assign(entry, compactVehicle(vehicleColumns(row)));
     const rpa = (row.rpa ?? '').trim();
     const streets = (row.streets ?? '').split(/[;|]/).map((x) => x.trim()).filter(Boolean);
-    if (vehicle) entry.vehicle = vehicle;
     if (rpa) entry.rpa = rpa;
     if (streets.length) entry.streets = streets;
     const entries = lists.get(row.list_name).list.entries;
@@ -767,11 +781,9 @@ function hotFromCsv(file: string, table: string[][], out: ImportResult): void {
       key: plateKey(plate),
       risks: [...new Set(risks)],
       riskLevel: level,
-      make: row.make ?? '',
-      model: row.model ?? '',
-      bodyType: row.body_type ?? '',
-      colour: row.colour ?? row.color ?? '',
-      notes: row.notes ?? '',
+      ...vehicleOf(vehicleColumns(row)),
+      // Model is not part of the vehicle-details structure: an older file's model column goes to notes.
+      notes: [row.notes ?? '', row.model?.trim() ? `Model: ${row.model.trim()}` : ''].filter(Boolean).join(' · '),
       addedAt: Date.now(),
     };
     const entries = lists.get(row.list_name).list.entries;

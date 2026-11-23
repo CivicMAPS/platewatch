@@ -10,7 +10,9 @@ import { host } from './host';
 import { sameVehicleLink } from './lookalike';
 import { OFFENCE_LABEL, PAID_TO_GRACE_MINUTES, type OffenceOffer } from './offence';
 import { formatClock, formatDuration, toLocalIso } from './time';
-import type { InfringementRecord, LookalikeLink, Observation, PaymentCheck, ScanRecord, TimedList } from './types';
+import type { InfringementRecord, LookalikeLink, Observation, PaymentCheck, ScanRecord, TimedList, VehicleDetails } from './types';
+import { plateReentry } from './vehicle';
+import { normalisePlate } from './plate';
 
 export type InfringementHandoff = Record<string, unknown> & {
   schemaVersion: '1.0';
@@ -80,7 +82,12 @@ export function buildHandoff(args: {
   offer: OffenceOffer;
   officerNumber: string;
   device: string;
+  /** Vehicle details entered (or confirmed) by the officer at hand-off. */
+  vehicle: VehicleDetails;
+  /** Second entry of the licence plate; must match the first (plateReentry). */
+  plateSecondEntry: { plate: string; at: number };
 }): InfringementHandoff {
+  if (plateReentry(args.scan.plate, args.plateSecondEntry.plate) !== 'match') throw new Error('The licence plate entries do not match.');
   const { list: l, observation: o, scan, offer } = args;
   const first = args.firstScan && args.firstScan.id !== scan.id ? args.firstScan : undefined;
   const r = l.restrictions.find((x) => x.id === o.restrictionId);
@@ -119,6 +126,11 @@ export function buildHandoff(args: {
     },
     vehicle: {
       registration: scan.plate,
+      registrationType: args.vehicle.registrationType.trim(),
+      make: args.vehicle.make.trim(),
+      type: args.vehicle.bodyType.trim(),
+      colour: args.vehicle.colour.trim(),
+      plateReentry: { second: normalisePlate(args.plateSecondEntry.plate), matched: true, at: iso(args.plateSecondEntry.at) },
       ocrText: scan.ocrText,
       corrected: scan.corrected,
       plateCheckedOnVehicle: false,

@@ -10,6 +10,7 @@ import {
   RISK_TAG_LABELS,
   RISK_TAGS,
   type AllowEntry,
+  type VehicleDetails,
   type AllowList,
   type HotEntry,
   type ListType,
@@ -27,20 +28,9 @@ import { formatIsoDate } from '../../lib/time';
 import type { App, View } from '../app';
 import { banner, header, icon, LIST_TYPE_META, page, plateBadge, riskPill, typeChip } from '../components';
 import { allowsPaidParking, creatableListTypes, listPermissions, officerSource, policyContext } from '../../lib/listPolicy';
+import { compactVehicle, describeVehicle, EMPTY_VEHICLE, hasVehicle, vehicleOf } from '../../lib/vehicle';
+import { vehicleFields } from '../vehicleFields';
 
-export const VEHICLE_MAKES = [
-  'Toyota', 'Mazda', 'Ford', 'Hyundai', 'Kia', 'Mitsubishi', 'Nissan', 'Holden', 'Volkswagen', 'Subaru',
-  'Honda', 'Tesla', 'BYD', 'MG', 'GWM', 'Isuzu', 'Suzuki', 'BMW', 'Mercedes-Benz', 'Audi', 'Lexus', 'Jeep',
-  'Land Rover', 'Volvo', 'Peugeot', 'Renault', 'Skoda', 'LDV', 'Chery', 'Porsche', 'Ram', 'Chevrolet',
-];
-export const BODY_TYPES = [
-  'Sedan', 'Hatchback', 'Wagon', 'SUV', 'Ute', 'Van', 'Coupe', 'Convertible', 'People mover', 'Light truck',
-  'Truck', 'Motorcycle', 'Other',
-];
-export const COLOURS = [
-  'White', 'Black', 'Silver', 'Grey', 'Blue', 'Red', 'Green', 'Yellow', 'Orange', 'Brown', 'Gold', 'Beige',
-  'Purple', 'Maroon', 'Other',
-];
 const SIDES: { value: StreetSide; label: string }[] = [
   { value: 'both', label: 'Both sides' },
   { value: 'north', label: 'North side' },
@@ -100,12 +90,12 @@ interface AllowDraft {
   permitNo: string;
   validFrom: string;
   validTo: string;
-  vehicle: string;
+  vehicle: VehicleDetails;
   rpa: string;
   /** Streets for a street-specific permit, separated by ";". */
   streets: string;
 }
-const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '', vehicle: '', rpa: '', streets: '' });
+const emptyAllowDraft = (): AllowDraft => ({ plate: '', label: '', permitNo: '', validFrom: '', validTo: '', vehicle: { ...EMPTY_VEHICLE }, rpa: '', streets: '' });
 
 type HotDraft = Omit<HotEntry, 'id' | 'key' | 'addedAt'> & { id: string | null };
 const emptyHotDraft = (): HotDraft => ({
@@ -113,8 +103,8 @@ const emptyHotDraft = (): HotDraft => ({
   plate: '',
   risks: [],
   riskLevel: 'high',
+  registrationType: '',
   make: '',
-  model: '',
   bodyType: '',
   colour: '',
   notes: '',
@@ -560,10 +550,9 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       validTo: allowDraft.validTo,
       addedAt: Date.now(),
     };
-    const vehicle = allowDraft.vehicle.trim();
+    Object.assign(entry, compactVehicle(allowDraft.vehicle));
     const rpa = allowDraft.rpa.trim();
     const streets = allowDraft.streets.split(';').map((x) => x.trim()).filter(Boolean);
-    if (vehicle) entry.vehicle = vehicle;
     if (rpa) entry.rpa = rpa;
     if (streets.length) entry.streets = streets;
     const l = list;
@@ -623,7 +612,8 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
           ${text({ id: 'allow-from', label: 'Valid from', type: 'date', value: allowDraft.validFrom, onInput: (v) => (allowDraft.validFrom = v) })}
           ${text({ id: 'allow-to', label: 'Valid to', type: 'date', value: allowDraft.validTo, onInput: (v) => (allowDraft.validTo = v) })}
         </div>
-        ${text({ id: 'allow-vehicle', label: 'Vehicle', value: allowDraft.vehicle, onInput: (v) => (allowDraft.vehicle = v), placeholder: 'e.g. White Toyota Corolla' })}
+        <p class="field-label -mb-1">Vehicle details</p>
+        ${vehicleFields({ id: 'allow', value: allowDraft.vehicle, onChange: (patch) => set(() => (allowDraft.vehicle = { ...allowDraft.vehicle, ...patch })) })}
         <div class="grid grid-cols-2 gap-3">
           ${text({ id: 'allow-rpa', label: 'Permit area (RPA)', value: allowDraft.rpa, onInput: (v) => (allowDraft.rpa = v), placeholder: 'e.g. 12', maxlength: 12 })}
           ${text({ id: 'allow-streets', label: 'Streets', value: allowDraft.streets, onInput: (v) => (allowDraft.streets = v), placeholder: 'e.g. Smith St; Gore St' })}
@@ -650,7 +640,7 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
                 ${plateBadge(e.plate, 'sm')}
                 <div class="min-w-0 flex-1 text-sm">
                   <p class="truncate text-neutral-800">${e.label || '—'}${e.permitNo ? html` · <span class="text-neutral-600">#${e.permitNo}</span>` : nothing}</p>
-                  ${e.vehicle || e.rpa || e.streets?.length ? html`<p class="truncate text-xs text-neutral-700">${[e.vehicle, e.rpa ? `RPA ${e.rpa}` : '', e.streets?.join(', ')].filter(Boolean).join(' · ')}</p>` : nothing}
+                  ${hasVehicle(e) || e.rpa || e.streets?.length ? html`<p class="truncate text-xs text-neutral-700">${[describeVehicle(e), e.rpa ? `RPA ${e.rpa}` : '', e.streets?.join(', ')].filter(Boolean).join(' · ')}</p>` : nothing}
                   ${e.validFrom || e.validTo ? html`<p class="text-xs text-neutral-600">Valid ${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</p>` : nothing}
                 </div>
                 <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
@@ -682,10 +672,11 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       key,
       risks: hotDraft.risks,
       riskLevel: hotDraft.riskLevel,
+      registrationType: hotDraft.registrationType.trim(),
       make: hotDraft.make.trim(),
-      model: hotDraft.model.trim(),
       bodyType: hotDraft.bodyType,
       colour: hotDraft.colour,
+      ...(hotDraft.model ? { model: hotDraft.model } : {}),
       notes: hotDraft.notes.trim(),
       addedAt: l.entries.find((x) => x.id === hotDraft.id)?.addedAt ?? Date.now(),
     };
@@ -731,27 +722,8 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
         })}
       </div>
     </fieldset>
-    <div class="grid grid-cols-2 gap-3">
-      ${text({ id: 'hot-make', label: 'Make', value: hotDraft.make, onInput: (v) => (hotDraft.make = v), placeholder: 'e.g. Toyota', list: 'makes' })}
-      ${text({ id: 'hot-model', label: 'Model', value: hotDraft.model, onInput: (v) => (hotDraft.model = v), placeholder: 'e.g. Corolla' })}
-    </div>
-    <datalist id="makes">${VEHICLE_MAKES.map((m) => html`<option value=${m}></option>`)}</datalist>
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="field-label" for="hot-body">Type</label>
-        <select id="hot-body" class="field" @change=${(e: Event) => (hotDraft.bodyType = (e.target as HTMLSelectElement).value)}>
-          <option value="" ?selected=${!hotDraft.bodyType}>—</option>
-          ${BODY_TYPES.map((b) => html`<option value=${b} ?selected=${hotDraft.bodyType === b}>${b}</option>`)}
-        </select>
-      </div>
-      <div>
-        <label class="field-label" for="hot-colour">Colour</label>
-        <select id="hot-colour" class="field" @change=${(e: Event) => (hotDraft.colour = (e.target as HTMLSelectElement).value)}>
-          <option value="" ?selected=${!hotDraft.colour}>—</option>
-          ${COLOURS.map((c) => html`<option value=${c} ?selected=${hotDraft.colour === c}>${c}</option>`)}
-        </select>
-      </div>
-    </div>
+    <p class="field-label -mb-1">Vehicle details</p>
+    ${vehicleFields({ id: 'hot', value: vehicleOf(hotDraft), onChange: (patch) => set(() => Object.assign(hotDraft, patch)) })}
     <div>
       <label class="field-label" for="hot-notes">Notes</label>
       <textarea id="hot-notes" class="field min-h-20" maxlength="1000" .value=${hotDraft.notes} placeholder="Incident references, behaviour, officer guidance…"
@@ -784,7 +756,7 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
                     <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Edit ${e.plate}" @click=${() => set(() => { hotDraft = { ...e }; hotEditorOpen = true; })}>${icon('edit', 'h-4 w-4')}</button>
                     <button type="button" class="btn-ghost min-h-11 px-2" aria-label="Remove ${e.plate}" @click=${() => set(() => (l.entries = l.entries.filter((x) => x.id !== e.id)))}>${icon('trash', 'h-4 w-4')}</button>
                   </div>
-                  <p class="mt-1 text-sm text-neutral-700">${[e.colour, e.make, e.model, e.bodyType].filter(Boolean).join(' ') || 'No vehicle details'}</p>
+                  <p class="mt-1 text-sm text-neutral-700">${describeVehicle(e) || 'No vehicle details'}</p>
                   <p class="mt-1 text-xs font-medium text-alert-strong">${e.risks.map((r) => RISK_TAG_LABELS[r]).join(' · ')}</p>
                 </li>`,
               )}

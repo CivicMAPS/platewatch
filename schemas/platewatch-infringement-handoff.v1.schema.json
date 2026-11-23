@@ -115,7 +115,12 @@
     "vehicle": {
       "type": "object",
       "required": [
-        "registration"
+        "registration",
+        "registrationType",
+        "make",
+        "type",
+        "colour",
+        "plateReentry"
       ],
       "additionalProperties": false,
       "properties": {
@@ -171,9 +176,42 @@
             }
           }
         },
-        "description": {
+        "registrationType": {
           "type": "string",
-          "description": "From an exact hot/allow entry only; officer confirms"
+          "description": "Vehicle details structure (owner direction 23/11/2026): Licence plate (registration), Registration type, Make, Type, Colour"
+        },
+        "make": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "Body type"
+        },
+        "colour": {
+          "type": "string"
+        },
+        "plateReentry": {
+          "type": "object",
+          "required": [
+            "second",
+            "matched",
+            "at"
+          ],
+          "additionalProperties": false,
+          "description": "Second entry of the licence plate, made after the other vehicle details and checked against the first (owner direction 23/11/2026). Issue is blocked unless matched.",
+          "properties": {
+            "second": {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{1,10}$"
+            },
+            "matched": {
+              "const": true
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
         }
       }
     },

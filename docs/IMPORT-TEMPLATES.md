@@ -109,7 +109,7 @@ found are listed on the Import screen.
 | `label` | | `Resident` | |
 | `permit_no` | | `P-1001` | |
 | `valid_from`, `valid_to` | | `2026-07-01` or `01/07/2026` | Inclusive; blank = no limit. |
-| `vehicle` | | `White Toyota Corolla` | Vehicle description held with the permit; shown in the permit pop-up. |
+| `registration_type`, `make`, `type`, `colour` | | `Standard`, `Toyota`, `Sedan`, `White` | Vehicle details in the infringement-issuance structure (licence plate is `plate`); shown in the permit pop-up. An older `vehicle` column is read into `make`. |
 | `rpa` | | `7` | Residential parking area the permit applies to. |
 | `streets` | | `Gladstone St;Smith St` | Street-specific permits; separate streets with `;`. An area, a street or both may be given: either one matching the segment shows the permit as applying here. |
 
@@ -123,7 +123,7 @@ Link an allow list to timed lists from each timed list's *Edit* screen.
 | `plate` | ✔ | `ABC123` | |
 | `risk_level` | | `caution` (default), `high`, `extreme` | |
 | `risks` | | `Aggressive;Threats / intimidation` | Separated by `;`: Aggressive, Previous assault, Spitting, Verbal abuse, Threats / intimidation, Weapon sighted, Flees / evades, Other. |
-| `make`, `model`, `body_type`, `colour` | | `Toyota`, `Hilux`, `Ute`, `White` | |
+| `registration_type`, `make`, `type`, `colour` | | `Standard`, `Toyota`, `Ute`, `White` | Vehicle details in the infringement-issuance structure. Older files: `body_type` is read as `type`; `model` (not part of the structure) is added to the notes. |
 | `notes` | | | |
 
 The example rows in each template are illustrations to overwrite. Restrictions marked

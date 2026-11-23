@@ -24,6 +24,7 @@ const scan = (id: string, capturedAt: number, patch: Partial<ScanRecord> = {}): 
     meta: { capturedAt, capturedAtLocal: '', timeZone: 'Australia/Melbourne', location: loc, locationAgeMs: 0, userAgent: 't', payment: { parkingArea: '645', easyPark: ['7514'], payStay: [] } },
     image: new Blob(), thumb: new Blob(), sha256: 'a'.repeat(64), createdAt: capturedAt, ...patch,
   }) as ScanRecord;
+const VEH = { registrationType: 'Standard', make: 'Holden', bodyType: 'Hatchback', colour: 'White' };
 const first = scan('s1', t(8, 20, 5), { payment: { status: 'paid', source: 'easypark', sourceRef: '7514', paidFrom: t(8, 18), paidTo: t(10, 45), checkedAt: t(8, 21, 2), checkedBy: '4471' } });
 const current = scan('s2', t(10, 41, 7), { outcome: 'overstay' });
 const obs: Observation = {
@@ -33,10 +34,18 @@ const obs: Observation = {
 
 describe('infringement hand-off payload (WF-S31, requirements §10)', () => {
   const offer = offenceFor(obs, current.meta.capturedAt)!;
-  const handoff = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d20', list, observation: obs, scan: current, firstScan: first, offer, officerNumber: '4471', device: 'test' });
+  const handoff = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d20', list, observation: obs, scan: current, firstScan: first, offer, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: 'DTS512', at: t(10, 43) } });
 
   it('validates against the requirements JSON Schema', () => {
     expect(errors(handoff)).toEqual([]);
+  });
+
+  it('carries the vehicle details in the infringement structure and the matched second plate entry', () => {
+    expect(handoff.vehicle).toMatchObject({ registration: 'DTS512', registrationType: 'Standard', make: 'Holden', type: 'Hatchback', colour: 'White', plateReentry: { second: 'DTS512', matched: true } });
+  });
+
+  it('refuses a hand-off whose second plate entry does not match the first', () => {
+    expect(() => buildHandoff({ handoffId: 'x', list, observation: obs, scan: current, firstScan: first, offer, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: 'DT5512', at: 1 } })).toThrow(/do not match/);
   });
 
   it('pre-fills the S31 scenario: 701, time from = first sighting, payment from the first scan, two evidence images', () => {
@@ -55,7 +64,7 @@ describe('infringement hand-off payload (WF-S31, requirements §10)', () => {
   it('702 no payment: time from = first scan; note names where it was checked', () => {
     const o702: Observation = { ...obs, scanCount: 1, payment: { status: 'not_found' } };
     const f = scan('s1', t(8, 20, 5), { payment: { status: 'not_found', source: 'easypark', sourceRef: '7514', checkedAt: t(8, 21), checkedBy: '4471' } });
-    const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d21', list, observation: o702, scan: f, offer: offenceFor(o702, t(8, 20, 5))!, officerNumber: '4471', device: 'test' });
+    const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d21', list, observation: o702, scan: f, offer: offenceFor(o702, t(8, 20, 5))!, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: 'DTS512', at: t(10, 43) } });
     expect(errors(h)).toEqual([]);
     expect(h.offence).toMatchObject({ suggestedCode: '702', basis: 'no_payment_found' });
     expect(h.notesTemplate).toBe('No paid session found at 08:20:05 (EasyPark 7514 checked).');
@@ -63,7 +72,7 @@ describe('infringement hand-off payload (WF-S31, requirements §10)', () => {
 
   it('carries the look-alike the officer acted on (the wizard then asks for the plate check, OQ28-6)', () => {
     const linked = { ...current, plate: '1UP6YF', lookalikes: [{ readAs: '1UP6YF', candidatePlate: '1UR6YF', source: 'timed' as const, candidateId: 'o1', choice: 'same' as const, decidedAt: t(10, 41, 30) }] };
-    const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d22', list, observation: obs, scan: linked, firstScan: first, offer, officerNumber: '4471', device: 'test' });
+    const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d22', list, observation: obs, scan: linked, firstScan: first, offer, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: '1up 6yf', at: t(10, 43) } });
     expect(errors(h)).toEqual([]);
     expect(h.vehicle).toMatchObject({ registration: '1UP6YF', lookalike: { readAs: '1UP6YF', candidatePlate: '1UR6YF', choice: 'same' } });
     expect(h.notesTemplate).toContain('Plate read as 1UP6YF; linked to timing for 1UR6YF by officer at 10:41:30.');

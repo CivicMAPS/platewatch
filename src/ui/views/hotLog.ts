@@ -6,6 +6,7 @@ import { html, nothing } from 'lit-html';
 import { getHotEventsForEntry, getHotLists, getScansForList } from '../../lib/db';
 import { hotLogRows, type HotLogRow } from '../../lib/hotlist';
 import { formatStamp } from '../../lib/time';
+import { describeVehicle } from '../../lib/vehicle';
 import { RISK_LEVEL_LABELS, type HotEntry, type HotList } from '../../lib/types';
 import type { App, View } from '../app';
 import { emptyState, header, icon, page, plateBadge, riskPill, statusPill } from '../components';
@@ -57,7 +58,7 @@ export function hotLogView(params: Record<string, string>, app: App): View {
               ? emptyState('Entry not found', 'The hot-list entry may have been removed.')
               : html`<section class="card" data-testid="hot-log-entry">
                   <div class="flex flex-wrap items-center gap-2">${plateBadge(entry.plate, 'md')}${riskPill(entry.riskLevel, RISK_LEVEL_LABELS[entry.riskLevel])}</div>
-                  <p class="mt-2 font-semibold">${[entry.colour, entry.make, entry.model, entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</p>
+                  <p class="mt-2 font-semibold">${describeVehicle(entry) || 'No vehicle details'}</p>
                   <p class="text-sm text-neutral-600">List: ${list.name}</p>
                 </section>
                 <section class="card mt-4">

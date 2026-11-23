@@ -32,6 +32,21 @@ export interface BaseList {
   source?: ListSource;
 }
 
+/* ───────────────────────────── Vehicle details ───────────────────────────── */
+
+/**
+ * Vehicle details as infringement issuance requires them (owner direction 23/11/2026): Licence
+ * plate (the entry's own plate), Registration type, Make, Type, Colour. The same structure is used
+ * wherever PlateWatch holds a vehicle description (hot lists, permits, the infringement hand-off).
+ */
+export interface VehicleDetails {
+  registrationType: string;
+  make: string;
+  /** Body type, shown as "Type" (e.g. Sedan, Wagon, Ute). */
+  bodyType: string;
+  colour: string;
+}
+
 /* ───────────────────────────── Allow list ───────────────────────────── */
 
 export interface AllowEntry {
@@ -48,8 +63,11 @@ export interface AllowEntry {
   validFrom: string;
   validTo: string;
   addedAt: number;
-  /** Vehicle description held with the permit, e.g. "White Toyota Corolla". */
-  vehicle?: string;
+  /** Vehicle details held with the permit (licence plate is `plate`). */
+  registrationType?: string;
+  make?: string;
+  bodyType?: string;
+  colour?: string;
   /** Residential parking area the permit applies to, as the issuing council holds it (e.g. "12"). */
   rpa?: string;
   /** Streets a street-specific resident permit applies to. */
@@ -232,10 +250,13 @@ export interface HotEntry {
   key: string;
   risks: RiskTag[];
   riskLevel: RiskLevel;
+  /** Vehicle details (licence plate is `plate`). */
+  registrationType: string;
   make: string;
-  model: string;
   bodyType: string;
   colour: string;
+  /** Not part of the vehicle-details structure: kept only on entries saved before it; shown in notes. */
+  model?: string;
   notes: string;
   addedAt: number;
 }

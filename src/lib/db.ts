@@ -14,7 +14,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -37,11 +37,37 @@ interface PlateWatchDB extends DBSchema {
   hotEvents: { key: string; value: HotListEvent; indexes: { 'by-entry': string; 'by-at': number } };
 }
 
+/** Vehicle details in the infringement structure (DB v5, backups): no model, no free-text vehicle. */
+export function migrateVehicleDetails(l: PlateList): PlateList {
+  if (l.type === 'hot') {
+    if (!l.entries.some((e) => e.model || e.registrationType === undefined)) return l;
+    return {
+      ...l,
+      entries: l.entries.map((e) => {
+        const { model, ...rest } = e;
+        const notes = model?.trim() && !rest.notes.includes(`Model: ${model.trim()}`) ? [rest.notes, `Model: ${model.trim()}`].filter(Boolean).join(' · ') : rest.notes;
+        return { ...rest, registrationType: rest.registrationType ?? '', notes };
+      }),
+    };
+  }
+  if (l.type === 'allow') {
+    if (!l.entries.some((e) => 'vehicle' in e)) return l;
+    return {
+      ...l,
+      entries: l.entries.map((e) => {
+        const { vehicle, ...rest } = e as typeof e & { vehicle?: unknown };
+        return typeof vehicle === 'string' && vehicle.trim() && !rest.make ? { ...rest, make: vehicle.trim() } : rest;
+      }),
+    };
+  }
+  return l;
+}
+
 let dbPromise: Promise<IDBPDatabase<PlateWatchDB>> | null = null;
 
 export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
   dbPromise ??= openDB<PlateWatchDB>(DB_NAME, DB_VERSION, {
-    upgrade(database, oldVersion) {
+    upgrade(database, oldVersion, _newVersion, tx) {
       if (oldVersion < 1) {
         const lists = database.createObjectStore('lists', { keyPath: 'id' });
         lists.createIndex('by-type', 'type');
@@ -64,6 +90,16 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
         const ev = database.createObjectStore('hotEvents', { keyPath: 'id' });
         ev.createIndex('by-entry', 'hotListEntryId');
         ev.createIndex('by-at', 'at');
+      }
+      if (oldVersion >= 1 && oldVersion < 5) {
+        // Version 5: vehicle details in the infringement structure (registration type, make, type,
+        // colour). Hot-list model → notes; a permit's free-text vehicle → make.
+        void tx.objectStore('lists').getAll().then(async (lists) => {
+          for (const l of lists) {
+            const next = migrateVehicleDetails(l);
+            if (next !== l) await tx.objectStore('lists').put(next);
+          }
+        });
       }
     },
     blocked() {

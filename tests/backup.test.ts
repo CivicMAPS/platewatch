@@ -140,6 +140,18 @@ describe('backup: patrol zone, RPA and dismissed captures', () => {
   });
 });
 
+describe('vehicle details from older backups', () => {
+  it('moves a hot-list model into notes and a permit free-text vehicle into make', () => {
+    const hotList = { id: 'h', type: 'hot', name: 'H', notes: '', createdAt: 0, updatedAt: 0, entries: [{ id: 'x', plate: 'ABC123', risks: [], riskLevel: 'high', make: 'Toyota', model: 'Hilux', bodyType: 'Ute', colour: 'White', notes: 'Seen', addedAt: 0 }] };
+    const allowList = { id: 'a', type: 'allow', name: 'A', notes: '', createdAt: 0, updatedAt: 0, entries: [{ id: 'y', plate: 'RES1', vehicle: 'White Corolla' }] };
+    const [h, a] = parseBackup(file([hotList, allowList])).lists as unknown as [{ entries: Record<string, unknown>[] }, { entries: Record<string, unknown>[] }];
+    expect(h.entries[0]).toMatchObject({ registrationType: '', make: 'Toyota', notes: 'Seen · Model: Hilux' });
+    expect(h.entries[0]).not.toHaveProperty('model');
+    expect(a.entries[0]).toMatchObject({ make: 'White Corolla' });
+    expect(a.entries[0]).not.toHaveProperty('vehicle');
+  });
+});
+
 describe('plate tags in backups', () => {
   it('restores well-formed tags and drops malformed ones', () => {
     const raw = JSON.parse(file([]));
@@ -159,15 +171,15 @@ describe('plate tags in backups', () => {
     expect(parseBackup(file([])).flags).toBeUndefined();
   });
 
-  it('keeps permit vehicle, area and streets on allow entries and drops malformed ones', () => {
+  it('keeps permit vehicle details, area and streets on allow entries and drops malformed ones', () => {
     const entries = [
-      { id: 'e1', plate: 'RES1', vehicle: 'White Corolla', rpa: '7', streets: ['Smith St', 3, ''] },
-      { id: 'e2', plate: 'RES2', vehicle: 9, rpa: '', streets: 'Smith St' },
+      { id: 'e1', plate: 'RES1', registrationType: 'Standard', make: 'Toyota', bodyType: 'Sedan', colour: 'White', rpa: '7', streets: ['Smith St', 3, ''] },
+      { id: 'e2', plate: 'RES2', make: 9, rpa: '', streets: 'Smith St' },
     ];
     const [l] = parseBackup(file([{ id: 'a', type: 'allow', name: 'P', notes: '', createdAt: 0, updatedAt: 0, entries }])).lists;
     const [a, b] = (l as unknown as { entries: Record<string, unknown>[] }).entries;
-    expect(a).toMatchObject({ vehicle: 'White Corolla', rpa: '7', streets: ['Smith St'] });
-    expect(b).not.toHaveProperty('vehicle');
+    expect(a).toMatchObject({ registrationType: 'Standard', make: 'Toyota', bodyType: 'Sedan', colour: 'White', rpa: '7', streets: ['Smith St'] });
+    expect(b).not.toHaveProperty('make');
     expect(b).not.toHaveProperty('rpa');
     expect(b).not.toHaveProperty('streets');
   });

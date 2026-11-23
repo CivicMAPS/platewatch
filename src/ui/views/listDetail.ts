@@ -25,6 +25,7 @@ import {
 import type { App, View } from '../app';
 import { listPermissions, policyContext } from '../../lib/listPolicy';
 import { DISMISS_LABEL, FLAG_LABEL } from '../../lib/dismissal';
+import { describeVehicle } from '../../lib/vehicle';
 import { banner, header, icon, LIST_TYPE_META, page, plateBadge, riskPill, statusPill, typeChip, UrlBag, type StatusKind } from '../components';
 import { segmentLabel } from './home';
 
@@ -219,7 +220,7 @@ export function listDetailView(params: Record<string, string>, app: App): View {
               ${l.entries.map(
                 (e) => html`<li class="py-3">
                   <div class="flex flex-wrap items-center gap-2">${plateBadge(e.plate, 'sm')}${riskPill(e.riskLevel, RISK_LEVEL_LABELS[e.riskLevel])}</div>
-                  <p class="mt-1 text-sm text-neutral-700">${[e.colour, e.make, e.model, e.bodyType].filter(Boolean).join(' ') || 'No vehicle details'}</p>
+                  <p class="mt-1 text-sm text-neutral-700">${describeVehicle(e) || 'No vehicle details'}</p>
                   <p class="mt-1 text-xs font-medium text-alert-strong">${e.risks.map((r) => RISK_TAG_LABELS[r]).join(' · ')}</p>
                   ${e.notes ? html`<p class="mt-1 text-xs whitespace-pre-line text-neutral-600">${e.notes}</p>` : nothing}
                 </li>`,

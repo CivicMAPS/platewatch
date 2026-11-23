@@ -37,10 +37,12 @@ import { formatClock, formatDateTime, formatDuration, formatIsoDate, formatMinut
 import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRESETS } from '../../lib/zoom';
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
-import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction } from '../../lib/types';
+import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction, VehicleDetails } from '../../lib/types';
 import { effectivePayment, OFFENCE_LABEL, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
 import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
 import { host, officerNumber } from '../../lib/host';
+import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
+import { vehicleFields } from '../vehicleFields';
 import { applyInfringementResult, buildHandoff, canIssueInfringement, formatInfringementNumber } from '../../lib/infringement';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
@@ -148,8 +150,10 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
   let payForm: { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string } = emptyPayForm();
   let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
-  /** Issue infringement hand-off sheet (WF-S31 31a). */
+  /** Issue infringement hand-off sheet (WF-S31 31a), with the vehicle details and second plate entry. */
   let handoffOffer: OffenceOffer | null = null;
+  let handoffVehicle: VehicleDetails = { ...EMPTY_VEHICLE };
+  let plateSecond = '';
   let evidence: Evidence | null = null;
   let clock: number | undefined;
   let unsubGeo: (() => void) | null = null;
@@ -322,6 +326,8 @@ export function scanView(params: Record<string, string>, app: App): View {
     payForm = emptyPayForm();
     topUp = { open: false, paidTo: '', error: '' };
     handoffOffer = null;
+    handoffVehicle = { ...EMPTY_VEHICLE };
+    plateSecond = '';
     editing = false;
     confirmError = null;
     pending = null;
@@ -1102,7 +1108,7 @@ export function scanView(params: Record<string, string>, app: App): View {
                   <div class="mt-1">${plateBadge(x.entry.plate, 'md')}</div></div>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">${riskPill(x.entry.riskLevel, RISK_LEVEL_LABELS[x.entry.riskLevel])}
-                <span class="text-sm font-semibold text-neutral-900">${[x.entry.colour, x.entry.make, x.entry.model, x.entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</span></div>
+                <span class="text-sm font-semibold text-neutral-900">${describeVehicle(x.entry) || 'No vehicle details'}</span></div>
               <div class="mt-3 grid gap-2">
                 <button type="button" class="btn-primary" data-testid="hot-lookalike-same" @click=${() => confirmHotLookalike(x)}>${icon('shield')} Same vehicle — hot list sighting</button>
                 <button type="button" class="btn-secondary" data-testid="hot-lookalike-not" @click=${() => void declineHotLookalike(x)}>Not the hot-list vehicle</button>
@@ -1131,7 +1137,7 @@ export function scanView(params: Record<string, string>, app: App): View {
               <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
                 <dt class="text-neutral-600">List</dt><dd>${x.list.name}</dd>
                 ${x.entry.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${x.entry.permitNo}</dd>` : nothing}
-                ${x.entry.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${x.entry.vehicle}</dd>` : nothing}
+                ${hasVehicle(x.entry) ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${describeVehicle(x.entry)}</dd>` : nothing}
                 ${x.entry.validTo ? html`<dt class="text-neutral-600">Valid to</dt><dd>${formatIsoDate(x.entry.validTo)}</dd>` : nothing}
               </dl>
               <button type="button" class="btn-primary mt-3 w-full" data-testid="permit-lookalike-confirm" @click=${() => confirmPermitPlate(x)}>${icon('edit')} Permit plate confirmed — edit plate</button>
@@ -1220,7 +1226,7 @@ export function scanView(params: Record<string, string>, app: App): View {
             ${riskPill(h.entry.riskLevel, RISK_LEVEL_LABELS[h.entry.riskLevel])}
             ${h.strength === 'possible' ? statusPill('verify', 'Possible match — verify plate') : nothing}
           </div>
-          <p class="mt-2 text-md font-bold text-neutral-900">${[h.entry.colour, h.entry.make, h.entry.model, h.entry.bodyType].filter(Boolean).join(' ') || 'No vehicle description'}</p>
+          <p class="mt-2 text-md font-bold text-neutral-900">${describeVehicle(h.entry) || 'No vehicle details'}</p>
           <div class="mt-2 flex flex-wrap gap-2">${h.entry.risks.map((r) => html`<span class="chip border-alert-border bg-surface text-sm text-alert-strong">${RISK_TAG_LABELS[r]}</span>`)}</div>
           ${h.entry.notes ? html`<p class="mt-2 text-sm whitespace-pre-line text-neutral-800">${h.entry.notes}</p>` : nothing}
           <p class="mt-2 text-xs text-neutral-700">List: ${h.list.name}</p>
@@ -1324,7 +1330,7 @@ export function scanView(params: Record<string, string>, app: App): View {
               <dt class="text-neutral-600">List</dt><dd class="font-semibold">${d.hit.list.name}</dd>
               ${e.label ? html`<dt class="text-neutral-600">Label</dt><dd>${e.label}</dd>` : nothing}
               ${e.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${e.permitNo}</dd>` : nothing}
-              ${e.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd>${e.vehicle}</dd>` : nothing}
+              ${hasVehicle(e) ? html`<dt class="text-neutral-600">Vehicle</dt><dd>${describeVehicle(e)}</dd>` : nothing}
               ${e.validFrom || e.validTo ? html`<dt class="text-neutral-600">Valid</dt><dd>${e.validFrom ? formatIsoDate(e.validFrom) : 'any time'} to ${e.validTo ? formatIsoDate(e.validTo) : 'no end date'}</dd>` : nothing}
             </dl>`,
           'result-exempt',
@@ -1513,7 +1519,22 @@ export function scanView(params: Record<string, string>, app: App): View {
     if (!canIssueInfringement() || !result?.saved || result.saved.infringement?.status === 'issued') return nothing;
     // IR-7: in a paid space, only once the payment check is saved.
     if (result.decision.kind === 'timed_new' && isPaidSpace() && !result.saved.payment) return nothing;
-    return html`<button type="button" class="btn-primary mt-3 w-full" data-testid="issue-infringement" @click=${() => { handoffOffer = offer; app.update(); }}>Issue infringement · ${offer.code} →</button>`;
+    return html`<button type="button" class="btn-primary mt-3 w-full" data-testid="issue-infringement" @click=${() => openHandoff(offer)}>Issue infringement · ${offer.code} →</button>`;
+  };
+
+  /**
+   * Open the hand-off: vehicle details pre-filled from an exact hot-list or permit entry for this
+   * plate (the officer confirms), never from a look-alike.
+   */
+  const openHandoff = async (offer: OffenceOffer) => {
+    const plate = result?.saved?.plate ?? '';
+    const key = plateKey(plate);
+    const hot = result?.hotHits.find((h) => h.strength === 'exact' && h.entry.key === key)?.entry;
+    const permit = hot ? undefined : (await getAllowLists()).flatMap((a) => a.entries).find((e) => e.key === key);
+    handoffVehicle = vehicleOf(hot ?? permit ?? {});
+    plateSecond = '';
+    handoffOffer = offer;
+    app.update();
   };
 
   /** The timing an offer is about (resighting or a first sighting with its payment check). */
@@ -1532,7 +1553,10 @@ export function scanView(params: Record<string, string>, app: App): View {
     app.update();
     try {
       const firstScan = obs.firstScanId !== r.saved.id ? await getScan(obs.firstScanId) : undefined;
-      const handoff = buildHandoff({ handoffId: crypto.randomUUID(), list, observation: obs, scan: r.saved, firstScan, offer, officerNumber: officerNumber(settings().officerNumber), device: navigator.userAgent });
+      const handoff = buildHandoff({
+        handoffId: crypto.randomUUID(), list, observation: obs, scan: r.saved, firstScan, offer, officerNumber: officerNumber(settings().officerNumber), device: navigator.userAgent,
+        vehicle: handoffVehicle, plateSecondEntry: { plate: plateSecond, at: Date.now() },
+      });
       const res = await start(handoff);
       const out = applyInfringementResult({ scan: r.saved, observation: obs, handoff, result: res });
       await saveScan(out.scan, out.observation);
@@ -1544,18 +1568,38 @@ export function scanView(params: Record<string, string>, app: App): View {
     app.update();
   };
 
-  /** 31a: what the wizard will receive; nothing is issued until Issue in the wizard. */
-  const handoffSheet = (offer: OffenceOffer) =>
-    decisionSheet({
+  /**
+   * 31a: what the wizard will receive; nothing is issued until Issue in the wizard. Vehicle details
+   * follow the infringement structure (Licence plate, Registration type, Make, Type, Colour); once
+   * entered, the licence plate is entered a second time and checked against the first — a mismatch
+   * is flagged and blocks Start (owner direction 23/11/2026).
+   */
+  const handoffSheet = (offer: OffenceOffer) => {
+    const first = result?.saved?.plate ?? '';
+    const complete = vehicleComplete(handoffVehicle);
+    const check = plateReentry(first, plateSecond);
+    return decisionSheet({
       testid: 'handoff-sheet',
       pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span>`,
-      title: `Start infringement for ${result?.plate ?? ''}`,
+      title: `Start infringement for ${first}`,
       onClose: () => { handoffOffer = null; app.update(); },
       body: html`<p>Filled in from this sighting: location, evidence images with their SHA-256, offence, locked time from (<span class="font-plate">${formatClock(offer.timeFrom)}</span>) and the payment check. The infringement number is allocated on this handset when you start.</p>
-        <p class="mt-2 font-semibold">Nothing is issued until you press Issue in the wizard.</p>`,
-      actions: html`<button type="button" class="btn-primary" data-testid="handoff-start" @click=${() => void startInfringement()}>Start infringement</button>
+        <h3 class="mt-3 font-semibold text-neutral-900">Vehicle details</h3>
+        <dl class="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-sm"><dt class="text-neutral-600">Licence plate</dt><dd>${plateBadge(first, 'sm')}</dd></dl>
+        <div class="mt-2">${vehicleFields({ id: 'handoff', value: handoffVehicle, required: true, onChange: (patch) => { handoffVehicle = { ...handoffVehicle, ...patch }; app.update(); } })}</div>
+        <label class="mt-3 block"><span class="field-label">Licence plate — enter again${complete ? '' : ' (after the vehicle details)'}</span>
+          <input class="field font-plate text-xl tracking-widest uppercase ${check === 'mismatch' ? 'field-invalid' : ''}" data-testid="handoff-plate-again" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"
+            ?disabled=${!complete} .value=${plateSecond} @input=${(e: Event) => { plateSecond = (e.target as HTMLInputElement).value.toUpperCase().replace(/[^A-Z0-9]/g, ''); app.update(); }} /></label>
+        ${check === 'mismatch'
+          ? html`<div class="mt-2">${banner('alert', 'Licence plate entries do not match', html`First entry <span class="font-plate">${first}</span>, second entry <span class="font-plate">${plateSecond}</span>. Check the plate on the vehicle and enter it again.`, 'handoff-plate-mismatch')}</div>`
+          : check === 'match'
+            ? html`<p class="mt-2 flex items-center gap-1 text-sm font-semibold text-active-strong" data-testid="handoff-plate-match">${icon('check', 'h-4 w-4')} Licence plate entries match</p>`
+            : nothing}
+        <p class="mt-3 font-semibold">Nothing is issued until you press Issue in the wizard.</p>`,
+      actions: html`<button type="button" class="btn-primary" data-testid="handoff-start" ?disabled=${!complete || check !== 'match'} @click=${() => void startInfringement()}>Start infringement</button>
         <button type="button" class="btn-ghost" @click=${() => { handoffOffer = null; app.update(); }}>Cancel</button>`,
     });
+  };
 
   /** 31f: issued — persistent, purple; timing closed as issued. */
   const issuedCard = (rec: NonNullable<ScanRecord['infringement']>): TemplateResult => html`<section class="rounded-md border-2 border-issued bg-issued-bg p-4" data-testid="pin-issued">
@@ -1777,7 +1821,7 @@ export function scanView(params: Record<string, string>, app: App): View {
             (h) => html`<li class="rounded-md border border-neutral-200 bg-surface-sunken p-3" data-testid="permit-hit" data-status=${h.status}>
               <div class="flex flex-wrap items-center gap-2">${plateBadge(h.entry.plate, 'sm')}${permitPill(h)}</div>
               <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-                ${h.entry.vehicle ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${h.entry.vehicle}</dd>` : nothing}
+                ${hasVehicle(h.entry) ? html`<dt class="text-neutral-600">Vehicle</dt><dd class="font-semibold">${describeVehicle(h.entry)}</dd>` : nothing}
                 ${h.entry.rpa ? html`<dt class="text-neutral-600">Area</dt><dd>RPA <span class="font-plate">${h.entry.rpa}</span>${list?.type === 'timed' && list.rpa ? html` <span class="text-neutral-600">(here: ${list.rpa})</span>` : nothing}</dd>` : nothing}
                 ${h.entry.streets?.length ? html`<dt class="text-neutral-600">Streets</dt><dd>${h.entry.streets.join(', ')}</dd>` : nothing}
                 ${h.entry.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">#${h.entry.permitNo}</dd>` : nothing}

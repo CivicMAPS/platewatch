@@ -1,5 +1,5 @@
 /** JSON backup / restore. Images are embedded as base64 data URLs when included. */
-import { getAllHotEvents, getAllObservations, getAllScans, getDismissed, getFlags, getLists, replaceAll } from './db';
+import { getAllHotEvents, getAllObservations, getAllScans, getDismissed, getFlags, getLists, migrateVehicleDetails, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
 import { normalisePayment, prunePaidBy } from './payment';
@@ -133,7 +133,7 @@ export function parseBackup(text: string): {
         .map((e) => {
           const out: Record<string, unknown> = { ...e, key: plateKey(str(e.plate)) };
           // Permit details: strings only; streets a list of strings.
-          for (const k of ['vehicle', 'rpa'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
+          for (const k of ['vehicle', 'rpa', 'registrationType', 'make', 'bodyType', 'colour'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
           if (Array.isArray(out.streets)) out.streets = (out.streets as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim());
           if (!Array.isArray(out.streets) || !(out.streets as string[]).length) delete out.streets;
           return out;
@@ -178,7 +178,7 @@ export function parseBackup(text: string): {
         ...(typeof src.serviceDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(src.serviceDay) ? { serviceDay: src.serviceDay } : {}),
       };
     } else delete l.source;
-    lists.push(l as unknown as PlateList);
+    lists.push(migrateVehicleDetails(l as unknown as PlateList));
   }
 
   const observations = (Array.isArray(raw.observations) ? raw.observations : []).filter(

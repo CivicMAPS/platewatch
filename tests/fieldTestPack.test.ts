@@ -55,7 +55,7 @@ describe('field-test pack', () => {
     const lists = planImport(r.drafts, [], { updateExisting: true }).created as AllowList[];
     const entries = lists.flatMap((l) => l.entries);
     expect(entries).toHaveLength(6);
-    expect(entries.find((e) => e.plate === 'PWP101')).toMatchObject({ rpa: '7', vehicle: 'White Toyota Corolla' });
+    expect(entries.find((e) => e.plate === 'PWP101')).toMatchObject({ rpa: '7', registrationType: 'Standard', make: 'Toyota', bodyType: 'Sedan', colour: 'White' });
     expect(entries.find((e) => e.plate === 'PWP606')?.streets).toEqual(['Gladstone St']);
     expect(entries.find((e) => e.plate === 'PWP303')?.validTo).toBe('2025-12-31');
   });

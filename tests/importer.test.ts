@@ -225,11 +225,18 @@ describe('allow and hot list CSV templates', () => {
   });
 
   it('builds hot lists with risk level and risk labels or keys', () => {
-    const csv = [CSV_TEMPLATES.hot.header, 'Officer safety,ABC123,high,Aggressive; weapon_sighted,Toyota,Hilux,Ute,White,Seen near market'].join('\n');
+    const csv = [CSV_TEMPLATES.hot.header, 'Officer safety,ABC123,high,Aggressive; weapon_sighted,Standard,Toyota,Ute,White,Seen near market'].join('\n');
     const r = parseImportFile(csv, 'hot.csv');
     expect(r.kind).toBe('hot-csv');
     const e = (r.drafts[0] as HotDraft).list.entries[0]!;
-    expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], make: 'Toyota', colour: 'White' });
+    expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], registrationType: 'Standard', make: 'Toyota', bodyType: 'Ute', colour: 'White', notes: 'Seen near market' });
+  });
+
+  it('reads older hot-list and permit columns into the vehicle-details structure (model → notes)', () => {
+    const hot = parseImportFile(['list_name,plate,risk_level,risks,make,model,body_type,colour,notes', 'Officer safety,ABC123,high,Aggressive,Toyota,Hilux,Ute,White,Seen near market'].join('\n'), 'hot.csv');
+    expect((hot.drafts[0] as HotDraft).list.entries[0]).toMatchObject({ make: 'Toyota', bodyType: 'Ute', colour: 'White', registrationType: '', notes: 'Seen near market · Model: Hilux' });
+    const allow = parseImportFile(['list_name,plate,label,permit_no,valid_from,valid_to,vehicle,rpa,streets', 'RPA 7,RES001,Resident,P1,,,White Toyota Corolla,7,'].join('\n'), 'allow.csv');
+    expect((allow.drafts[0] as AllowDraft).list.entries[0]).toMatchObject({ make: 'White Toyota Corolla', rpa: '7' });
   });
 });
 

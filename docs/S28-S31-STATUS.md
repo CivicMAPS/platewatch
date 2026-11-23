@@ -10,6 +10,25 @@ S28–S31 is built; CommandMAPS screens and the EnforcementMAPS wizard live in o
 | **S30** Payment check, 701 / 702 | `offence.ts` decision table (5-minute grace after paid to, not found = 702 at once, first reached offered + secondary, disability never 702, OQ30-2 handling); payment check form on a first sighting in a paid space (Next scan disabled until saved); offer card with code chip and locked time from; top-up with history; record payment block (30a–30e, 30g) | `offence.ts`, `scan.ts`, `record.ts` |
 | **S31** Issue infringement | Hand-off payload validated against `schemas/platewatch-infringement-handoff.v1.schema.json` (from the requirements doc), note templates (§5); "Issue infringement" + 31a sheet only with an EnforcementMAPS host (hidden in the development build, IR-3); store-back of the I-N, timing closed `issued` (31f); issued records locked: no plate edit, delete or purge (31h, IR-23) | `infringement.ts`, `host.ts`, `scan.ts`, `record.ts`, `db.ts` |
 
+## Vehicle details (owner direction 23/11/2026)
+
+Wherever PlateWatch holds a vehicle it uses the infringement-issuance structure: **Licence plate,
+Registration type, Make, Type, Colour** (`VehicleDetails`, `src/lib/vehicle.ts`) — hot-list and
+permit entries, their forms and CSV columns, and the hand-off payload (`vehicle.registration`,
+`registrationType`, `make`, `type`, `colour`, all required). Model is no longer held: older entries
+and files move it into the notes (DB v5 migration, backups, CSV import).
+
+**Second licence plate entry at issue:** the 31a hand-off asks for the vehicle details (pre-filled
+only from an exact hot-list or permit entry), then the licence plate again. The second entry is
+checked exactly against the first (no look-alike tolerance); a mismatch is flagged and Start stays
+disabled until they match. The payload records `vehicle.plateReentry { second, matched: true, at }`,
+and `buildHandoff` refuses a mismatch. The EnforcementMAPS wizard should apply the same rule if
+the officer edits the vehicle details or registration in step 1.
+
+Registration type is free text with suggestions (Standard, Custom / personalised, Commercial,
+Heavy vehicle, Motorcycle, Trailer, Interstate, Overseas, Unregistered) until the council's list of
+accepted values is confirmed.
+
 ## Not built here (other systems or open decisions)
 
 - **CommandMAPS:** soft Code 1 banners, radio OK / escalate to Code 1 (29e–29k), void-only approvals (31l).

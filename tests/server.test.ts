@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../server/app';
-import { runWatchdog, type SafetyConfig } from '../server/safety';
+import { raiseOverdueSoftCode1, runWatchdog, type SafetyConfig } from '../server/safety';
 import { createPool, migrate, type Db } from '../server/db';
 import { newObservation } from '../src/lib/engine';
 import { allocate, canonical, generateSigningKey, GENESIS_HASH, sha256Hex, signStatement, type IssueStatement, type Signed, type AllocationStatement } from '../src/lib/inNumber';
@@ -398,6 +398,14 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     await call('POST', '/api/console/alerts/c1-open-old/cancel', { staff: 'D1', body: { reason: 'test' } });
   });
 
+  it('the watchdog raises nothing for a hit answered after its overdue check (stale row)', async () => {
+    await call('POST', '/api/hot-hits', { body: { hit: hit('h9', t(8, 0), '4471', { plate: 'WDG909', hotListEntryId: 'e9' }) } });
+    const stale = { id: 'h9', officer_number: '4471', device_key_id: key.keyId, lat: null, lng: null, accuracy_m: null }; // as the overdue query saw it
+    await call('POST', '/api/hot-hits/h9/response', { body: { response: 'safe_clear', at: t(8, 2), officerNumber: '4471' } }); // answered meanwhile
+    expect(await raiseOverdueSoftCode1(db, SAFETY, stale, t(9))).toEqual({ id: '', created: false });
+    expect((await call('GET', '/api/console/alerts?scope=all', { staff: 'D1' })).json.alerts.find((a: { id: string }) => a.id === 'sc1-h9')).toBeUndefined();
+  });
+
   it('a hit reported before the officer number was known takes the number of the officer who answers it', async () => {
     const h8 = hit('h8', t(9, 3), '', { plate: 'RSP808', hotListEntryId: 'e8' });
     await call('POST', '/api/hot-hits', { body: { hit: h8 } });
@@ -600,6 +608,19 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect(backend.backendState().lastError).toMatch(/Infringement sync stopped/);
     expect((await fetch(`${base}/api/console/evidence/sHot`, { headers: staff })).status).toBe(200);
     expect(await getKv(`backendCursor:${base}`)).toBeDefined(); // updates were pulled
+  });
+
+  it('a registration interrupted by a backend change is not recorded for the new backend', async () => {
+    const { getKv } = await import('../src/lib/db');
+    const backend = await import('../src/lib/backend');
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' };
+    backend.installBackend(() => settings as never);
+    const other = base.replace('127.0.0.1', 'localhost') + '/';
+    const registering = backend.registerDevice();
+    settings.backendUrl = other; // Settings change while the key is being loaded
+    await expect(registering).rejects.toThrow(/backend changed/);
+    expect(await getKv(`backendDevice:${other.replace(/\/+$/, '')}`)).toBeUndefined();
+    settings.backendUrl = base;
   });
 
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {

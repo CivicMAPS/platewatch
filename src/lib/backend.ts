@@ -113,8 +113,11 @@ const officerHeader = (officer?: string): Record<string, string> => (officer?.tr
 
 /** Register this device's signing key (idempotent). */
 export async function registerDevice(): Promise<NonNullable<BackendState['device']>> {
-  const k = await deviceKey();
-  const key = DEVICE_KEY(); // the server this registration is with, even if Settings change meanwhile
+  // The backend this registration is for, fixed before the key is loaded: its key, its record.
+  const sc = serverScope();
+  const key = DEVICE_KEY();
+  const k = await deviceKey(sc);
+  if (serverScope() !== sc) throw new BackendError(0, 'backend_changed', 'The backend changed during registration; it registers again on the next sync.');
   const out = await request<{ keyId: string; status: 'pending' | 'approved' | 'revoked'; council: string; hotAckSeconds?: number }>('POST', '/api/devices/register', {
     json: { publicJwk: k.publicJwk, label: typeof navigator === 'undefined' ? 'device' : navigator.userAgent.slice(0, 120), officerNumber: settingsRef().officerNumber },
     headers: { 'X-Device-Key': k.keyId },

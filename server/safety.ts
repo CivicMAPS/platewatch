@@ -159,6 +159,24 @@ export async function raiseAlert(
 }
 
 /** Raise the soft Code 1 for overdue hits the handset did not report, and auto-escalate if configured. */
+/**
+ * The watchdog's soft Code 1 for one overdue hit. The hit row is locked and rechecked first: an
+ * answer recorded after the overdue query (recordResponse updates the same row, so the two are
+ * serialised) means the officer answered, and no alarm is raised for an acknowledged hit.
+ */
+export async function raiseOverdueSoftCode1(
+  db: Db,
+  cfg: SafetyConfig,
+  h: { id: string; officer_number: string; device_key_id: string | null; lat: number | null; lng: number | null; accuracy_m: number | null },
+  now: number,
+): Promise<{ id: string; created: boolean }> {
+  return tx(db, async (q) => {
+    const cur = (await q.query<{ response: string | null }>('select response from hot_hits where id = $1 for update', [h.id])).rows[0];
+    if (!cur || cur.response) return { id: '', created: false };
+    return raiseAlert(q, cfg, { id: `sc1-${h.id}`, kind: 'soft_code1', hitId: h.id, cause: 'hot_list_timeout', raisedBy: 'server_watchdog', officerNumber: h.officer_number, keyId: h.device_key_id, at: now, location: h.lat === null ? null : { lat: h.lat, lng: h.lng!, accuracyM: h.accuracy_m ?? undefined }, now });
+  });
+}
+
 export async function runWatchdog(db: Db, cfg: SafetyConfig, now: number): Promise<{ softCode1: string[]; escalated: string[] }> {
   const overdue = await db.query<{ id: string; officer_number: string; device_key_id: string | null; lat: number | null; lng: number | null; accuracy_m: number | null }>(
     `select h.id, h.officer_number, h.device_key_id, h.lat, h.lng, h.accuracy_m from hot_hits h
@@ -167,9 +185,7 @@ export async function runWatchdog(db: Db, cfg: SafetyConfig, now: number): Promi
   );
   const softCode1: string[] = [];
   for (const h of overdue.rows) {
-    const out = await tx(db, (q) =>
-      raiseAlert(q, cfg, { id: `sc1-${h.id}`, kind: 'soft_code1', hitId: h.id, cause: 'hot_list_timeout', raisedBy: 'server_watchdog', officerNumber: h.officer_number, keyId: h.device_key_id, at: now, location: h.lat === null ? null : { lat: h.lat, lng: h.lng!, accuracyM: h.accuracy_m ?? undefined }, now }),
-    );
+    const out = await raiseOverdueSoftCode1(db, cfg, h, now);
     if (out.created) softCode1.push(out.id);
   }
   const escalated: string[] = [];

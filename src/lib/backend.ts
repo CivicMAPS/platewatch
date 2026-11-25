@@ -429,6 +429,10 @@ export function installBackend(getSettings: () => Settings): void {
       await request('POST', '/api/hot-hits', { json: { hit }, timeoutMs: 8000 });
       if (hit.scanId) await enqueue('evidence', hit.scanId);
     },
+    async reportHotHitResponse(hit, answer) {
+      if (!isConfigured()) throw new Error('No backend configured.');
+      await request('POST', `/api/hot-hits/${encodeURIComponent(hit.id)}/response`, { json: { ...answer, hit }, timeoutMs: 8000 });
+    },
     async raiseSoftCode1(args) {
       if (!isConfigured()) throw new Error('No backend configured.');
       return request<{ id: string | null }>('POST', '/api/alerts/soft-code1', { json: args, timeoutMs: 10_000 });

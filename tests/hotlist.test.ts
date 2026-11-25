@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { closeDb, getAllHotEvents, getKv } from '../src/lib/db';
+import { closeDb, getAllHotEvents, getKv, putKv } from '../src/lib/db';
 import { ackLocation, hitPayload, hotLogRows, responseEvent } from '../src/lib/hotlist';
-import { cancelCode1, checkDeadline, openHotAlert, raiseCode1, resetSafety, respond, safetyState, setAckSeconds, startSafety } from '../src/lib/safety';
+import { cancelCode1, checkDeadline, flushDeliveries, openHotAlert, raiseCode1, resetSafety, respond, safetyState, setAckSeconds, startSafety } from '../src/lib/safety';
 import type { GeoFix, HotEntry } from '../src/lib/types';
 import { hot } from './fixtures';
 
@@ -151,4 +151,38 @@ describe('hot-list officer safety: handset state machine', () => {
     expect(safetyState().code1).toBeNull();
     expect(cancels).toHaveLength(2);
   });
+
+  it('delivers the hit and the answer to the host, retrying a failed delivery', async () => {
+    const sent: string[] = [];
+    let fail = true;
+    setWindow({
+      reportHotHit: async (h: { id: string }) => { sent.push(`hit:${h.id}`); },
+      reportHotHitResponse: async (h: { id: string }, a: { response: string; note?: string }) => { if (fail) throw new Error('offline'); sent.push(`answer:${h.id}:${a.response}:${a.note}`); },
+    });
+    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    const hitId = safetyState().pending!.hits[0]!.hit.id;
+    await respond('safe_clear', 'left the segment');
+    await done;
+    await flushDeliveries(Date.now());
+    expect(sent).toEqual([`hit:${hitId}`]);
+    expect(safetyState().deliveries).toMatchObject([{ kind: 'response', attempts: 1 }]);
+    fail = false;
+    await flushDeliveries(Date.now() + 11_000);
+    expect(sent).toEqual([`hit:${hitId}`, `answer:${hitId}:safe_clear:left the segment`]);
+    expect(safetyState().deliveries).toEqual([]);
+  });
+
+  it('a soft Code 1 that was mid-send when the app closed is retried after a restart', async () => {
+    const pendingHit = { hit: { id: 'hx', plate: 'ZAF402', hotListEntryId: entry.id, scanId: 's1', at: 1000, ackDeadline: 61_000, officerNumber: '4471', location: null, entry: { make: '', type: '', colour: '', riskLevel: 'high', risks: [] } }, hotListId: list.id, key: entry.key, listName: 'x', notes: '' };
+    await putKv('safety', { pending: { hits: [pendingHit], openedAt: 1000, deadline: 61_000, softCode1: { status: 'sending', at: 61_000 } }, code1: null, deliveries: [] });
+    resetSafety();
+    const calls: unknown[] = [];
+    setWindow({ raiseSoftCode1: async (a: unknown) => (calls.push(a), { id: 'sc1-hx' }) });
+    await startSafety(() => ({ officerNumber: '4471', vibrate: false, sound: false })); // the restart
+    expect(safetyState().pending?.softCode1?.status).toBe('failed');
+    await checkDeadline(80_000);
+    expect(calls).toHaveLength(1);
+    expect(safetyState().pending?.softCode1).toMatchObject({ status: 'sent', id: 'sc1-hx' });
+  });
 });
+

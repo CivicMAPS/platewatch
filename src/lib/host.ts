@@ -9,6 +9,14 @@
 import type { HotHitPayload } from './types';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 
+export interface HotHitAnswer {
+  response: 'safe_clear' | 'code1';
+  note?: string;
+  at: number;
+  officerNumber: string;
+  location: HotHitPayload['location'];
+}
+
 /** An alert as the handset sees it (soft Code 1 or Code 1). */
 export interface LiveAlert {
   id: string;
@@ -42,8 +50,10 @@ export interface HotProfile {
 export interface EnforcementMapsHost {
   /** Officer number from the operating context. */
   officerNumber?: string;
-  /** Report a hot-list hit at once (the pop-up is open; the deadline runs). */
+  /** Report a hot-list hit at once (the pop-up is open; the deadline runs). Retried until it resolves. */
   reportHotHit?(hit: HotHitPayload): Promise<void>;
+  /** The officer's answer to a hit (SAFE & CLEAR or CODE 1, note, time, location). Retried until it resolves. */
+  reportHotHitResponse?(hit: HotHitPayload, answer: HotHitAnswer): Promise<void>;
   /** The pop-up was not acknowledged in time: soft Code 1 to dispatch and the team supervisor. */
   raiseSoftCode1?(args: { hit: HotHitPayload; at: number; location: HotHitPayload['location'] }): Promise<{ id: string | null }>;
   /** Code 1 (duress), from the pop-up or elsewhere. */

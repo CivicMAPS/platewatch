@@ -22,6 +22,9 @@ describe('issuing from the hand-off', () => {
     expect(variantFor(h({ suggestedCode: '702', basis: 'no_payment_found' }, { status: 'not_found' }), '702')).toBe('no_payment');
     expect(variantFor(h({ suggestedCode: '702', basis: 'paid_to_passed' }, { status: 'paid', paidTo: '2026-11-21T09:00:00.000+11:00' }), '702')).toBe('expired_session');
     expect(variantFor(h({ suggestedCode: '701', basis: 'allowance_exceeded' }), '702')).toBe('unknown');
+    // 701 changed to 702 while the paid session is still valid at the scan (10:41): not 702e.
+    expect(variantFor(h({ suggestedCode: '701', basis: 'allowance_exceeded' }, { status: 'paid', paidTo: '2026-11-21T12:00:00.000+11:00' }), '702')).toBe('unknown');
+    expect(variantFor(h({ suggestedCode: '701', basis: 'allowance_exceeded' }, { status: 'paid', paidTo: '2026-11-21T10:00:00.000+11:00' }), '702')).toBe('expired_session');
     expect(variantFor(h({ suggestedCode: '701', basis: 'allowance_exceeded' }), '701')).toBeUndefined();
   });
 

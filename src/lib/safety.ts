@@ -13,7 +13,7 @@ import { getKv, putHotEvent, putKv, uid } from './db';
 import { feedback } from './feedback';
 import { geo } from './geo';
 import { hitEvent, hitPayload, responseEvent } from './hotlist';
-import { host, officerNumber, type HotProfile, type LiveAlert } from './host';
+import { host, officerNumber, type HotHitAnswer, type HotProfile, type LiveAlert } from './host';
 import type { GeoFix, HotEntry, HotHitPayload, HotHitResponse, HotList, HotListEvent, Settings } from './types';
 
 export interface PendingHit {
@@ -26,7 +26,18 @@ export interface PendingHit {
 
 type SendState = { status: 'sending' | 'sent' | 'failed' | 'unavailable'; at: number; id?: string | null; error?: string };
 
+/** A hit or an answer waiting for the host (EnforcementMAPS or the backend), retried every 10 s. */
+export interface Delivery {
+  key: string;
+  kind: 'hit' | 'response';
+  hit: HotHitPayload;
+  answer?: HotHitAnswer;
+  attempts: number;
+  nextAt: number;
+}
+
 export interface SafetyState {
+  deliveries: Delivery[];
   pending: { hits: PendingHit[]; openedAt: number; deadline: number; softCode1?: SendState } | null;
   /** `cancelRequested`: the officer cancelled before the raise was confirmed; reconciled with the host. */
   code1: ({ id: string; cause: string; hit?: HotHitPayload; raisedAt: number; cancelRequested?: string } & SendState) | null;
@@ -39,7 +50,7 @@ const KV = 'safety';
 /** Seconds the officer has to answer the pop-up (owner: "a set time frame"; backend can override). */
 export const DEFAULT_ACK_SECONDS = 60;
 
-let state: SafetyState = { pending: null, code1: null, own: [], branch: [] };
+let state: SafetyState = { deliveries: [], pending: null, code1: null, own: [], branch: [] };
 let ackSeconds = DEFAULT_ACK_SECONDS;
 let settingsRef: () => Pick<Settings, 'officerNumber' | 'vibrate' | 'sound'> = () => ({ officerNumber: '', vibrate: true, sound: true });
 let resolveAck: ((events: HotListEvent[]) => void) | null = null;
@@ -55,7 +66,7 @@ export function onSafetyChange(fn: () => void): () => void {
 }
 function set(patch: Partial<SafetyState>, persist = true): void {
   state = { ...state, ...patch };
-  if (persist) void putKv(KV, { pending: state.pending, code1: state.code1 }).catch(() => undefined);
+  if (persist) void putKv(KV, { pending: state.pending, code1: state.code1, deliveries: state.deliveries }).catch(() => undefined);
   for (const fn of listeners) fn();
 }
 
@@ -77,11 +88,14 @@ const freshLocation = (fallback: HotHitPayload['location']) => fixToLoc(geo.best
 /** Load what was open before a reload and start the timers. */
 export async function startSafety(getSettings: typeof settingsRef): Promise<void> {
   settingsRef = getSettings;
-  if (started) return;
+  const saved = await getKv<Pick<SafetyState, 'pending' | 'code1' | 'deliveries'>>(KV).catch(() => undefined);
+  if (saved) {
+    // A send in flight when the app closed has no live request any more: make it retryable.
+    const pending = saved.pending?.softCode1?.status === 'sending' ? { ...saved.pending, softCode1: { ...saved.pending.softCode1, status: 'failed' as const, at: 0 } } : (saved.pending ?? null);
+    set({ pending, code1: saved.code1 ?? null, deliveries: saved.deliveries ?? [] }, false);
+  }
+  if (started || typeof window === 'undefined') return;
   started = true;
-  const saved = await getKv<Pick<SafetyState, 'pending' | 'code1'>>(KV).catch(() => undefined);
-  if (saved) set({ pending: saved.pending ?? null, code1: saved.code1 ?? null }, false);
-  if (typeof window === 'undefined') return;
   setInterval(tick, 1000);
   setInterval(() => void pollLive(), 5000);
   setInterval(() => void shareCode1Location(), 10_000);
@@ -109,8 +123,8 @@ export async function openHotAlert(args: {
   args.hits.forEach((h, i) => {
     const hit = pending[i]!.hit;
     void putHotEvent(hitEvent({ id: uid(), list: h.list, entry: h.entry, hit, device: navigator.userAgent })).catch(() => undefined);
-    void host()?.reportHotHit?.(hit).catch(() => undefined);
   });
+  queueDeliveries(pending.map((h) => ({ key: `hit:${h.hit.id}`, kind: 'hit' as const, hit: h.hit })));
   return answered;
 }
 
@@ -128,6 +142,10 @@ export async function respond(response: HotHitResponse, note: string, officerOve
     events.push(e);
   }
   set({ pending: null });
+  queueDeliveries(p.hits.map((h) => ({
+    key: `response:${h.hit.id}`, kind: 'response' as const, hit: { ...h.hit, officerNumber: officer },
+    answer: { response, ...(note.trim() ? { note: note.trim().slice(0, 1000) } : {}), at, officerNumber: officer, location },
+  })));
   const first = p.hits[0]?.hit;
   if (response === 'code1') await raiseCode1({ cause: 'hot_list_code1', ...(first ? { hit: { ...first, officerNumber: officer } } : {}) });
   resolveAck?.(events);
@@ -135,7 +153,33 @@ export async function respond(response: HotHitResponse, note: string, officerOve
   return events;
 }
 
+function queueDeliveries(items: Omit<Delivery, 'attempts' | 'nextAt'>[]): void {
+  const keys = new Set(items.map((d) => d.key));
+  set({ deliveries: [...state.deliveries.filter((d) => !keys.has(d.key)), ...items.map((d) => ({ ...d, attempts: 0, nextAt: 0 }))] });
+  void deliver(Date.now());
+}
+
+let delivering = false;
+/** Send due hits and answers to the host, hits before their answers; keep failures for 10 s later. */
+async function deliver(now: number): Promise<void> {
+  if (delivering) return;
+  delivering = true;
+  try {
+    const h = host();
+    for (const d of [...state.deliveries].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'hit' ? -1 : 1))) {
+      if (d.nextAt > now) continue;
+      const send = d.kind === 'hit' ? h?.reportHotHit : h?.reportHotHitResponse;
+      // No host, or a host without this capability: nothing to deliver to (the log stays on the device).
+      const done = !send ? true : await (d.kind === 'hit' ? h!.reportHotHit!(d.hit) : h!.reportHotHitResponse!(d.hit, d.answer!)).then(() => true, () => false);
+      set({ deliveries: done ? state.deliveries.filter((x) => x.key !== d.key) : state.deliveries.map((x) => (x.key === d.key ? { ...x, attempts: x.attempts + 1, nextAt: now + 10_000 } : x)) });
+    }
+  } finally {
+    delivering = false;
+  }
+}
+
 function tick(now = Date.now()): void {
+  if (state.deliveries.some((d) => d.nextAt <= now)) void deliver(now);
   const p = state.pending;
   if (!p) return;
   if (now < p.deadline) return;
@@ -284,7 +328,10 @@ export async function checkDeadline(now: number): Promise<void> {
   tick(now);
   await new Promise((r) => setTimeout(r, 0));
 }
+export async function flushDeliveries(now: number): Promise<void> {
+  await deliver(now);
+}
 export function resetSafety(): void {
-  state = { pending: null, code1: null, own: [], branch: [] };
+  state = { deliveries: [], pending: null, code1: null, own: [], branch: [] };
   resolveAck = null;
 }

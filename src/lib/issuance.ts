@@ -47,7 +47,10 @@ export function variantFor(h: HandoffLike, code: '701' | '702'): IssuedRecord['i
   if (code !== '702') return undefined;
   const p = payment(h);
   if (!p) return 'unknown';
-  return p.paidTo ? 'expired_session' : p.status === 'not_found' ? 'no_payment' : 'unknown';
+  // 702e only when the paid session had actually ended by the scan (an officer can change a 701 to
+  // 702 while the session is still valid: no payment basis, so "unknown", never "expired").
+  if (p.paidTo) return Date.parse(p.paidTo) <= Date.parse(String(h.times.scanAt ?? h.times.timeTo)) ? 'expired_session' : 'unknown';
+  return p.status === 'not_found' ? 'no_payment' : 'unknown';
 }
 
 export function evidenceCount(h: HandoffLike): number {

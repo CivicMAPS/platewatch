@@ -1,6 +1,7 @@
 import pg from 'pg';
 import migration001 from './migrations/001_init.sql?raw';
 import migration002 from './migrations/002_safety.sql?raw';
+import migration003 from './migrations/003_rejected.sql?raw';
 
 export type Db = pg.Pool;
 export type Tx = pg.PoolClient;
@@ -9,6 +10,7 @@ export type Tx = pg.PoolClient;
 const MIGRATIONS: { id: string; sql: string }[] = [
   { id: '001_init', sql: migration001 },
   { id: '002_safety', sql: migration002 },
+  { id: '003_rejected', sql: migration003 },
 ];
 
 /**

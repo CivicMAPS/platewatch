@@ -162,26 +162,42 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     expect(detail.json.statements.map((s: { type: string }) => s.type)).toEqual(['allocation', 'issue']);
   });
 
-  it('refuses a chain break, a skipped sequence, a tampered record and a chosen 702 variant', async () => {
+  it('refuses a chain break and a tampered record outright; a skipped sequence or a chosen 702 variant rejects the number but keeps the chain', async () => {
+    const post = (body: Record<string, unknown>) => call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', ...body } });
     const forked = await nextAllocation(t(8, 30), { prev: GENESIS_HASH });
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation: forked.allocation } })).json).toMatchObject({ error: 'chain_break' });
+    expect((await post({ allocation: forked.allocation })).json).toMatchObject({ error: 'chain_break' });
+    // Authentic and chained, but out of sequence: the number is refused, the statement kept in the chain.
     const skipped = await nextAllocation(t(8, 30), { sequence: seq + 2 });
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation: skipped.allocation } })).json).toMatchObject({ error: 'sequence' });
+    expect((await post({ allocation: skipped.allocation })).json).toMatchObject({ number: skipped.number, status: 'rejected', rejection: { code: 'sequence' } });
+    prevHash = skipped.allocation.hash; // the pool did not move
 
     const { number, allocation } = await nextAllocation(t(8, 30));
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation } })).status).toBe(200);
+    expect((await post({ allocation })).status).toBe(200);
     commit(allocation);
     const record = buildIssuedRecord({ number, handoff: handoff702(), values: values('702'), issuedAt: toLocalIso(t(8, 31)), toIso: toLocalIso });
     const closing = await close(number, allocation.hash, record, t(8, 31));
-    const tampered = { ...record, notes: 'changed after signing' };
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation, closing, record: tampered } })).json).toMatchObject({ error: 'record_hash' });
-    // A client that "chooses" 702e: re-signed honestly, but the server re-derives and refuses.
-    const chosen = { ...record, internalVariant: 'expired_session' as const };
-    const closing2 = await close(number, allocation.hash, chosen, t(8, 31));
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation, closing: closing2, record: chosen } })).json).toMatchObject({ error: 'variant' });
-    // The honest closing is still accepted.
-    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation, closing, record } })).json).toEqual({ number, status: 'issued' });
+    // A record that is not the signed one: refused outright (the handset resends what it holds).
+    expect((await post({ allocation, closing, record: { ...record, notes: 'changed after signing' } })).json).toMatchObject({ error: 'record_hash' });
+    expect((await post({ allocation, closing, record })).json).toEqual({ number, status: 'issued' });
     commit(closing);
+
+    // A client that "chooses" 702e: honestly signed, but the server re-derives and refuses the number.
+    const n2 = await nextAllocation(t(8, 32));
+    await post({ allocation: n2.allocation });
+    commit(n2.allocation);
+    const chosen = { ...buildIssuedRecord({ number: n2.number, handoff: handoff702(), values: values('702'), issuedAt: toLocalIso(t(8, 33)), toIso: toLocalIso }), internalVariant: 'expired_session' as const };
+    const c2 = await close(n2.number, n2.allocation.hash, chosen, t(8, 33));
+    expect((await post({ allocation: n2.allocation, closing: c2, record: chosen })).json).toMatchObject({ number: n2.number, status: 'rejected', rejection: { code: 'variant' } });
+    commit(c2);
+    expect((await call('GET', `/api/console/infringements/${n2.number}`, { staff: sup })).json.infringement).toMatchObject({ status: 'rejected', rejection: { code: 'variant' } });
+
+    // Later statements, chained onto the refused ones, are still accepted.
+    const n3 = await nextAllocation(t(8, 34));
+    expect((await post({ allocation: n3.allocation })).json).toEqual({ number: n3.number, status: 'allocated' });
+    commit(n3.allocation);
+    const c3 = await close(n3.number, n3.allocation.hash, null, t(8, 34));
+    expect((await post({ allocation: n3.allocation, closing: c3 })).json).toEqual({ number: n3.number, status: 'cancelled' });
+    commit(c3);
   });
 
   it('a cancelled number is consumed', async () => {
@@ -217,6 +233,19 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     const number = await issue702();
     expect((await call('POST', `/api/console/infringements/${number}/payment`, { staff: 'CL1' })).json).toEqual({ status: 'paid' });
     expect((await call('POST', `/api/console/infringements/${number}/payment`, { staff: sup })).status).toBe(409);
+  });
+
+  it('a reissue signed offline after the original was paid is rejected, and the device keeps syncing', async () => {
+    const original = await issue702();
+    await call('POST', `/api/console/infringements/${original}/payment`, { staff: 'CL1' });
+    const reissue = await issue702({ reissueOf: original }); // 200: kept in the chain
+    const d = (await call('GET', `/api/console/infringements/${reissue}`, { staff: sup })).json;
+    expect(d.infringement).toMatchObject({ status: 'rejected', rejection: { code: 'reissue' } });
+    expect(d.statements.map((x: { type: string }) => x.type)).toEqual(['allocation', 'issue']);
+    expect((await call('GET', `/api/console/infringements/${original}`, { staff: sup })).json.infringement.status).toBe('paid');
+    const next = await issue702();
+    expect((await call('GET', `/api/console/infringements/${next}`, { staff: sup })).json.infringement.status).toBe('issued');
+    expect((await call('GET', '/api/updates?since=0')).json.infringements.find((x: { number: string }) => x.number === reissue)).toMatchObject({ status: 'rejected', rejection: { code: 'reissue' } });
   });
 
   const hit = (id: string, at: number, officer = '4471', patch: Record<string, unknown> = {}) => ({

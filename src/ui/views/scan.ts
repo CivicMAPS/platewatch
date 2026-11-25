@@ -240,6 +240,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** Hot-list entries the officer confirmed as this vehicle / decided are not. */
   const hotConfirmed = new Set<string>();
   const hotDeclined = new Set<string>();
+  /** Safety pop-ups already opened for this capture: entry id → the answer and the evidence scan id. */
+  const hotAlerted = new Map<string, { answered: Promise<HotListEvent[]>; scanId: string }>();
   /** Permit look-alike decided for this capture (plate confirmed or not a match). */
   let permitDecided = false;
   /** Open look-alike prompt before anything is recorded: hot list first, then permit. */
@@ -327,6 +329,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     lookalikes = [];
     hotConfirmed.clear();
     hotDeclined.clear();
+    hotAlerted.clear();
     permitDecided = false;
     lookalikePrompt = null;
     hintSources = null;
@@ -629,6 +632,19 @@ export function scanView(params: Record<string, string>, app: App): View {
         return;
       }
       if (l.type === 'hot' && res.decision.kind === 'hot_match' && !res.hotHits.some((h) => h.list.id === l.id)) res.decision = { kind: 'hot_none' };
+      // Officer safety (owner 25/11/2026): the blocking pop-up as soon as the match is certain, before
+      // anything is written, so a storage failure (photos filling the handset) can never hold it back.
+      const exactHot = res.hotHits.filter((h) => h.strength === 'exact');
+      const freshHot = exactHot.filter((h) => !hotAlerted.has(h.entry.id)).map((h) => ({ h, scanId: uid() }));
+      if (freshHot.length) {
+        const answered = openHotAlert({
+          hits: freshHot.map(({ h, scanId }) => ({ list: h.list, entry: h.entry, scanId })),
+          at,
+          location: fixOf(pending.meta.location),
+          where: { listId: l.id, listName: l.name, ...(l.type === 'timed' && l.displayId ? { displayId: l.displayId } : {}) },
+        });
+        for (const { h, scanId } of freshHot) hotAlerted.set(h.entry.id, { answered, scanId });
+      }
       // 2. Permit: a similar permit plate never exempts; the officer checks the displayed permit.
       const openPermit = (l.type === 'timed' || l.type === 'permit_zone') && !permitDecided ? permitLookalikes(plate, l, allowLists) : [];
       if (openPermit.length) {
@@ -658,11 +674,17 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       // Officer-safety evidence: record exact hot-list sightings.
       const hotScanIds: Record<string, string> = {};
-      for (const hit of res.hotHits.filter((h) => h.strength === 'exact')) {
-        const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null);
-        await saveScan(rec);
-        hotScanIds[hit.entry.id] = rec.id;
-        if (hit.list.id === l.id) saved = rec;
+      for (const hit of exactHot) {
+        const id = hotAlerted.get(hit.entry.id)?.scanId ?? uid();
+        hotScanIds[hit.entry.id] = id;
+        try {
+          const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null, { id });
+          await saveScan(rec);
+          if (hit.list.id === l.id) saved = rec;
+        } catch (e) {
+          // The pop-up is already up and the hit reported; only the photo record is missing.
+          app.toast(`Hot-list photo not saved: ${(e as Error).message}`, 'error');
+        }
       }
 
       const d = res.decision;
@@ -678,17 +700,12 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts, hotScanIds };
       phase = 'result';
-      // Officer safety (owner 25/11/2026): a blocking pop-up until the officer answers CODE 1 or SAFE & CLEAR.
-      const exactHot = res.hotHits.filter((h) => h.strength === 'exact');
-      if (exactHot.length) {
+      // The officer's answer to the pop-up (opened above) is shown on the result.
+      const answers = [...new Set(exactHot.map((h) => hotAlerted.get(h.entry.id)?.answered).filter((a): a is Promise<HotListEvent[]> => !!a))];
+      if (answers.length) {
         const opened = result;
-        void openHotAlert({
-          hits: exactHot.map((h) => ({ list: h.list, entry: h.entry, scanId: hotScanIds[h.entry.id] ?? null })),
-          at,
-          location: fixOf(pending.meta.location),
-          where: { listId: l.id, listName: l.name, ...(l.type === 'timed' && l.displayId ? { displayId: l.displayId } : {}) },
-        }).then((events) => {
-          if (result === opened) result = { ...opened, hotAcks: events };
+        void Promise.all(answers).then((all) => {
+          if (result === opened) result = { ...opened, hotAcks: all.flat() };
           app.update();
         });
       }

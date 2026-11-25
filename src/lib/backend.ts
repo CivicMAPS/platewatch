@@ -193,10 +193,13 @@ async function pushOutbox(): Promise<void> {
       if (done) await removeOutbox(it.key, it.queuedAt);
     } catch (e) {
       const err = e as BackendError;
+      // A statement the server refuses outright (signature, chain, key) is not in its chain, so every
+      // later statement chained onto it would be refused too: keep it queued and stop here, visibly,
+      // instead of dropping it and the numbers after it (a supervisor must re-key the device).
       if (err instanceof BackendError && !err.retryable && it.kind === 'infringement') {
         await markInfringementRejected(it.id, err.message);
-        await removeOutbox(it.key, it.queuedAt);
-        continue;
+        await markOutboxFailed(it.key, it.queuedAt, err.message);
+        throw new BackendError(err.status, err.code, `Infringement sync stopped at ${it.id}: ${err.message} Later numbers are kept on the handset.`);
       }
       await markOutboxFailed(it.key, it.queuedAt, err.message);
       // Keep chain order: never send a later statement past a failed one.
@@ -213,9 +216,12 @@ async function pushOutbox(): Promise<void> {
 async function pushInfringement(number: string): Promise<boolean> {
   const b = await getBundle(number);
   if (!b) return true;
-  await request('POST', '/api/infringements/statements', { json: { keyId: b.keyId, scanId: b.scanId, allocation: b.allocation, closing: b.closing, record: b.record } });
+  const out = await request<{ status: string; rejection?: { code: string; message: string } }>('POST', '/api/infringements/statements', { json: { keyId: b.keyId, scanId: b.scanId, allocation: b.allocation, closing: b.closing, record: b.record } });
+  // Refused on a business rule (e.g. reissued offline after the original was paid): the server kept
+  // the statements in this key's chain, so later numbers still follow; this one is not valid.
+  if (out?.status === 'rejected') await markInfringementRejected(number, out.rejection?.message ?? 'Refused by the backend.');
   if (b.closing) {
-    await updateScanInfringement(b.scanId, number, (r) => ({ ...r, sync: 'synced' }));
+    if (out?.status !== 'rejected') await updateScanInfringement(b.scanId, number, (r) => ({ ...r, sync: 'synced' }));
     return true;
   }
   if (!isWizardOpen(number) && Date.now() - b.createdAt > 60_000) await closeNumber(number, null);
@@ -259,15 +265,20 @@ async function pullUpdates(): Promise<void> {
   const since = (await getKv<number>(key)) ?? 0;
   const u = await request<{
     cursor: number;
-    infringements: { number: string; scanId: string; status: InfringementRecord['status'] | 'paid' | 'allocated'; voidRequest: InfringementRecord['voidRequest'] & { decision?: 'approved' | 'rejected'; decidedBy?: string; decidedAt?: number }; paidAt: number | null }[];
+    infringements: { number: string; scanId: string; status: InfringementRecord['status'] | 'paid' | 'allocated' | 'rejected'; voidRequest: InfringementRecord['voidRequest'] & { decision?: 'approved' | 'rejected'; decidedBy?: string; decidedAt?: number }; paidAt: number | null; rejection?: { message?: string } }[];
   }>('GET', `/api/updates?since=${since}`);
   // The backend changed while this was in flight: these updates and this cursor are not for it.
   if (CURSOR_KEY() !== key) return;
   for (const x of u.infringements) {
     if (x.status === 'allocated') continue;
+    if (x.status === 'rejected') {
+      await markInfringementRejected(x.number, x.rejection?.message ?? 'Refused by the backend.');
+      continue;
+    }
+    const status = x.status === 'paid' ? 'issued' : x.status;
     await updateScanInfringement(x.scanId, x.number, (r) => ({
       ...r,
-      status: x.status === 'paid' ? 'issued' : x.status,
+      status,
       sync: 'synced',
       ...(x.paidAt ? { paidAt: x.paidAt } : {}),
       ...(x.voidRequest && r.voidRequest

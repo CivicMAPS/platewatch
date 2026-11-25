@@ -157,6 +157,16 @@ recordHash = SHA-256(canonical(issued record))
   what the statement commits to · uniqueness · record hash · hand-off validates against
   `schemas/platewatch-infringement-handoff.v1.schema.json` · locked time from and the internal 702
   classification **re-derived** (a client that sends a different one is refused).
+- **Refused statement vs rejected number.** A statement that fails who-signed-it or chain checks
+  (unknown or unapproved key, signature, chain head, number, uniqueness, a record that is not the
+  signed one) is refused: it is not part of the key's chain, and the handset stops sending
+  infringements at that point, keeping it and every later number queued, with the error shown, until
+  it is resolved (a device that has truly lost its chain needs a new key and approval). A
+  statement that is authentic and chains but breaks a **business rule** (sequence, date, council,
+  record checks, or a reissue of an infringement that is no longer issued — e.g. reissued offline
+  after the original was paid) is **kept in the chain** and the number is marked `rejected` with the
+  reason (`infringements.rejection`, shown on the record and in the console). The handset's later
+  statements, already chained onto it, are then accepted as normal.
 
 ## 3. Offence rules on the device (25/11/2026)
 
@@ -187,7 +197,7 @@ scan. The officer is never offered or shown "702e"; the wizard's offence chips r
 | `chain_heads` | `key_id` | Last accepted statement per key |
 | `pools` | `(officer, day)` | Last accepted sequence |
 | `infringements` | `number` | Status, offence, `internal_variant`, `variant_source`, shortfall, times, location, full issued record, reissue links, void request, `change_no` |
-| `infringement_events` | `id` | Life-cycle audit: allocated, issued, cancelled, void_requested, void_approved / rejected, voided_by_reissue, payment_recorded |
+| `infringement_events` | `id` | Life-cycle audit: allocated, issued, cancelled, void_requested, void_approved / rejected, voided_by_reissue, rejected (business rule; statements kept in the chain), payment_recorded |
 | `scans` / `evidence` | `id` / `scan_id` | Scan metadata (+ thumbnail) / evidence JPEG, SHA-256 checked against the capture hash |
 | `observations`, `hot_events` | `id` | Timings and hot-list entry-log events |
 | `staff` / `shifts` | `id` / `(staff_id, day)` | Roster: role (officer, dispatch, team supervisor, compliance lead), team, branch, officer number; who is on shift each council day |

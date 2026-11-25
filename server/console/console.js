@@ -7,7 +7,7 @@ const ROLE_LABEL = { officer: 'Officer', dispatch: 'Dispatch', team_supervisor: 
 const isManager = () => S.auth && (S.auth.role === 'team_supervisor' || S.auth.role === 'compliance_lead');
 const ALERT_STATUS = { active: ['alert', 'Active'], radio_requested: ['alert', 'Radio response requested'], resolved: ['active', 'Resolved — officer OK'], escalated: ['inactive', 'Escalated to Code 1'], acknowledged: ['alert', 'Acknowledged'], cleared: ['active', 'Cleared'], cancelled: ['inactive', 'Cancelled'] };
 const OPEN = new Set(['active', 'radio_requested', 'acknowledged']);
-const INF_PILL = { allocated: ['pending', 'Allocated'], issued: ['issued', 'PIN issued'], cancelled: ['inactive', 'Cancelled'], void_requested: ['alert', 'Void requested'], voided: ['inactive', 'Voided'], paid: ['active', 'Paid'] };
+const INF_PILL = { allocated: ['pending', 'Allocated'], issued: ['issued', 'PIN issued'], cancelled: ['inactive', 'Cancelled'], void_requested: ['alert', 'Void requested'], voided: ['inactive', 'Voided'], paid: ['active', 'Paid'], rejected: ['alert', 'Rejected'] };
 const VOID_LABEL = { officer_error: 'Officer error', permit_displayed: 'Permit displayed', incorrect_offence: 'Incorrect offence', incorrect_vehicle_details: 'Incorrect vehicle details', non_conforming_signage: 'Non-conforming signage', other: 'Other' };
 const VARIANT_LABEL = { no_payment: 'No valid payment', expired_session: 'Paid session expired (702e)', unknown: 'Unknown (no payment check)', '': '—' };
 
@@ -398,6 +398,7 @@ async function loadDetail() {
           h('dt', {}, 'Vehicle'), h('dd', {}, x.vehicle ? [x.vehicle.registrationState, x.vehicle.registrationType, x.vehicle.make, x.vehicle.type, x.vehicle.colour].filter(Boolean).join(' · ') : '—'),
           h('dt', {}, 'Notes'), h('dd', {}, x.notes || '—'),
           x.evidenceOverride ? [h('dt', {}, 'Evidence override'), h('dd', {}, x.evidenceOverride.reason)] : null,
+          x.rejection ? [h('dt', {}, 'Rejected'), h('dd', {}, `${x.rejection.message} (${x.rejection.code}) — the signed statements are kept in the device's chain; the number is not valid.`)] : null,
           x.reissueOf ? [h('dt', {}, 'Reissue of'), h('dd', { class: 'mono' }, fmtIN(x.reissueOf))] : null,
           x.reissuedBy ? [h('dt', {}, 'Replaced by'), h('dd', { class: 'mono' }, fmtIN(x.reissuedBy))] : null,
           x.voidRequest ? [h('dt', {}, 'Void request'), h('dd', {}, `${VOID_LABEL[x.voidRequest.reason] || x.voidRequest.reason}${x.voidRequest.note ? ` — ${x.voidRequest.note}` : ''}${x.voidRequest.decision ? ` · ${x.voidRequest.decision} by ${x.voidRequest.decidedBy}` : ''}`)] : null),

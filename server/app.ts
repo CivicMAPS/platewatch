@@ -242,15 +242,15 @@ export function createApp(db: Db, cfg: Config) {
   r.on('GET', '/api/updates', async (c) => {
     const keyId = needDevice(c);
     const since = Number(c.url.searchParams.get('since') ?? 0) || 0;
-    const inf = await db.query<{ number: string; scan_id: string; status: string; void_request: unknown; paid_at: Date | null; change_no: string }>(
-      'select number, scan_id, status, void_request, paid_at, change_no from infringements where key_id = $1 and change_no > $2 order by change_no limit 500',
+    const inf = await db.query<{ number: string; scan_id: string; status: string; void_request: unknown; paid_at: Date | null; change_no: string; rejection: { message?: string } | null }>(
+      'select number, scan_id, status, void_request, paid_at, change_no, rejection from infringements where key_id = $1 and change_no > $2 order by change_no limit 500',
       [keyId, since],
     );
     const cursor = Math.max(since, ...inf.rows.map((x) => Number(x.change_no)));
     await touchDevice(keyId);
     return {
       cursor,
-      infringements: inf.rows.map((x) => ({ number: x.number, scanId: x.scan_id, status: x.status, voidRequest: x.void_request, paidAt: ms(x.paid_at) })),
+      infringements: inf.rows.map((x) => ({ number: x.number, scanId: x.scan_id, status: x.status, voidRequest: x.void_request, paidAt: ms(x.paid_at), ...(x.rejection ? { rejection: x.rejection } : {}) })),
     };
   });
 
@@ -289,7 +289,7 @@ export function createApp(db: Db, cfg: Config) {
     number: x.number, status: x.status, scanId: x.scan_id, officerNumber: x.officer_number, plate: x.plate, offenceCode: x.offence_code,
     internalVariant: x.internal_variant, variantSource: x.variant_source, shortfallMinutes: x.shortfall_minutes,
     timeFrom: iso(x.time_from as Date | null), timeTo: iso(x.time_to as Date | null), issuedAt: iso(x.issued_at as Date | null), allocatedAt: iso(x.allocated_at as Date),
-    location: x.location, reissueOf: x.reissue_of, reissuedBy: x.reissued_by, voidRequest: x.void_request, paidAt: iso(x.paid_at as Date | null), updatedAt: iso(x.updated_at as Date),
+    location: x.location, reissueOf: x.reissue_of, reissuedBy: x.reissued_by, voidRequest: x.void_request, paidAt: iso(x.paid_at as Date | null), updatedAt: iso(x.updated_at as Date), rejection: x.rejection ?? null,
   });
 
   r.on('GET', '/api/console/infringements', async (c) => {

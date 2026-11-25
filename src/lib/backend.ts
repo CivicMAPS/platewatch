@@ -188,9 +188,8 @@ async function pushOutbox(): Promise<void> {
   for (const it of items) {
     if (it.kind !== 'voidRequest' && it.kind !== 'evidence') continue;
     try {
-      if (it.kind === 'voidRequest') await pushVoidRequest(it.id);
-      else await pushEvidence(it.id);
-      await removeOutbox(it.key, it.queuedAt);
+      const done = it.kind === 'voidRequest' ? (await pushVoidRequest(it.id), true) : await pushEvidence(it.id, it.queuedAt);
+      if (done) await removeOutbox(it.key, it.queuedAt);
     } catch (e) {
       await markOutboxFailed(it.key, it.queuedAt, (e as Error).message);
     }
@@ -286,10 +285,15 @@ async function pushVoidRequest(number: string): Promise<void> {
   await request('POST', `/api/infringements/${encodeURIComponent(number)}/void-request`, { json: { reason: v.reason, note: v.note, requestedAt: v.requestedAt, officerNumber: settingsRef().officerNumber } });
 }
 
-async function pushEvidence(scanId: string): Promise<void> {
+/** How long an evidence job waits for its scan to be saved (the hit is reported before the photo). */
+const EVIDENCE_WAIT_MS = 60 * 60_000;
+
+/** Upload a scan's photo. False while the scan is not saved yet (kept queued, up to an hour). */
+async function pushEvidence(scanId: string, queuedAt: number): Promise<boolean> {
   const s = await getScan(scanId);
-  if (!s) return;
+  if (!s) return Date.now() - queuedAt > EVIDENCE_WAIT_MS;
   await request('PUT', `/api/evidence/${encodeURIComponent(scanId)}`, { body: s.image, headers: { 'Content-Type': s.image.type || 'image/jpeg', 'X-Content-SHA256': s.sha256 }, timeoutMs: 60_000 });
+  return true;
 }
 
 async function updateScanInfringement(scanId: string, number: string, fn: (r: InfringementRecord) => InfringementRecord): Promise<void> {

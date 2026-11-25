@@ -392,6 +392,15 @@ async function main() {
   await change(field2, '[data-testid=backend-url]', ORIGIN);
   await change(field2, '[data-testid=backend-token]', DEVICE_TOKEN);
 
+  // Dispatch is typing in a console form when the alert comes in: it must still see the banner.
+  const disp = await browser.newPage();
+  await disp.setViewport({ width: 1366, height: 900 });
+  watch(disp, 'dispatch');
+  await consoleLogin(disp, 'D1');
+  await clickText(disp, 'Paid sessions (test)');
+  await disp.waitForSelector('main input', { visible: true });
+  await disp.focus('main input');
+
   // 8c. No answer: the handset raises the soft Code 1 at the deadline (10 s in this test).
   await scanOn('FT Munro St P10', 'PWH801');
   await app.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
@@ -401,11 +410,11 @@ async function main() {
     throw e;
   });
   await shot(app, 'hot-popup-soft-code1-sent');
-  const disp = await browser.newPage();
-  await disp.setViewport({ width: 1366, height: 900 });
-  watch(disp, 'dispatch');
-  await consoleLogin(disp, 'D1');
-  await disp.waitForSelector('.hot-banner[data-kind=soft_code1]', { visible: true, timeout: 20000 });
+  // The console is a background tab here (Puppeteer's visibility polling needs the foreground): poll the DOM.
+  await until('soft Code 1 banner on the focused console', () => disp.evaluate(() => !!document.querySelector('.hot-banner[data-kind=soft_code1]')));
+  if (!(await disp.evaluate(() => document.activeElement?.tagName === 'INPUT' && !!document.activeElement.closest('main'))))
+    throw new Error('the console form lost its focus: the banner should appear without redrawing the form');
+  await clickText(disp, 'Live');
   const soft = (await consoleApi('GET', '/api/console/alerts', 'D1')).alerts.find((x) => x.kind === 'soft_code1' && x.status === 'active');
   if (soft.recipients.staffIds.join() !== 'S1' || soft.recipients.fallback) throw new Error(`soft Code 1 should go to dispatch + team A supervisor S1: ${JSON.stringify(soft.recipients)}`);
   if ((await consoleApi('GET', '/api/console/alerts', 'S2')).alerts.find((x) => x.id === soft.id).forMe) throw new Error('team B supervisor should not get the banner');

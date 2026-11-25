@@ -43,10 +43,25 @@ const KEY = () => scoped('signingKey');
 const CHAIN = () => scoped('inChain');
 const bundleKey = (n: string) => `inBundle:${n}`;
 
+interface LockManagerLike {
+  request<T>(name: string, options: { mode: 'exclusive' }, fn: () => Promise<T>): Promise<T>;
+}
+
+/**
+ * Run `fn` holding a lock shared by every tab and the installed PWA of this origin (Web Locks).
+ * They share the IndexedDB key and chain, so two contexts must never read the same chain head and
+ * sign two statements onto it. Where Web Locks are unavailable, the in-page lock is all there is.
+ */
+function crossContext<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator?.locks;
+  return locks ? locks.request(name, { mode: 'exclusive' }, fn) : fn();
+}
+
 let lock: Promise<unknown> = Promise.resolve();
-/** Serialise everything that reads and advances the chain. */
+/** Serialise everything that reads and advances the chain (in this page and across contexts). */
 function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = lock.then(fn, fn);
+  const guarded = () => crossContext('platewatch-signer', fn);
+  const run = lock.then(guarded, guarded);
   lock = run.catch(() => undefined);
   return run;
 }
@@ -58,14 +73,14 @@ export function deviceKey(): Promise<StoredKey> {
   const key = KEY();
   const pending = creating.get(key);
   if (pending) return pending;
-  const p = (async () => {
+  const p = crossContext(`platewatch-key:${key}`, async () => {
     const existing = await getKv<StoredKey>(key);
     if (existing?.privateKey) return existing;
     const k = await generateSigningKey();
     const stored: StoredKey = { ...k, createdAt: Date.now() };
     await putKv(key, stored);
     return stored;
-  })();
+  });
   creating.set(key, p);
   void p.finally(() => creating.delete(key)).catch(() => undefined);
   return p;

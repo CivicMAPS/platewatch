@@ -142,9 +142,15 @@ async function refresh() {
     S.error = null;
   } catch (e) { S.error = e.message; }
   siren();
-  // Do not redraw under someone typing (forms keep their values); banners refresh on the next tick.
+  // Under someone typing, redraw only the safety banners (forms keep their values): a focused field
+  // left unattended must never hide a soft Code 1 or a Code 1.
   const a = document.activeElement;
-  if (a && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) && a.closest('main')) return;
+  if (a && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) && a.closest('main')) {
+    const current = document.querySelector('.banners');
+    if (current) current.replaceWith(banners());
+    else draw();
+    return;
+  }
   draw();
 }
 
@@ -185,25 +191,33 @@ async function act(id, action, body) {
   if (S.selected?.kind === 'alert') loadDetail();
 }
 
-/** Audible alarm while a Code 1 for this console is not yet acknowledged (needs one click on the page first). */
+/**
+ * Audible alarm until acknowledged (needs one click on the page first): a Code 1 siren, or for a
+ * soft Code 1 waiting for this console a softer repeating chime.
+ */
 let audioCtx = null;
 let sirenTimer = null;
+let sirenMode = null;
 function siren() {
-  const ringing = (S.data.alerts || []).some((a) => a.kind === 'code1' && a.status === 'active' && a.forMe);
-  if (ringing && !sirenTimer) {
-    const beep = () => {
-      try {
-        audioCtx ??= new AudioContext();
-        for (let i = 0; i < 3; i++) {
-          const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-          o.type = 'sawtooth'; o.frequency.value = i % 2 ? 740 : 980; g.gain.value = 0.15;
-          o.connect(g).connect(audioCtx.destination); o.start(audioCtx.currentTime + i * 0.3); o.stop(audioCtx.currentTime + i * 0.3 + 0.25);
-        }
-      } catch { /* no audio */ }
-    };
-    beep();
-    sirenTimer = setInterval(beep, 2000);
-  } else if (!ringing && sirenTimer) { clearInterval(sirenTimer); sirenTimer = null; }
+  const mine = (S.data.alerts || []).filter((a) => a.status === 'active' && a.forMe);
+  const mode = mine.some((a) => a.kind === 'code1') ? 'code1' : mine.some((a) => a.kind === 'soft_code1') ? 'soft' : null;
+  if (mode === sirenMode) return;
+  if (sirenTimer) { clearInterval(sirenTimer); sirenTimer = null; }
+  sirenMode = mode;
+  if (!mode) return;
+  const tones = mode === 'code1' ? { type: 'sawtooth', freqs: [980, 740, 980], gain: 0.15, every: 2000 } : { type: 'sine', freqs: [660, 880], gain: 0.1, every: 4000 };
+  const beep = () => {
+    try {
+      audioCtx ??= new AudioContext();
+      tones.freqs.forEach((f, i) => {
+        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+        o.type = tones.type; o.frequency.value = f; g.gain.value = tones.gain;
+        o.connect(g).connect(audioCtx.destination); o.start(audioCtx.currentTime + i * 0.3); o.stop(audioCtx.currentTime + i * 0.3 + 0.25);
+      });
+    } catch { /* no audio */ }
+  };
+  beep();
+  sirenTimer = setInterval(beep, tones.every);
 }
 
 function draw() {

@@ -487,6 +487,31 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect(backend.backendState().pending).toBe(0);
   });
 
+  it('an evidence job queued before its scan is saved waits for it, then uploads the photo', async () => {
+    const { closeDb, enqueue, getOutbox, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' } as never;
+    backend.installBackend(() => settings);
+    const dev = await backend.registerDevice();
+    await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    // The hit is reported (and its evidence queued) while the scan is still being saved.
+    await enqueue('evidence', 'sEv');
+    await backend.syncNow();
+    expect((await getOutbox()).map((x) => x.key)).toContain('evidence:sEv');
+    const bytes = new TextEncoder().encode('hot-list photo bytes');
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    await saveScan(scan('sEv', t(9, 30), { outcome: 'hot_sighting', plate: 'ZAF402', key: 'ZAF402', image: new Blob([bytes], { type: 'image/jpeg' }), sha256: sha }));
+    await backend.syncNow();
+    expect(backend.backendState().lastError).toBeUndefined();
+    expect((await getOutbox()).map((x) => x.key)).not.toContain('evidence:sEv');
+    const photo = await fetch(`${base}/api/console/evidence/sEv`, { headers: staff });
+    expect(photo.status).toBe(200);
+    expect(Buffer.from(await photo.arrayBuffer()).toString()).toBe('hot-list photo bytes');
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');

@@ -94,3 +94,17 @@ describe('paymentLines (evidence data bar and "Check payment before enforcing")'
     expect(paymentLines(undefined)).toEqual([]);
   });
 });
+
+describe('paid session from the provider lookup', () => {
+  it("ignores a session that ended before the scan's day (it would otherwise be moved onto today)", async () => {
+    const { paidSessionForScan } = await import('../src/lib/payment');
+    const scan = new Date(2026, 10, 25, 9, 0).getTime();
+    const yesterday = { paidFrom: new Date(2026, 10, 24, 8, 0).getTime(), paidTo: new Date(2026, 10, 24, 10, 0).getTime() };
+    const today = { paidFrom: new Date(2026, 10, 25, 8, 0).getTime(), paidTo: new Date(2026, 10, 25, 8, 30).getTime() };
+    const overnight = { paidFrom: new Date(2026, 10, 24, 22, 0).getTime(), paidTo: new Date(2026, 10, 25, 1, 0).getTime() };
+    expect(paidSessionForScan(yesterday, scan)).toBeNull();
+    expect(paidSessionForScan(today, scan)).toBe(today);
+    expect(paidSessionForScan(overnight, scan)).toBe(overnight);
+    expect(paidSessionForScan(null, scan)).toBeNull();
+  });
+});

@@ -99,3 +99,13 @@ export function restrictionPaymentLabel(payment: PaymentAreas | undefined, r: Pi
     ...r.paidBy.payStay.map((z) => withMeters(`PayStay ${z}`, meters.filter((m) => m.payStay.includes(z)))),
   ].join(', ');
 }
+
+/**
+ * A paid session from the provider lookup, or null when it ended before the scan's local day (an
+ * earlier day's session says nothing about today; HH:MM on the form would move it onto the scan day).
+ */
+export function paidSessionForScan<T extends { paidFrom: number; paidTo: number }>(found: T | null, scanAt: number): T | null {
+  if (!found) return null;
+  const dayStart = new Date(scanAt).setHours(0, 0, 0, 0);
+  return found.paidTo >= dayStart ? found : null;
+}

@@ -135,19 +135,18 @@ export async function respond(response: HotHitResponse, note: string, officerOve
   const at = Date.now();
   const officer = officerOverride?.trim() || currentOfficer() || 'unknown';
   const location = freshLocation(p.hits[0]?.hit.location ?? null);
-  const events: HotListEvent[] = [];
-  for (const h of p.hits) {
-    const e = responseEvent({ id: uid(), hit: { ...h.hit, officerNumber: officer || h.hit.officerNumber }, hotListId: h.hotListId, key: h.key, response, note, at, officerNumber: officer, location, device: navigator.userAgent });
-    await putHotEvent(e);
-    events.push(e);
-  }
+  // CODE 1 first: duress must never wait on, or fail with, the local log (e.g. storage full).
+  const first = p.hits[0]?.hit;
+  const raising = response === 'code1' ? raiseCode1({ cause: 'hot_list_code1', ...(first ? { hit: { ...first, officerNumber: officer } } : {}) }) : Promise.resolve();
   set({ pending: null });
   queueDeliveries(p.hits.map((h) => ({
     key: `response:${h.hit.id}`, kind: 'response' as const, hit: { ...h.hit, officerNumber: officer },
     answer: { response, ...(note.trim() ? { note: note.trim().slice(0, 1000) } : {}), at, officerNumber: officer, location },
   })));
-  const first = p.hits[0]?.hit;
-  if (response === 'code1') await raiseCode1({ cause: 'hot_list_code1', ...(first ? { hit: { ...first, officerNumber: officer } } : {}) });
+  const events = p.hits.map((h) => responseEvent({ id: uid(), hit: { ...h.hit, officerNumber: officer || h.hit.officerNumber }, hotListId: h.hotListId, key: h.key, response, note, at, officerNumber: officer, location, device: navigator.userAgent }));
+  // Best-effort local log: a failed write never undoes the answer or the alert.
+  for (const e of events) await putHotEvent(e).catch((err: unknown) => console.warn('[safety] answer not logged on the device', err));
+  await raising;
   resolveAck?.(events);
   resolveAck = null;
   return events;

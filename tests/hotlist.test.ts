@@ -184,5 +184,24 @@ describe('hot-list officer safety: handset state machine', () => {
     expect(calls).toHaveLength(1);
     expect(safetyState().pending?.softCode1).toMatchObject({ status: 'sent', id: 'sc1-hx' });
   });
+
+  it('CODE 1 is raised even when the local log cannot be written (storage full)', async () => {
+    const raised: string[] = [];
+    setWindow({ raiseCode1: async (a: { cause: string }) => (raised.push(a.cause), { id: 'c1' }) });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    await new Promise((r) => setTimeout(r, 0));
+    await closeDb();
+    const real = globalThis.indexedDB;
+    (globalThis as { indexedDB: unknown }).indexedDB = { open: () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); } };
+    try {
+      const events = await respond('code1', '');
+      expect(raised).toEqual(['hot_list_code1']);
+      expect(events[0]).toMatchObject({ response: 'code1' }); // answer still recorded in memory and delivered
+      expect(safetyState().code1).toMatchObject({ status: 'sent' });
+    } finally {
+      (globalThis as { indexedDB: unknown }).indexedDB = real;
+      await closeDb();
+    }
+  });
 });
 

@@ -1,7 +1,7 @@
 import { patrol, hasPatrol, frameUrlFor, type Sighting } from '../../lib/patrol';
 import { deviceTimeZone, localDateString, toLocalIso } from '../../lib/time';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { isPaidBy, paymentFor, paymentLines } from '../../lib/payment';
+import { isPaidBy, paymentFor, paymentLines, paidSessionForScan } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { CameraController, CameraError, fileToCanvas, type CameraCapabilities } from '../../lib/camera';
@@ -108,7 +108,11 @@ interface ResultState {
 
 
 const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', error: '' }) as { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string };
+const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', error: '' }) as {
+  status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string;
+  /** Exact times from the test provider, used when the officer saves them unchanged (HH:MM loses the date). */
+  lookedUp?: { paidFrom: number; paidTo: number };
+};
 const SOURCE_LABEL: Record<PaymentSource, string> = { easypark: 'EasyPark', paystay: 'PayStay', meter: 'Meter', ticket: 'Ticket', other: 'Other' };
 
 /** A capture's GPS fix as stored on hot-list events and payment checks. */
@@ -151,7 +155,7 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** "Dismiss offence alert" reasons sheet open. */
   let dismissOpen = false;
   /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
-  let payForm: { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string } = emptyPayForm();
+  let payForm: ReturnType<typeof emptyPayForm> = emptyPayForm();
   let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
   /** Issue infringement hand-off sheet (WF-S31 31a), with the vehicle details and second plate entry. */
   let handoffOffer: OffenceOffer | null = null;
@@ -1726,10 +1730,11 @@ export function scanView(params: Record<string, string>, app: App): View {
     if (!pending || !result?.saved) return;
     const ref = payForm.source?.ref ?? pending.meta.payment?.easyPark?.[0];
     try {
-      const sess = await paymentLookup(result.saved.plate, pending.meta.capturedAt, ref);
+      // A session that ended before the scan day says nothing about today: treat it as none found.
+      const sess = paidSessionForScan(await paymentLookup(result.saved.plate, pending.meta.capturedAt, ref), pending.meta.capturedAt);
       payForm = sess
-        ? { ...payForm, status: 'paid', source: { kind: sess.source as PaymentSource, ref: sess.sourceRef || undefined }, paidFrom: hhmm(sess.paidFrom), paidTo: hhmm(sess.paidTo), error: '' }
-        : { ...payForm, status: 'not_found', source: payForm.source ?? (ref ? { kind: 'easypark', ref } : null), error: '' };
+        ? { ...payForm, status: 'paid', source: { kind: sess.source as PaymentSource, ref: sess.sourceRef || undefined }, paidFrom: hhmm(sess.paidFrom), paidTo: hhmm(sess.paidTo), lookedUp: { paidFrom: sess.paidFrom, paidTo: sess.paidTo }, error: '' }
+        : { ...payForm, status: 'not_found', source: payForm.source ?? (ref ? { kind: 'easypark', ref } : null), lookedUp: undefined, error: '' };
       app.toast(sess ? `Paid session found: ${hhmm(sess.paidFrom)}–${hhmm(sess.paidTo)}. Check and save.` : 'No paid session found for this plate. Check and save.', 'info');
     } catch (e) {
       payForm = { ...payForm, error: `Lookup failed: ${(e as Error).message}` };
@@ -1749,6 +1754,8 @@ export function scanView(params: Record<string, string>, app: App): View {
     if (f.status === 'paid') {
       paidFrom = timeOnDay(scanAt, f.paidFrom || hhmm(scanAt)) ?? undefined;
       paidTo = timeOnDay(scanAt, f.paidTo) ?? undefined;
+      // Unchanged lookup values: keep the provider's exact times (dates included).
+      if (f.lookedUp && f.paidFrom === hhmm(f.lookedUp.paidFrom) && f.paidTo === hhmm(f.lookedUp.paidTo)) ({ paidFrom, paidTo } = f.lookedUp);
       if (paidTo === undefined) return void ((payForm = { ...f, error: 'Enter paid to (HH:MM).' }), app.update());
       // A session that crosses midnight: paid to earlier than paid from ends the next day.
       if (paidFrom !== undefined && paidTo <= paidFrom) paidTo += 86_400_000;

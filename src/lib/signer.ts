@@ -98,8 +98,8 @@ export async function getBundle(number: string): Promise<StoredBundle | undefine
 }
 
 /** The new chain head, the signed bundle and its outbox row: one transaction (never a chain gap). */
-async function commit(chainState: ChainState, b: StoredBundle): Promise<void> {
-  await putKvsAndQueue([[CHAIN(), chainState], [bundleKey(b.number), b]], { kind: 'infringement', id: b.number });
+async function commit(chainState: ChainState, b: StoredBundle, evidence: readonly string[] = []): Promise<void> {
+  await putKvsAndQueue([[CHAIN(), chainState], [bundleKey(b.number), b]], [{ kind: 'infringement', id: b.number }, ...evidence.map((id) => ({ kind: 'evidence' as const, id }))]);
 }
 
 const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|${day}`;
@@ -171,7 +171,10 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
     };
     const closing = await signStatement(k.privateKey, statement);
     const next: StoredBundle = { ...b, closing: closing as unknown as IssueBundle['closing'], ...(record ? { record } : {}) };
-    await commit({ ...c, prevHash: closing.hash }, next);
+    // The evidence uploads are queued in the same transaction as the signed issue: an interruption
+    // can never leave an issued number whose photos are not on their way.
+    const evidence = record ? ((record.handoff as { evidence?: { scanId?: string }[] }).evidence ?? []).map((e) => e.scanId).filter((id): id is string => !!id) : [];
+    await commit({ ...c, prevHash: closing.hash }, next, evidence);
     return next;
   });
 }

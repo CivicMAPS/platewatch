@@ -478,7 +478,8 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     await backend.syncNow();
     expect(backend.backendState().lastError).toBeUndefined();
     expect((await detail(a.number)).status).toBe('cancelled');
-    expect(backend.backendState().pending).toBe(0);
+    // Nothing of the chain is left queued (evidence jobs wait for scans this test never saves).
+    expect((await (await import('../src/lib/db')).getOutbox()).filter((x) => x.kind === 'infringement')).toEqual([]);
   });
 
   it('interleaved numbers (A recovered while B was open) are sent statement by statement in chain order', async () => {
@@ -504,7 +505,8 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     const status = async (n: string) => (await (await fetch(`${base}/api/console/infringements/${n}`, { headers: staff })).json()).infringement.status;
     expect(await status(a.number)).toBe('cancelled');
     expect(await status(b.number)).toBe('issued');
-    expect(backend.backendState().pending).toBe(0);
+    // Nothing of the chain is left queued (evidence jobs wait for scans this test never saves).
+    expect((await (await import('../src/lib/db')).getOutbox()).filter((x) => x.kind === 'infringement')).toEqual([]);
   });
 
   it('an evidence job queued before its scan is saved waits for it, then uploads the photo', async () => {

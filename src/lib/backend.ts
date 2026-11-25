@@ -291,6 +291,8 @@ export async function reconcileIssued(): Promise<number> {
       ? { ...out.scan, infringement: { ...out.scan.infringement!, reissueOf: r.reissueOf }, infringementHistory: [...(scan.infringementHistory ?? []), { ...cur, status: 'voided' }] }
       : out.scan;
     await saveScan(next, obs ? out.observation : undefined);
+    // Issues signed before evidence was queued with them: make sure their photos still go up.
+    for (const e of (handoff.evidence as { scanId?: string }[] | undefined) ?? []) if (e.scanId) await enqueue('evidence', e.scanId);
     fixed++;
   }
   return fixed;
@@ -455,8 +457,7 @@ async function runWizard(args: { handoff: InfringementHandoff; scanId: string; i
     }
     const issuedAt = Date.now();
     const record = buildIssuedRecord({ number: b.number, handoff: args.handoff, values: outcome.values, issuedAt: toLocalIso(issuedAt), toIso: toLocalIso, ...(args.reissueOf ? { reissueOf: args.reissueOf, reissueReason: args.reissueReason } : {}) });
-    await closeNumber(b.number, record, issuedAt);
-    for (const e of (args.handoff.evidence as { scanId: string }[] | undefined) ?? []) await enqueue('evidence', e.scanId);
+    await closeNumber(b.number, record, issuedAt); // queues the evidence uploads with the signed issue
     requestSync(100);
     return {
       record,

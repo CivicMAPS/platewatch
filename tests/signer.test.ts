@@ -81,4 +81,14 @@ describe('I-N signer across tabs sharing one device key', () => {
     await a.raisePoolFloors('4471', [{ day, lastSequence: 10 }], 'https://b.example');
     expect(((await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's2' })).allocation.statement as { sequence: number }).sequence).toBe(11);
   });
+
+  it('signing an issue queues its evidence uploads in the same transaction', async () => {
+    const [a] = await twoTabs();
+    const { getOutbox } = await import('../src/lib/db');
+    const n = await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's1' });
+    const record = { number: n.number, handoff: { evidence: [{ scanId: 'first' }, { scanId: 's1' }] } } as never;
+    await a.closeNumber(n.number, record);
+    const keys = (await getOutbox()).map((x) => x.key);
+    expect(keys).toEqual(expect.arrayContaining([`infringement:${n.number}`, 'evidence:first', 'evidence:s1']));
+  });
 });

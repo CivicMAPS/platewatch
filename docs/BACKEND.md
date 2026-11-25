@@ -285,3 +285,4 @@ the analytics (14 checks, two officer handsets, production CSP, no console error
 | BE-11 | Radio response wait | Manual by default; optional auto-escalation (`PLATEWATCH_RADIO_ESCALATE_SECONDS`) — **DECISION REQUIRED** |
 | BE-12 | Officer cancels own Code 1 | Allowed from the handset as "raised in error" (logged); **OWNER VALIDATION REQUIRED** |
 | BE-13 | Hot-list hit retention (personal data) | No retention job yet (OQ29-5) |
+| BE-14 | Handset swapped mid-shift | The new handset continues the officer's daily I-N sequence from the backend on its first sync; one that issues **before** that sync (offline) can collide with the old handset's numbers and is refused (`sequence`) |

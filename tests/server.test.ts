@@ -623,6 +623,30 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     settings.backendUrl = base;
   });
 
+  it('recovery replaces an earlier cancelled attempt on the scan, but never an issued infringement', async () => {
+    const { closeDb, getScan, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    backend.installBackend(() => ({ backendUrl: base, backendToken: DEVICE, officerNumber: '5123' }) as never);
+    const inf = (number: string, status: 'cancelled' | 'issued') => ({ status, sync: 'pending' as const, pinSource: 'device' as const, handoffId: 'h0', number, offenceCode: '702' as const, offenceOverridden: false, timeFrom: 0, timeTo: 0, officerNumber: '5123' });
+    const values = { offenceCode: '702' as const, timeTo: t(8, 25), notes: 'n', vehicle: { make: 'Holden', type: 'Hatchback', colour: 'White', registrationType: 'Standard' }, evidenceOverride: 'x' };
+    // Scan C: the wizard was cancelled (number X), started again, and the second number's issue was signed.
+    await saveScan({ ...scan('sC', t(8, 20, 5)), observationId: null, infringement: inf('05123000000000000001', 'cancelled') });
+    const y = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sC' });
+    await signer.closeNumber(y.number, buildIssuedRecord({ number: y.number, handoff: handoff(), values, issuedAt: toLocalIso(t(8, 26)), toIso: toLocalIso }));
+    // Scan D: already shows another issued infringement; a stray signed issue must not displace it.
+    await saveScan({ ...scan('sD', t(8, 20, 5)), observationId: null, infringement: inf('05123000000000000002', 'issued') });
+    const z = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sD' });
+    await signer.closeNumber(z.number, buildIssuedRecord({ number: z.number, handoff: handoff(), values, issuedAt: toLocalIso(t(8, 27)), toIso: toLocalIso }));
+    expect(await backend.reconcileIssued()).toBe(1);
+    const c = await getScan('sC');
+    expect(c?.infringement).toMatchObject({ number: y.number, status: 'issued' });
+    expect(c?.infringementHistory).toEqual([expect.objectContaining({ number: '05123000000000000001', status: 'cancelled' })]);
+    expect((await getScan('sD'))?.infringement).toMatchObject({ number: '05123000000000000002', status: 'issued' });
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');

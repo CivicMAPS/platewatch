@@ -293,14 +293,21 @@ export async function reconcileIssued(): Promise<number> {
     if (!scan) continue;
     const cur = scan.infringement;
     if (cur?.number === b.number || scan.infringementHistory?.some((x) => x.number === b.number)) continue;
-    if (cur && cur.number !== r.reissueOf) continue;
+    // A later infringement on the scan stands; an earlier cancelled attempt (the wizard was cancelled,
+    // then started again) or the infringement this one reissued is replaced and kept in the history.
+    if (cur && cur.number !== r.reissueOf && cur.status !== 'cancelled') continue;
     const handoff = r.handoff as InfringementHandoff;
     const obs = scan.observationId ? await getObservation(scan.observationId) : undefined;
     const result: InfringementResult = { status: 'issued', number: b.number, offenceCode: r.offenceCode, timeFrom: Date.parse(r.timeFrom), timeTo: Date.parse(r.timeTo), issuedAt: Date.parse(r.issuedAt), sync: 'pending' };
     const out = applyInfringementResult({ scan, observation: obs ?? ({} as never), handoff, result });
-    const next: ScanRecord = cur && r.reissueOf
-      ? { ...out.scan, infringement: { ...out.scan.infringement!, reissueOf: r.reissueOf }, infringementHistory: [...(scan.infringementHistory ?? []), { ...cur, status: 'voided' }] }
-      : out.scan;
+    const reissued = !!cur && cur.number === r.reissueOf;
+    const next: ScanRecord = !cur
+      ? out.scan
+      : {
+          ...out.scan,
+          infringement: reissued ? { ...out.scan.infringement!, reissueOf: r.reissueOf } : out.scan.infringement!,
+          infringementHistory: [...(scan.infringementHistory ?? []), reissued ? { ...cur, status: 'voided' } : cur],
+        };
     await saveScan(next, obs ? out.observation : undefined);
     // Issues signed before evidence was queued with them: make sure their photos still go up.
     for (const e of (handoff.evidence as { scanId?: string }[] | undefined) ?? []) if (e.scanId) await enqueue('evidence', e.scanId);

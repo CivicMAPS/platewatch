@@ -565,6 +565,30 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect(await backend.reconcileIssued()).toBe(0);
   });
 
+  it('a statement refused outright stops only the signing chain: evidence still uploads and updates are still pulled', async () => {
+    const { closeDb, enqueue, getKv, putKv, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
+    backend.installBackend(() => ({ backendUrl: base, backendToken: DEVICE, officerNumber: '5123' }) as never);
+    const dev = await backend.registerDevice();
+    await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    // A queued statement the server will refuse outright (its signature no longer verifies).
+    const n = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sX' });
+    const bundle = (await getKv<Record<string, any>>(`inBundle:${n.number}`))!;
+    await putKv(`inBundle:${n.number}`, { ...bundle, allocation: { ...bundle.allocation, signature: 'AAAA' } });
+    // An unrelated hot-list photo waiting to upload.
+    const bytes = new TextEncoder().encode('unrelated hot-list photo');
+    await saveScan(scan('sHot', t(9, 40), { outcome: 'hot_sighting', plate: 'ZAF402', key: 'ZAF402', image: new Blob([bytes], { type: 'image/jpeg' }), sha256: createHash('sha256').update(bytes).digest('hex') }));
+    await enqueue('evidence', 'sHot');
+    await backend.syncNow();
+    expect(backend.backendState().lastError).toMatch(/Infringement sync stopped/);
+    expect((await fetch(`${base}/api/console/evidence/sHot`, { headers: staff })).status).toBe(200);
+    expect(await getKv(`backendCursor:${base}`)).toBeDefined(); // updates were pulled
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');

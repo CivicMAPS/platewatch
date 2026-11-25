@@ -184,7 +184,14 @@ async function pushOutbox(): Promise<void> {
   }
 
   // Infringements (in chain order), then void requests and evidence, after the records they refer to.
-  await pushInfringements(items.filter((it) => it.kind === 'infringement'));
+  // A stopped signing chain holds back only later statements: evidence (hot-list photos for dispatch
+  // included) and void requests still go, and the chain's error is reported afterwards.
+  let chainError: unknown = null;
+  try {
+    await pushInfringements(items.filter((it) => it.kind === 'infringement'));
+  } catch (e) {
+    chainError = e;
+  }
   for (const it of items) {
     if (it.kind !== 'voidRequest' && it.kind !== 'evidence') continue;
     try {
@@ -194,6 +201,7 @@ async function pushOutbox(): Promise<void> {
       await markOutboxFailed(it.key, it.queuedAt, (e as Error).message);
     }
   }
+  if (chainError) throw chainError;
 }
 
 interface ChainStep {
@@ -398,8 +406,15 @@ export function syncNow(): Promise<void> {
         const me = await request<{ pools?: { day: string; lastSequence: number }[] }>('GET', '/api/devices/me').catch(() => null);
         if (me?.pools?.length) await raisePoolFloors(officer, me.pools, asked);
       }
-      await pushOutbox();
+      // Updates (void decisions, payments) are pulled even when sending failed, then the error shows.
+      let pushError: unknown = null;
+      try {
+        await pushOutbox();
+      } catch (e) {
+        pushError = e;
+      }
       await pullUpdates();
+      if (pushError) throw pushError;
       const lastSyncAt = Date.now();
       await putKv(LAST_KEY(), lastSyncAt);
       setState({ lastSyncAt, lastError: undefined });

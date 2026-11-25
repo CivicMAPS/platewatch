@@ -70,4 +70,15 @@ describe('I-N signer across tabs sharing one device key', () => {
     expect((await b.getBundle(n.number))?.closing?.statement).toMatchObject({ type: 'cancel' });
     await expect(a.closeNumber(n.number, { number: n.number } as never)).rejects.toThrow(/already cancelled/);
   });
+
+  it('pool floors fetched from one backend never raise another backend\'s chain', async () => {
+    const [a] = await twoTabs();
+    const d = new Date();
+    const day = `${String(d.getFullYear() % 100).padStart(2, '0')}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    a.setSigningScope(() => 'https://b.example');
+    await a.raisePoolFloors('4471', [{ day, lastSequence: 10 }], 'https://a.example'); // Settings changed mid-request
+    expect(((await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's1' })).allocation.statement as { sequence: number }).sequence).toBe(1);
+    await a.raisePoolFloors('4471', [{ day, lastSequence: 10 }], 'https://b.example');
+    expect(((await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's2' })).allocation.statement as { sequence: number }).sequence).toBe(11);
+  });
 });

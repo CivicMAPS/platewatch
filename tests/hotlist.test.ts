@@ -134,6 +134,31 @@ describe('hot-list officer safety: handset state machine', () => {
     expect(cancels).toEqual(['4471']);
   });
 
+  it('keeps the id the host returns (a CODE 1 merged into one already raised for the hit) for cancel', async () => {
+    const cancels: string[] = [];
+    let land!: () => void;
+    setWindow({
+      raiseCode1: (a: { id: string }) => new Promise((res) => { land = () => res({ id: `host-${a.id === 'x' ? 'x' : 'merged'}` }); }),
+      cancelCode1: async (id: string) => void cancels.push(id),
+    });
+    const raising = raiseCode1({ cause: 'officer_duress' });
+    await new Promise((r) => setTimeout(r, 0));
+    land();
+    await raising;
+    expect(safetyState().code1).toMatchObject({ id: 'host-merged', status: 'sent' });
+    await cancelCode1('raised in error');
+    expect(cancels).toEqual(['host-merged']);
+    // Cancelled while the raise is in flight: the cancel goes to the id the host then returns.
+    const again = raiseCode1({ cause: 'officer_duress' });
+    await new Promise((r) => setTimeout(r, 0));
+    const cancelling = cancelCode1('raised in error');
+    land();
+    await again;
+    await cancelling;
+    expect(cancels).toEqual(['host-merged', 'host-merged']);
+    expect(safetyState().code1).toBeNull();
+  });
+
   it('cancelling while the raise is in flight cancels at the host once the raise lands', async () => {
     let land!: () => void;
     const calls: string[] = [];

@@ -223,16 +223,22 @@ async function sendCode1(): Promise<void> {
   const raise = host()?.raiseCode1;
   if (!raise) return set({ code1: { ...c, status: 'unavailable', at: Date.now() } });
   inFlight.add(c.id);
+  // The host's id is the one that counts: it may merge this Code 1 into one already raised for the
+  // same hit (another tab answered first), and every later cancel and location goes to that id.
+  let id = c.id;
   try {
-    await raise({ id: c.id, ...(c.hit ? { hit: c.hit } : {}), cause: c.cause, at: c.raisedAt, location: freshLocation(c.hit?.location ?? null), ...(c.officerNumber ? { officerNumber: c.officerNumber } : {}) });
-    if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'sent', at: Date.now() } });
+    const out = await raise({ id: c.id, ...(c.hit ? { hit: c.hit } : {}), cause: c.cause, at: c.raisedAt, location: freshLocation(c.hit?.location ?? null), ...(c.officerNumber ? { officerNumber: c.officerNumber } : {}) });
+    if (state.code1?.id === c.id) {
+      id = out?.id || c.id;
+      set({ code1: { ...state.code1, id, status: 'sent', at: Date.now() } });
+    }
   } catch (e) {
     if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'failed', at: Date.now(), error: (e as Error).message } });
   } finally {
     inFlight.delete(c.id);
   }
   // Cancelled while the raise was in flight: the host may now hold it, so cancel it there.
-  if (state.code1?.id === c.id && state.code1.cancelRequested) await reconcileCancel();
+  if (state.code1?.id === id && state.code1.cancelRequested) await reconcileCancel();
 }
 
 /**

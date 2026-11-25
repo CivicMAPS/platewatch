@@ -108,8 +108,10 @@ const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|$
  * Raise the daily pools to what the backend has already accepted for this officer (a replacement
  * or second handset the same day must continue the officer's sequence, not restart at 001).
  */
-export function raisePoolFloors(officer: string, pools: readonly { day: string; lastSequence: number }[]): Promise<void> {
+export function raisePoolFloors(officer: string, pools: readonly { day: string; lastSequence: number }[], forScope?: string): Promise<void> {
   return exclusive(async () => {
+    // Pools from one backend never raise another backend's chain (Settings changed meanwhile).
+    if (forScope !== undefined && scope() !== forScope) return;
     const k = await deviceKey();
     const c = await chain(k.keyId);
     let changed = false;

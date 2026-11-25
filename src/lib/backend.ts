@@ -392,8 +392,9 @@ export function syncNow(): Promise<void> {
       // Continue the officer's daily I-N sequence from what the backend already accepted (another handset).
       const officer = settingsRef().officerNumber?.trim();
       if (officer) {
+        const asked = serverScope(); // the backend these pools come from
         const me = await request<{ pools?: { day: string; lastSequence: number }[] }>('GET', '/api/devices/me').catch(() => null);
-        if (me?.pools?.length) await raisePoolFloors(officer, me.pools);
+        if (me?.pools?.length) await raisePoolFloors(officer, me.pools, asked);
       }
       await pushOutbox();
       await pullUpdates();

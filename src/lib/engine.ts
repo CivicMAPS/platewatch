@@ -9,8 +9,8 @@
 import { comparePlates, plateKey, type MatchStrength } from './plate';
 import { restrictionInForce, nextRestrictionStart, type RestrictionInstance } from './restriction';
 import { localDateString } from './time';
-import type { AllowEntry, AllowList, DismissReason, HotEntry, HotList, Observation, PermitType, PlateFlag, PlateList, TimedList } from './types';
-import { parseArea, permitValidity } from './permit';
+import type { AllowEntry, AllowList, DismissReason, HotEntry, HotList, Observation, PermitZoneList, PermitType, PlateFlag, PlateList, TimedList } from './types';
+import { parseArea, parsePermitNumber, permitValidity, validPermitDate } from './permit';
 
 export interface HotHit {
   list: HotList;
@@ -38,7 +38,7 @@ export interface AllowHit {
 export type PermitScope = 'applies' | 'payment_only' | 'other_area' | 'unknown';
 
 export interface PermitHit extends AllowHit {
-  validity: 'valid' | 'expired';
+  validity: 'valid' | 'expired' | 'unverified';
   /** Expired because valid-from is still to come. */
   notYetValid: boolean;
   scope: PermitScope;
@@ -72,6 +72,8 @@ export type Decision =
       overstay: boolean;
     }
   | { kind: 'timed_possible'; candidates: Observation[]; instance: RestrictionInstance; concession?: 'disability' }
+  | { kind: 'zone_permits'; hits: PermitHit[] }
+  | { kind: 'permit_unconfirmed' }
   | { kind: 'hot_match' }
   | { kind: 'hot_none' }
   | { kind: 'allow_member'; hit: AllowHit; validNow: boolean }
@@ -168,21 +170,50 @@ function listCouncil(l: TimedList): string | undefined {
   return m?.[1];
 }
 
+// Keep the street type for permit-only zones: Smith Rd and Smith St can be distinct streets.
+const streetSuffixes: Record<string, string> = {
+  st: 'street', rd: 'road', ave: 'avenue', pl: 'place', ln: 'lane', pde: 'parade', dr: 'drive',
+  cres: 'crescent', tce: 'terrace', blvd: 'boulevard', hwy: 'highway', cl: 'close', ct: 'court',
+};
+function permitStreet(value: string): string {
+  return value.trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ')
+    .replace(/\b[a-z]+$/, (suffix) => streetSuffixes[suffix] ?? suffix);
+}
+
+function zoneScope(entry: AllowEntry, zone: PermitZoneList): Pick<PermitHit, 'scope' | 'basis'> {
+  const types = parsePermitNumber(entry.permitNo ?? '')?.types;
+  const council = entry.council?.code.toLowerCase();
+  if (!types || !council) return { scope: 'unknown' };
+  if (council !== zone.councilCode) return { scope: 'other_area' };
+  const area = parseArea(entry.rpa ?? '');
+  if (types.includes('RPA') && area.area === zone.rpa && (!area.council || area.council === council))
+    return { scope: 'applies', basis: 'RPA' };
+  const streets = entry.address?.street ? [entry.address.street] : entry.streets ?? [];
+  if (types.includes('RSP') && streets.some((street) => permitStreet(street) === permitStreet(zone.segment.street)))
+    return { scope: 'applies', basis: 'RSP' };
+  return { scope: 'other_area' };
+}
+
 /**
  * Every permit held for the plate on any allow list (exact plate only), with its validity and where
  * it applies here. `restriction` is the one in force (FS needs a foreshore space).
  */
-export function findPermits(plate: string, list: TimedList, allowLists: readonly AllowList[], at: number, restriction?: { code: string; description: string }): PermitHit[] {
+export function findPermits(plate: string, list: TimedList | PermitZoneList, allowLists: readonly AllowList[], at: number, restriction?: { code: string; description: string }): PermitHit[] {
   const key = plateKey(plate);
-  const council = listCouncil(list);
+  const council = list.type === 'timed' ? listCouncil(list) : list.councilCode;
   const listArea = list.rpa?.trim() ? parseArea(list.rpa) : null;
   const segStreet = streetKey(list.segment.street);
   const hits: PermitHit[] = [];
   for (const a of allowLists) {
-    const linked = list.allowListIds.includes(a.id);
+    const linked = list.type === 'timed' && list.allowListIds.includes(a.id);
     for (const entry of a.entries) {
       if (plateKey(entry.plate) !== key) continue;
       const { status: validity, notYetValid } = permitValidity(entry, at);
+      if (list.type === 'permit_zone') {
+        const dated = validPermitDate(entry.validFrom) && validPermitDate(entry.validTo);
+        hits.push({ list: a, entry, validity: dated ? validity : 'unverified', notYetValid, linked, ...zoneScope(entry, list) });
+        continue;
+      }
       // Areas and foreshore rights are council-scoped: com 7 is not copp 7 (§13).
       const sameCouncil = !entry.council || !council || entry.council.code === council;
       const permitArea = entry.rpa?.trim() ? parseArea(entry.rpa) : null;
@@ -207,7 +238,8 @@ export function findPermits(plate: string, list: TimedList, allowLists: readonly
     }
   }
   const rank: Record<PermitScope, number> = { applies: 0, payment_only: 1, unknown: 2, other_area: 3 };
-  return hits.sort((x, y) => (x.validity === y.validity ? 0 : x.validity === 'valid' ? -1 : 1) || rank[x.scope] - rank[y.scope]);
+  const order = { valid: 0, expired: 1, unverified: 2 };
+  return hits.sort((x, y) => (order[x.validity] - order[y.validity]) || rank[x.scope] - rank[y.scope]);
 }
 
 /** Restriction code a timing decision is about (for the statutory check). */
@@ -317,6 +349,11 @@ export function evaluate(input: EngineInput): EngineResult {
 
   let decision: Decision;
   switch (list.type) {
+    case 'permit_zone': {
+      const hits = findPermits(input.plate, list, input.allowLists, at);
+      decision = hits.length ? { kind: 'zone_permits', hits } : { kind: 'permit_unconfirmed' };
+      break;
+    }
     case 'timed':
       decision = decideTimed(input, list, expireIds);
       break;

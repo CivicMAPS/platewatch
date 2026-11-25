@@ -19,6 +19,7 @@ import {
   type RiskTag,
   type PaidBy,
   type PaymentAreas,
+  type StreetSegment,
   type StreetSide,
   type TimedList,
   type TimedRestriction,
@@ -69,7 +70,10 @@ function newRestriction(): TimedRestriction {
 function emptyList(type: ListType): PlateList {
   // Created on the device: the officer's own list (a daily chalking list in EnforcementMAPS).
   const base = { id: uid(), name: '', notes: '', createdAt: Date.now(), updatedAt: Date.now(), source: officerSource() };
+  const segment: StreetSegment = { street: '', fromStreet: '', toStreet: '', side: 'both', suburb: '' };
   switch (type) {
+    case 'permit_zone':
+      return { ...base, type, segment, councilCode: '', rpa: '' };
     case 'allow':
       return { ...base, type, entries: [] };
     case 'hot':
@@ -78,7 +82,7 @@ function emptyList(type: ListType): PlateList {
       return {
         ...base,
         type,
-        segment: { street: '', fromStreet: '', toStreet: '', side: 'both', suburb: '' },
+        segment,
         restrictions: [newRestriction()],
         allowListIds: [],
       };
@@ -144,13 +148,19 @@ export function listFormView(params: Record<string, string>, app: App): View {
   const validate = (l: PlateList): Record<string, string> => {
     const e: Record<string, string> = {};
     if (!l.name.trim()) e.name = 'List name is required.';
+    if (l.type === 'permit_zone') {
+      if (!/^[a-z]{2,8}$/.test(l.councilCode)) e.councilCode = 'Enter the council code, for example copp.';
+      if (!/^\d{1,2}[A-Z]?$/.test(l.rpa)) e.rpa = 'Enter a residential area such as 7 or 4B.';
+    }
+    if (l.type === 'timed' || l.type === 'permit_zone') {
+      if (!l.segment.street.trim()) e.street = 'Street / segment name is required.';
+      if (!l.segment.fromStreet.trim()) e.fromStreet = 'Required.';
+      if (!l.segment.toStreet.trim()) e.toStreet = 'Required.';
+    }
     if (l.type === 'timed') {
       if (l.payment?.easyPark.some(area => !area.trim())) e.payment = 'EasyPark AreaNumber is required.';
       if (l.payment?.payStay.some(p => !p.zone.trim())) e.payment = 'PayStay ParkingZone is required.';
       if (l.payment?.meters?.some(m => !m.id.trim())) e.payment = 'Meter ID is required.';
-      if (!l.segment.street.trim()) e.street = 'Street / segment name is required.';
-      if (!l.segment.fromStreet.trim()) e.fromStreet = 'Required.';
-      if (!l.segment.toStreet.trim()) e.toStreet = 'Required.';
       if (!l.restrictions.length) e.restrictions = 'Add at least one parking restriction.';
       l.restrictions.forEach((r) => {
         const errs = validateRestriction(r);
@@ -183,7 +193,11 @@ export function listFormView(params: Record<string, string>, app: App): View {
       }
     }
     const cleaned: PlateList = { ...list, name: list.name.trim(), notes: list.notes.trim() } as PlateList;
-    if (cleaned.type === 'timed') {
+    if (cleaned.type === 'permit_zone') {
+      cleaned.councilCode = cleaned.councilCode.trim().toLowerCase();
+      cleaned.rpa = cleaned.rpa.trim().toUpperCase();
+    }
+    if (cleaned.type === 'timed' || cleaned.type === 'permit_zone') {
       cleaned.segment = {
         ...cleaned.segment,
         street: cleaned.segment.street.trim(),
@@ -191,6 +205,8 @@ export function listFormView(params: Record<string, string>, app: App): View {
         toStreet: cleaned.segment.toStreet.trim(),
         suburb: cleaned.segment.suburb.trim(),
       };
+    }
+    if (cleaned.type === 'timed') {
       if (cleaned.payment) {
         const pay = normalisePayment(cleaned.payment);
         // Meters keep only links to numbers still on the segment (none left = whole segment).
@@ -438,6 +454,39 @@ export function listFormView(params: Record<string, string>, app: App): View {
     </section>`;
   };
 
+  const segmentFields = (segment: StreetSegment, extra?: TemplateResult) => {
+    const seg = (patch: Partial<StreetSegment>) => set(() => Object.assign(segment, patch));
+    return html`      <section class="card mt-4 grid gap-3">
+        <h2 class="section-title">Street segment</h2>
+        ${text({ id: 'street', label: 'Street / segment name', value: segment.street, onInput: (v) => seg({ street: v }), placeholder: 'e.g. Smith Street', required: true, errKey: 'street' })}
+        <div class="grid grid-cols-2 gap-3">
+          ${text({ id: 'from', label: 'Between', value: segment.fromStreet, onInput: (v) => seg({ fromStreet: v }), placeholder: 'Cross street', required: true, errKey: 'fromStreet' })}
+          ${text({ id: 'to', label: 'And', value: segment.toStreet, onInput: (v) => seg({ toStreet: v }), placeholder: 'Cross street', required: true, errKey: 'toStreet' })}
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="side">Side</label>
+            <select id="side" class="field" @change=${(e: Event) => seg({ side: (e.target as HTMLSelectElement).value as StreetSide })}>
+              ${SIDES.map((s) => html`<option value=${s.value} ?selected=${segment.side === s.value}>${s.label}</option>`)}
+            </select>
+          </div>
+          ${text({ id: 'suburb', label: 'Suburb', value: segment.suburb, onInput: (v) => seg({ suburb: v }), placeholder: 'Optional' })}
+        </div>
+        ${extra}
+      </section>`;
+  };
+
+  const permitZoneFields = () => {
+    if (list?.type !== 'permit_zone') return nothing;
+    const l = list;
+    return html`${segmentFields(l.segment)}
+      <section class="card mt-4 grid gap-3">
+        <h2 class="section-title">Residential permit area</h2>
+        ${text({ id: 'councilCode', label: 'Council code', value: l.councilCode, onInput: (v) => (l.councilCode = v), placeholder: 'e.g. copp', required: true, errKey: 'councilCode', maxlength: 8 })}
+        ${text({ id: 'rpa', label: 'Residential parking area (RPA)', value: l.rpa, onInput: (v) => (l.rpa = v), placeholder: 'e.g. 7 or 4B', required: true, errKey: 'rpa' })}
+      </section>`;
+  };
+
   const timedFields = (): TemplateResult => {
     if (list?.type !== 'timed') return html``;
     const l = list;
@@ -461,22 +510,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
         <datalist id="known-zone-names">${[...new Set(knownZoneNames.values())].map((n) => html`<option value=${n}></option>`)}</datalist>
         <datalist id="known-rpas">${knownRpas.map((r) => html`<option value=${r}></option>`)}</datalist>
       </section>
-      <section class="card mt-4 grid gap-3">
-        <h2 class="section-title">Street segment</h2>
-        ${text({ id: 'street', label: 'Street / segment name', value: l.segment.street, onInput: (v) => seg({ street: v }), placeholder: 'e.g. Smith Street', required: true, errKey: 'street' })}
-        <div class="grid grid-cols-2 gap-3">
-          ${text({ id: 'from', label: 'Between', value: l.segment.fromStreet, onInput: (v) => seg({ fromStreet: v }), placeholder: 'Cross street', required: true, errKey: 'fromStreet' })}
-          ${text({ id: 'to', label: 'And', value: l.segment.toStreet, onInput: (v) => seg({ toStreet: v }), placeholder: 'Cross street', required: true, errKey: 'toStreet' })}
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="field-label" for="side">Side</label>
-            <select id="side" class="field" @change=${(e: Event) => seg({ side: (e.target as HTMLSelectElement).value as StreetSide })}>
-              ${SIDES.map((s) => html`<option value=${s.value} ?selected=${l.segment.side === s.value}>${s.label}</option>`)}
-            </select>
-          </div>
-          ${text({ id: 'suburb', label: 'Suburb', value: l.segment.suburb, onInput: (v) => seg({ suburb: v }), placeholder: 'Optional' })}
-        </div>
+      ${segmentFields(l.segment, html`
         <p class="text-xs text-neutral-600">Part of the side (optional), where the signs change part way along: from and to a bay, an address or a cross street.</p>
         <div class="grid grid-cols-2 gap-3">
           ${text({ id: 'subFrom', label: 'Part from', value: l.segment.subFrom ?? '', onInput: (v) => seg({ subFrom: v }), placeholder: 'e.g. Bay 58' })}
@@ -487,7 +521,7 @@ export function listFormView(params: Record<string, string>, app: App): View {
             onInput: (v) => { bayDraft = v; } })}
           ${text({ id: 'roadSegmentId', label: 'Road segment ID', value: l.roadSegmentId ?? '', onInput: (v) => set(() => (l.roadSegmentId = v)), placeholder: 'Optional', maxlength: 24 })}
         </div>
-      </section>
+      `)}
 
 ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       <section class="card mt-4 grid gap-3">
@@ -847,7 +881,7 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
               label: 'List name',
               value: l.name,
               onInput: (v) => (l.name = v),
-              placeholder: l.type === 'timed' ? 'e.g. Smith St 2P (north)' : l.type === 'hot' ? 'e.g. Officer safety — North patrol' : 'e.g. Zone 12 resident permits',
+              placeholder: l.type === 'permit_zone' ? 'e.g. Smith Street permit zone' : l.type === 'timed' ? 'e.g. Smith St 2P (north)' : l.type === 'hot' ? 'e.g. Officer safety — North patrol' : 'e.g. Zone 12 resident permits',
               required: true,
               errKey: 'name',
             })}
@@ -856,7 +890,7 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
               <textarea id="notes" class="field min-h-16" maxlength="2000" .value=${l.notes} @input=${(e: Event) => (l.notes = (e.target as HTMLTextAreaElement).value)}></textarea>
             </div>
           </section>
-          ${timedFields()}${allowFields()}${hotFields()}
+          ${timedFields()}${permitZoneFields()}${allowFields()}${hotFields()}
           <button type="button" class="btn-primary mt-6 w-full" ?disabled=${saving} @click=${save}>${icon('check')} Save list</button>
         `)}`;
     },

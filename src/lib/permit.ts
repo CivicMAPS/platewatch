@@ -72,6 +72,12 @@ export function parseArea(v: string): { area: string; council?: string } {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+export function validPermitDate(value: string): boolean {
+  if (!DATE.test(value)) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 /** Problems with one permit record (schema rules plus the derived-parts check), by path. */
 export function validatePermitRecord(r: unknown, path = ''): string[] {
   const p = (k: string) => `${path}${k}`;

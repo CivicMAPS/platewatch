@@ -37,6 +37,11 @@ export async function correctRecord(id: string, input: string, expectedPlate: st
   const amended: ScanRecord = {...s, plate,key:plate,corrected:true,revisions,observationId:target?.id ?? null,
     outcome:target ? 'recorded' : decision.kind === 'timed_exempt' ? 'permit_valid' : decision.kind === 'hot_match' && result.hotHits.some(h => h.strength === 'exact' && h.list.id === list.id) ? 'hot_sighting' : 'reviewed',
     amendmentResult:decision.kind, amendmentMatches:result.hotHits.map(h => h.entry.plate+' · '+h.list.name+' · '+h.strength)};
+  if (list.type === 'permit_zone') {
+    // Changing the plate invalidates the officer's confirmation for the original vehicle.
+    delete amended.exemption;
+    amended.outcome = 'permit_unconfirmed';
+  }
   await scans.put(amended);
   for (const group of [histories.find(o => o.id === previousId),target]) {
     if (!group) continue;

@@ -31,6 +31,7 @@ import { segmentLabel } from './home';
 
 /** Scan outcome → CivicMAPS status (assessment §3): colour + icon + text, no red. */
 const OUTCOME_STATUS: Record<ScanRecord['outcome'], { kind: StatusKind; text: string }> = {
+  permit_unconfirmed: { kind: 'verify', text: 'Permit unconfirmed' },
   reviewed: { kind: 'reviewed', text: 'Reviewed' },
   recorded: { kind: 'timing', text: 'First sighting' },
   within_allowance: { kind: 'within_allowance', text: 'Within allowance' },
@@ -212,6 +213,14 @@ export function listDetailView(params: Record<string, string>, app: App): View {
   </section>`;
 
   const entriesSection = (l: PlateList): TemplateResult => {
+    if (l.type === 'permit_zone')
+      return html`<section class="card mt-4">
+        <h2 class="section-title">Permit zone segment</h2>
+        <p class="font-semibold">${segmentLabel(l)}</p>
+        <p>${l.segment.side === 'both' ? 'Both sides' : `${l.segment.side} side`}${l.segment.suburb ? ` · ${l.segment.suburb}` : ''}</p>
+        <p class="mt-2">Residential area ${l.rpa} · ${l.councilCode.toUpperCase()}</p>
+        <p class="text-sm">A current area permit or a residential street permit for ${l.segment.street} can apply here.</p>
+      </section>`;
     if (l.type === 'hot')
       return html`<section class="card mt-4">
         <h2 class="section-title">High-risk vehicles (${l.entries.length})</h2>

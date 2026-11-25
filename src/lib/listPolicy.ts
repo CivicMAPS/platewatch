@@ -72,7 +72,7 @@ export function canImportInCommandMaps(role: ListRole | undefined, authorised: b
 
 /** List types the user may create on the device. */
 export function creatableListTypes(ctx: PolicyContext): ListType[] {
-  if (isDevelopment(ctx)) return ['timed', 'hot', 'allow'];
+  if (isDevelopment(ctx)) return ['timed', 'permit_zone', 'hot', 'allow'];
   // Officers create daily digital chalking lists only (timed segments).
   return ctx.role === 'officer' ? ['timed'] : [];
 }

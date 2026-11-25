@@ -6,7 +6,7 @@ import { normalisePayment, prunePaidBy } from './payment';
 import type { DismissedCapture, HotListEvent, Observation, PaidBy, PaymentAreas, PlateFlag, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 
 type SerialScan = Omit<ScanRecord, 'image' | 'thumb'> & { image: string | null; thumb: string | null };
 type SerialDismissed = Omit<DismissedCapture, 'image' | 'thumb'> & { image: string; thumb: string };
@@ -58,7 +58,8 @@ export async function createBackup(includeScans: boolean, appVersion: string, op
   }
   const file: BackupFile = {
     schema: BACKUP_SCHEMA,
-    version: BACKUP_VERSION,
+    // Older builds silently discard unknown list types. Keep v1 compatibility for other backups.
+    version: lists.some(l => l.type === 'permit_zone') ? BACKUP_VERSION : 1,
     exportedAt: new Date().toISOString(),
     appVersion,
     includesScans: includeScans,
@@ -125,7 +126,14 @@ export function parseBackup(text: string): {
   const lists: PlateList[] = [];
   for (const l of raw.lists) {
     if (!isObj(l) || typeof l.id !== 'string' || typeof l.name !== 'string') continue;
-    if (l.type !== 'allow' && l.type !== 'timed' && l.type !== 'hot') continue;
+    if (l.type !== 'allow' && l.type !== 'timed' && l.type !== 'hot' && l.type !== 'permit_zone') continue;
+    if (l.type === 'permit_zone') {
+      const seg = l.segment;
+      if (!isObj(seg) || ![seg.street, seg.fromStreet, seg.toStreet].every(v => typeof v === 'string' && v.trim())
+        || typeof seg.suburb !== 'string' || !['both', 'north', 'south', 'east', 'west', 'centre', 'odd', 'even'].includes(str(seg.side))
+        || typeof l.councilCode !== 'string' || !/^[a-z]{2,8}$/.test(l.councilCode)
+        || typeof l.rpa !== 'string' || !/^\d{1,2}[A-Z]?$/.test(l.rpa)) continue;
+    }
     // Re-derive keys so tampered/old keys cannot cause false matches.
     if ((l.type === 'allow' || l.type === 'hot') && Array.isArray(l.entries)) {
       l.entries = (l.entries as Record<string, unknown>[])

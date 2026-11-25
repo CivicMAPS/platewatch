@@ -118,7 +118,7 @@ export function recordView(params: Record<string, string>, app: App): View {
     try {
       if (!dismiss) {
         const lists = [...await getHotLists(), ...((await getAllowLists()).filter(a =>
-          list?.type === 'timed' ? list.allowListIds.includes(a.id) : a.id === list?.id))];
+          list?.type === 'timed' ? list.allowListIds.includes(a.id) : list?.type === 'permit_zone' || a.id === list?.id))];
         const entries = lists.flatMap(l => l.entries.map(e => ({plate:e.plate,source:l.name})));
         if (list.type === 'timed') {
           const at = scan.meta.capturedAt;

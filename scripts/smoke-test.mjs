@@ -187,6 +187,40 @@ async function main() {
   await waitText('Allowed plates (2)');
   log('allow list saved, including a permit typed but not yet added');
 
+  // Create and patrol a non-timed permit zone from the normal list picker.
+  await page.goto(`${ORIGIN}/#/new`);
+  await click('Non-timed permit zone');
+  await type('#name', 'Smith Street residents');
+  await type('#street', 'Smith St');
+  await type('#from', 'Johnston Street');
+  await type('#to', 'Gertrude Street');
+  await type('#councilCode', 'com');
+  await type('#rpa', '12');
+  await click('Save list');
+  await waitText('Permit zone segment');
+  const permitZoneUrl = page.url();
+  await click('Scan number plate');
+  for (const plate of ['RES001', 'XYZ777']) {
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+    if (plate === 'RES001') {
+      await page.waitForSelector('[data-testid=permit-hit][data-scope=applies]');
+      await page.click('[data-testid=permit-exempt]');
+      await page.waitForSelector('[data-testid=result-exempt]');
+      await page.click('[data-testid=next-scan]');
+    } else {
+      await page.waitForSelector('[data-testid=result-zone-unconfirmed]');
+    }
+  }
+  await page.goto(permitZoneUrl);
+  await waitText('Recent scan records');
+  await waitText('Permit unconfirmed');
+  await waitText('Permit valid');
+  log('permit zone created from the list picker and both residential permit check outcomes saved');
+
   // Hot list
   await page.goto(`${ORIGIN}/#/new/hot`);
   await type('#name', 'Officer safety');
@@ -302,6 +336,7 @@ async function main() {
   await page.waitForSelector('[data-testid=payment-saved]', { visible: true });
   await waitText('Paid');
   log('first sighting → recorded; payment check (paid session, PayStay zone of the restriction, paid to) saved before Next scan');
+  const gpsRecordUrl = await page.$eval('a[href^="#/record/"]', (a) => a.href);
   await shot('recorded');
 
   // Scan 2 (within allowance)
@@ -583,10 +618,9 @@ async function main() {
   if (!(await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Delete/.test(b.textContent))?.disabled))) throw new Error('Delete enabled on a record with an issued infringement');
   log('issue infringement (mock EnforcementMAPS host): 702 → vehicle details + licence plate entered twice (mismatch flagged) → hand-off payload → PIN 04471 261121 001 8363 93 shown, timing closed, record locked');
 
-  // Evidence record: EXIF + integrity.
-  await page.goto(timedUrl);
-  await waitText('Recent scan records');
-  await page.click('main ul li button');
+  // Verify the same first sighting whose GPS fix was checked at capture.
+  await page.goto(gpsRecordUrl);
+  await waitText('Capture metadata');
   // Thumbnails load after the record renders; wait so the layout is stable before clicking.
   await page.waitForFunction(() => [...document.images].every((i) => i.complete));
   // No sideways scroll on a phone (a pill row overflowing the card once did this).

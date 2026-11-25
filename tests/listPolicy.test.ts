@@ -35,7 +35,7 @@ describe('deploymentMode', () => {
 describe('development build: every list can be imported and edited in PlateWatch', () => {
   it('imports on the device and creates every list type, with paid parking', () => {
     expect(canImportOnDevice(DEV)).toBe(true);
-    expect(creatableListTypes(DEV)).toEqual(['timed', 'hot', 'allow']);
+    expect(creatableListTypes(DEV)).toEqual(['timed', 'permit_zone', 'hot', 'allow']);
     expect(allowsPaidParking(null, DEV)).toBe(true);
   });
 

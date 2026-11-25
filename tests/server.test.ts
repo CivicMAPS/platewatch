@@ -228,6 +228,21 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     commit(own);
   });
 
+  it("a device cannot void another device's infringement by reissuing it", async () => {
+    const original = await issue702(); // device A
+    const keyC = await generateSigningKey();
+    const asC = { device: false, headers: { 'X-Device-Key': keyC.keyId } };
+    await call('POST', '/api/devices/register', { ...asC, body: { publicJwk: keyC.publicJwk, label: 'other handset', officerNumber: '7777' } });
+    await call('POST', `/api/console/devices/${keyC.keyId}/decision`, { staff: sup, body: { approve: true } });
+    const alloc = await allocate({ privateKey: keyC.privateKey, keyId: keyC.keyId, council: 'com', officer: '7777', sequence: 1, prevHash: GENESIS_HASH, now: t(8, 24), timestamp: toLocalIso(t(8, 24)) });
+    const record = buildIssuedRecord({ number: alloc.number, handoff: handoff702(), values: values('702'), issuedAt: toLocalIso(t(8, 26)), toIso: toLocalIso, reissueOf: original, reissueReason: 'officer_error' });
+    const st: IssueStatement = { v: 1, type: 'issue', number: alloc.number, keyId: keyC.keyId, allocationHash: alloc.allocation.hash, recordHash: await sha256Hex(canonical(record)), timestamp: toLocalIso(t(8, 26)), prevHash: alloc.allocation.hash };
+    const closing = await signStatement(keyC.privateKey, st);
+    const res = await call('POST', '/api/infringements/statements', { ...asC, body: { keyId: keyC.keyId, scanId: 's1', allocation: alloc.allocation, closing, record } });
+    expect(res.json).toMatchObject({ number: alloc.number, status: 'rejected', rejection: { code: 'reissue' } });
+    expect((await call('GET', `/api/console/infringements/${original}`, { staff: sup })).json.infringement.status).toBe('issued');
+  });
+
   it('void without reissue: requested on the device, rejected then approved by a supervisor; device sees each change', async () => {
     const number = await issue702();
     const before = (await call('GET', '/api/updates?since=0')).json.cursor as number;
@@ -396,6 +411,19 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     expect(live.filter((a) => a.status === 'cancelled').length).toBeLessThanOrEqual(20);
     expect((await call('GET', '/api/alerts/live', asOfficer('4471'))).json.own.map((a: { id: string }) => a.id)).toContain('c1-open-old');
     await call('POST', '/api/console/alerts/c1-open-old/cancel', { staff: 'D1', body: { reason: 'test' } });
+  });
+
+  it("the handset's timeout soft Code 1 waits for an answer being recorded and then raises nothing", async () => {
+    const h10 = hit('h10', t(8, 5), '4471', { plate: 'RCE010', hotListEntryId: 'e10' });
+    await call('POST', '/api/hot-hits', { body: { hit: h10 } });
+    const c1 = await db.connect();
+    await c1.query('begin');
+    await c1.query("update hot_hits set response = 'safe_clear', responded_at = now() where id = 'h10'"); // answer in flight
+    const soft = call('POST', '/api/alerts/soft-code1', { body: { hit: h10, at: t(8, 6) } });
+    await new Promise((r) => setTimeout(r, 300));
+    await c1.query('commit');
+    c1.release();
+    expect((await soft).json).toMatchObject({ id: null, status: 'not_needed', response: 'safe_clear' });
   });
 
   it('the watchdog raises nothing for a hit answered after its overdue check (stale row)', async () => {

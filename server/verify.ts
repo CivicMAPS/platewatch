@@ -174,9 +174,11 @@ export async function acceptBundle(c: Tx, b: BundleIn, opts: { council: string; 
   const shortfall = variant === 'expired_session' && paidTo ? Math.max(0, Math.floor((Date.parse(String(handoff.times.scanAt ?? r.timeTo)) - Date.parse(paidTo)) / 60_000)) : null;
 
   if (r.reissueOf) {
-    const orig = (await c.query<{ status: string; scan_id: string }>('select status, scan_id from infringements where number = $1 for update', [r.reissueOf])).rows[0];
+    const orig = (await c.query<{ status: string; scan_id: string; key_id: string }>('select status, scan_id, key_id from infringements where number = $1 for update', [r.reissueOf])).rows[0];
     // E.g. reissued offline while the original was paid or voided at the console: refused, chain kept.
     if (!orig) return reject(c, number, officer, new HttpError(422, 'reissue', `Reissue of unknown infringement ${r.reissueOf}.`), r);
+    // Only the issuing device may void-and-reissue (as for a void request); anyone else goes through a supervisor.
+    if (orig.key_id !== b.keyId) return reject(c, number, officer, new HttpError(403, 'reissue', `${r.reissueOf} was issued by another device; only that device can reissue it.`), r);
     if (!['issued', 'void_requested'].includes(orig.status)) return reject(c, number, officer, new HttpError(409, 'reissue', `${r.reissueOf} is ${orig.status}; only an issued infringement can be reissued.`), r);
     if (orig.scan_id !== b.scanId) return reject(c, number, officer, new HttpError(422, 'reissue', 'A reissue must come from the same sighting.'), r);
     // Owner, 23/11/2026: a void followed by a reissue needs no approval.

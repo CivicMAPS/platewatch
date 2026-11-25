@@ -279,7 +279,8 @@ export function registerSafety(
     const now = h.now();
     return tx(db, async (q) => {
       const hitId = await upsertHit(q, keyId, b.hit ?? {}, cfg);
-      const hit = (await q.query<{ officer_number: string; response: string | null }>('select officer_number, response from hot_hits where id = $1', [hitId])).rows[0]!;
+      // Locked like the watchdog's check: an answer recorded meanwhile wins, never an alarm for it.
+      const hit = (await q.query<{ officer_number: string; response: string | null }>('select officer_number, response from hot_hits where id = $1 for update', [hitId])).rows[0]!;
       if (hit.response) return { id: null, status: 'not_needed', response: hit.response };
       const out = await raiseAlert(q, cfg, { id: `sc1-${hitId}`, kind: 'soft_code1', hitId, cause: 'hot_list_timeout', raisedBy: 'handset', officerNumber: hit.officer_number, keyId, at: num(b.at) ?? now, location: loc(b.location), now });
       return { id: out.id, status: 'raised' };

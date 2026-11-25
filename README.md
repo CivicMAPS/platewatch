@@ -34,8 +34,9 @@ officer-safety hot lists. Runs as an installable PWA or as a native Android APK.
 | List ownership | Imported lists are **system** lists (`SYSTEM` tag, "Imported from …"); lists made on the device are the officer's own. In this development build every list can be imported, created, edited and deleted. In an EnforcementMAPS build (`VITE_PLATEWATCH_MODE=enforcementmaps`) import moves to CommandMAPS (team leaders and parking services management, with authorisation), system lists are read-only, and officers create timed lists without paid parking that last for the day. See [docs/LIST-RULES.md](docs/LIST-RULES.md). |
 | Look-alike plates (WF-S28) | OCR look-alikes (0·O·Q·D, 1·I·L, 8·B, 5·S, 2·Z, 6·G, 7·T, V·U, R·P, A·4, F·E, N·M) are routed by source: a hot-list look-alike gets a verify interrupt (never dropped), a permit look-alike asks for the displayed permit (never exempts), a timed look-alike goes to *Possible earlier sighting* with both scans side by side. Every choice is logged on the records. |
 | Hot-list acknowledge (WF-S29) | A hot-list match must be acknowledged (officer number from Settings in this build) before Next scan: time, GPS and officer are saved on the plate's entry log and a soft Code 1 to dispatch and the compliance coordinator is queued (sent only inside EnforcementMAPS). |
-| Payment check, 701 / 702 (WF-S30) | First sighting in a paid space: record Paid session found (paid from / to) or No payment found before Next scan. Results offer **701** (allowance exceeded) or **702** (paid to + 5 min grace passed, or no payment found) with the locked offence time. |
-| Issue infringement (WF-S31) | Inside EnforcementMAPS only: hands a validated pre-fill (`schemas/platewatch-infringement-handoff.v1.schema.json`) to the wizard and stores the infringement number back; issued records are locked. Hidden in this development build. See [docs/S28-S31-STATUS.md](docs/S28-S31-STATUS.md). |
+| Payment check, 701 / 702 (WF-S30) | First sighting in a paid space: record Paid session found (paid from / to) or No payment found before Next scan. **Time first, then payment** (owner, 25/11/2026): past the allowance it is **701** whatever the payment state; within it, **702** when no valid payment was found or paid to + 5 min grace has passed. The officer only ever sees 702; the internal 702 / 702e split (`no_payment` / `expired_session`) is derived from the payment check and travels in internal data only. |
+| Issue infringement (WF-S31) | Inside EnforcementMAPS: hands a validated pre-fill (`schemas/platewatch-infringement-handoff.v1.schema.json`) to the wizard and stores the infringement number back; issued records are locked. With the PlateWatch backend configured (development / field testing): the four-step wizard runs on the device, the I-N is allocated and signed on the device (works offline), the backend verifies and accepts it; void (supervisor approval) and void + reissue (no approval) from the record. Hidden in the standalone build. See [docs/BACKEND.md](docs/BACKEND.md). |
+| Backend and console (field testing) | Optional Node + PostgreSQL server ([docs/BACKEND.md](docs/BACKEND.md)) serving the app, a CommandMAPS stand-in console and the API: sync of scans, timings and hot-list events; soft Code 1 banners (amber, dispatch + compliance coordinator, acknowledged per recipient); infringement verification and life cycle; a test payment provider; 702 / 702e analytics. Configure in *Settings → Backend*. |
 | Backup | Export lists, or lists + scan records, as JSON; *Include dismissed captures* (off by default) adds the Dismissed list with its evidence images. Import merges or replaces; a backup without dismissed captures leaves the device's Dismissed list untouched. |
 | Evidence integrity | SHA-256 recorded at capture; in-app re-verification and EXIF read-back. File names are ISO-8601-UTC-prefixed. |
 
@@ -130,6 +131,12 @@ npm run dev          # http://localhost:5173 (copies OCR assets first)
 npm test             # unit tests: engine, restrictions, plates, storage, backup, corrections
 npm run build        # typecheck + production build (CSP applied)
 npm run smoke        # E2E in headless Chrome: fake camera + GPS, production CSP
+
+# Backend (docs/BACKEND.md): PostgreSQL + Node
+cp .env.example .env && npm run server                 # app at :8787/, console at :8787/console/
+docker compose up --build                              # same, with PostgreSQL in a container
+PLATEWATCH_TEST_DATABASE_URL=postgres://… npm run test:server    # API tests against a real database
+PLATEWATCH_TEST_DATABASE_URL=postgres://… npm run smoke:backend  # browser E2E: handset + console
 ```
 
 ### Android APK
@@ -173,12 +180,17 @@ android/          Capacitor project (permissions, signing, backup exclusions, Pa
 docs/SECURITY.md  CSP, data handling, permissions
 docs/EMAPS-INTEGRATION-ASSESSMENT.md  EnforcementMAPS integration gaps, battery/GPS plan
 docs/DESIGN-SYSTEM.md  CivicMAPS design system wiring and conformance (D1–D16)
+docs/BACKEND.md   backend, console, I-N verification, API and data model
+server/           backend (Node + PostgreSQL): API, I-N verifier, migrations, console (static)
 ```
 
 ## Data & privacy
 
-All data (lists, plates, evidence images, locations) stays in IndexedDB on the device; there
-is no server and the app makes no network requests of its own other than loading itself. In
+All data (lists, plates, evidence images, locations) is saved in IndexedDB on the device first.
+Standalone, there is no server and the app makes no network requests of its own other than
+loading itself. When a PlateWatch backend is configured (*Settings → Backend*, field testing),
+scan records, timings and hot-list events are synced to it, and evidence images are uploaded for
+issued infringements and acknowledged hot-list sightings ([docs/BACKEND.md](docs/BACKEND.md)). In
 the APK, Google ML Kit (patrol mode) runs on-device with a bundled model, but per Google's
 ML Kit terms it may contact Google to send API usage/performance metrics; no images or plate
 text are sent. Android cloud backup and

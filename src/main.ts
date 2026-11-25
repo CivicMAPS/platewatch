@@ -1,7 +1,9 @@
 import './styles.css';
 import { Capacitor } from '@capacitor/core';
 import { registerSW } from 'virtual:pwa-register';
-import { purgeScansOlderThan } from './lib/db';
+import { purgeScansOlderThan, setOutboxHook } from './lib/db';
+import { installBackend, requestSync, setInfringementWizard, startSyncLoop } from './lib/backend';
+import { openInfringementWizard } from './ui/infringementWizard';
 import { warmUpOcr } from './lib/ocr';
 import { App } from './ui/app';
 import { homeView, newListTypeView } from './ui/views/home';
@@ -34,7 +36,13 @@ const app = new App(root)
   .route('/import', importView)
   .route('/settings', settingsView);
 
+// PlateWatch backend (docs/BACKEND.md): development host + sync, only when configured in Settings.
+installBackend(() => app.settings);
+setInfringementWizard(openInfringementWizard);
+setOutboxHook(() => requestSync());
+
 await app.start();
+startSyncLoop();
 
 // Ask the browser not to evict evidence under storage pressure.
 void navigator.storage?.persist?.().catch(() => false);

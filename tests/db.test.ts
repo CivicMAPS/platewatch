@@ -21,6 +21,10 @@ import {
   deleteFlag,
   getObservations,
   getScan,
+  getOutbox,
+  removeOutbox,
+  setOutboxHook,
+  enqueueAll,
 } from '../src/lib/db';
 import { applyDismissal } from '../src/lib/dismissal';
 import { newObservation } from '../src/lib/engine';
@@ -228,5 +232,42 @@ describe('putLists (bulk import)', () => {
     const many = Array.from({ length: 500 }, (_, i) => timed({ id: `t${i}`, name: `Segment ${i}` }));
     await putLists(many);
     expect(await getLists()).toHaveLength(500);
+  });
+});
+
+describe('backend outbox (DB v7)', () => {
+  it('queues a scan and its timing in the same transaction, once per record, and signals a sync', async () => {
+    let signals = 0;
+    setOutboxHook(() => (signals += 1));
+    const list = timed();
+    const t = at(2026, 11, 21, 9);
+    const obs = newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: t, instance: { restriction: r2P(), start: t, end: t + 3600_000 } });
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    expect((await getOutbox()).map((o) => o.key).sort()).toEqual(['observation:o1', 'scan:s1']);
+    expect(signals).toBe(2);
+    setOutboxHook(null);
+  });
+
+  it('a change made while a send is in flight is not dropped by the stale removal', async () => {
+    const list = timed();
+    const t = at(2026, 11, 21, 9);
+    await saveScan(scan('s1', list.id, t));
+    const [sent] = await getOutbox();
+    await saveScan({ ...scan('s1', list.id, t), plate: 'ABC124' });
+    await removeOutbox(sent!.key, sent!.queuedAt);
+    expect((await getOutbox()).map((o) => o.key)).toEqual(['scan:s1']);
+    const [newer] = await getOutbox();
+    await removeOutbox(newer!.key, newer!.queuedAt);
+    expect(await getOutbox()).toEqual([]);
+  });
+
+  it('send everything queues every record on the device', async () => {
+    const list = timed();
+    await saveScan(scan('s1', list.id, at(2026, 11, 21, 9)));
+    await saveScan(scan('s2', list.id, at(2026, 11, 21, 10)));
+    for (const o of await getOutbox()) await removeOutbox(o.key, o.queuedAt);
+    expect(await enqueueAll()).toBe(2);
+    expect((await getOutbox()).length).toBe(2);
   });
 });

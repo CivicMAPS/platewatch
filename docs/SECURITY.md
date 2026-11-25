@@ -14,7 +14,7 @@ with header-only directives for static hosts.
 default-src 'self';
 script-src 'self' 'wasm-unsafe-eval';
 worker-src 'self' blob:;
-connect-src 'self' blob: data:;
+connect-src 'self' blob: data: https: http://localhost:* http://127.0.0.1:* http://10.0.2.2:* [VITE_PLATEWATCH_CONNECT_SRC];
 img-src 'self' blob: data:;
 media-src 'self' blob: mediastream:;
 style-src 'self';
@@ -35,6 +35,11 @@ frame-ancestors 'none'   (header only)
 - **No third-party origins.** OCR worker, cores and language model are copied from
   `node_modules` into `/ocr` at build time (`scripts/copy-ocr-assets.mjs`); nothing loads from
   a CDN.
+- **`connect-src` allows any `https:` origin** (plus `http://localhost`, `127.0.0.1` and the
+  Android emulator's `10.0.2.2`) because the PlateWatch backend is configured at run time
+  (docs/BACKEND.md). The app contacts only the configured backend, and only when one is set.
+  Extra origins (e.g. a LAN `http://` address for testing) are added at build time with
+  `VITE_PLATEWATCH_CONNECT_SRC`.
 - The E2E smoke test fails on any `securitypolicyviolation` event or console error.
 
 Dev server (`npm run dev`) runs without the meta CSP because Vite injects `<style>` tags for HMR.

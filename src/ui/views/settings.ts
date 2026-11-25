@@ -1,7 +1,8 @@
 import { html, nothing } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { createBackup, restoreBackup } from '../../lib/backup';
-import { countDismissed, purgeScansOlderThan } from '../../lib/db';
+import { countDismissed, enqueueAll, purgeScansOlderThan } from '../../lib/db';
+import { backendSettingsChanged, backendState, onBackendChange, registerDevice, syncNow, testConnection } from '../../lib/backend';
 import { clearDiagnostics, countDiagnostics, diagnosticsExport } from '../../lib/diagnostics';
 import { saveFile } from '../../lib/files';
 import { formatLatLng, geo, type GeoState } from '../../lib/geo';
@@ -33,6 +34,8 @@ export function settingsView(_p: Record<string, string>, app: App): View {
   let geoTesting = false;
   let busy = false;
   let unsubGeo: (() => void) | null = null;
+  let unsubBackend: (() => void) | null = null;
+  let backendTest: { tone: 'active' | 'alert'; text: string } | null = null;
   let diagCount = 0;
   let dismissedCount = 0;
   /** Add the Dismissed list to the next export (off by default; it carries evidence images). */
@@ -162,8 +165,66 @@ export function settingsView(_p: Record<string, string>, app: App): View {
     void refresh();
   };
 
+  const saveBackend = async (patch: { backendUrl?: string; backendToken?: string }) => {
+    await app.updateSettings(patch);
+    backendTest = null;
+    backendSettingsChanged();
+    app.update();
+  };
+
+  const runBackendTest = async () => {
+    backendTest = null;
+    busy = true;
+    app.update();
+    try {
+      const h = await testConnection();
+      const d = await registerDevice();
+      backendTest = { tone: 'active', text: `Connected · council ${h.council} · server v${h.version} · device key ${d.keyId} ${d.status}` };
+      void syncNow();
+    } catch (e) {
+      backendTest = { tone: 'alert', text: (e as Error).message };
+    }
+    busy = false;
+    app.update();
+  };
+
+  /** PlateWatch backend (docs/BACKEND.md): where the device syncs and how its I-N key stands. */
+  const backendSection = () => {
+    const s = app.settings;
+    const b = backendState();
+    const dev = b.device;
+    return html`<section class="card mt-4 grid gap-3" data-testid="backend">
+      <h2 class="section-title">Backend</h2>
+      <p class="text-sm text-neutral-700">Development and field testing: syncs scans, timings and hot-list events to the PlateWatch backend, sends soft Code 1 alerts to the CommandMAPS console, and issues infringements with numbers signed on this device. Inside EnforcementMAPS the host connection is used instead.</p>
+      <label class="block"><span class="field-label">Server URL</span>
+        <input class="field font-plate" data-testid="backend-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://platewatch.example.org" .value=${s.backendUrl}
+          @change=${(e: Event) => void saveBackend({ backendUrl: (e.target as HTMLInputElement).value.trim() })} /></label>
+      <label class="block"><span class="field-label">Device token</span>
+        <input class="field font-plate" data-testid="backend-token" type="password" autocomplete="off" spellcheck="false" .value=${s.backendToken}
+          @change=${(e: Event) => void saveBackend({ backendToken: (e.target as HTMLInputElement).value.trim() })} /></label>
+      ${b.configured
+        ? html`<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt class="text-neutral-600">Device key</dt><dd>${dev ? html`<span class="font-plate">${dev.keyId}</span> ${dev.status === 'approved' ? statusPill('permit_valid', 'Approved') : dev.status === 'revoked' ? statusPill('not_valid', 'Revoked') : statusPill('timing', 'Awaiting approval')}` : '—'}</dd>
+            <dt class="text-neutral-600">Waiting to send</dt><dd class="font-plate" data-testid="backend-pending">${b.pending}</dd>
+            <dt class="text-neutral-600">Last sync</dt><dd>${b.syncing ? 'syncing…' : b.lastSyncAt ? html`<span class="font-plate">${formatStamp(b.lastSyncAt)}</span>` : 'never'}</dd>
+          </dl>
+          ${dev && dev.status !== 'approved' ? banner('pending', 'Device key awaiting approval', html`A supervisor approves this device in the console (Devices). Until then infringements are issued and kept on this device; the server accepts their numbers once approved.`) : nothing}
+          ${b.lastError ? banner('alert', 'Last sync failed', b.lastError, 'backend-error') : nothing}
+          ${!s.officerNumber ? banner('alert', 'Officer number required', 'Set it above: it is needed to acknowledge hot-list alerts and to allocate infringement numbers.') : nothing}`
+        : nothing}
+      ${backendTest ? banner(backendTest.tone, backendTest.tone === 'active' ? 'Connection OK' : 'Connection failed', backendTest.text, 'backend-test-result') : nothing}
+      <div class="grid grid-cols-2 gap-2">
+        <button type="button" class="btn-secondary" data-testid="backend-test" ?disabled=${busy || !b.configured} @click=${() => void runBackendTest()}>${icon('refresh')} Test connection</button>
+        <button type="button" class="btn-secondary" data-testid="backend-sync" ?disabled=${b.syncing || !b.configured} @click=${() => void syncNow()}>${icon('share')} Sync now</button>
+      </div>
+      <button type="button" class="btn-ghost" ?disabled=${!b.configured} @click=${async () => { const n = await enqueueAll(); app.toast(`${n} record(s) queued for the backend.`, 'info'); void syncNow(); }}>Send every record on this device</button>
+      <p class="text-xs text-neutral-500">Scan records include number plates, locations and thumbnails; evidence images are sent only for issued infringements and acknowledged hot-list sightings.</p>
+    </section>`;
+  };
+
   return {
     async mount() {
+      unsubBackend = onBackendChange(() => app.update());
       unsubGeo = geo.subscribe((s) => {
         geoState = s;
         app.update();
@@ -171,6 +232,7 @@ export function settingsView(_p: Record<string, string>, app: App): View {
       await refresh();
     },
     unmount() {
+      unsubBackend?.();
       unsubGeo?.();
       if (geoTesting) geo.stop();
     },
@@ -263,6 +325,8 @@ export function settingsView(_p: Record<string, string>, app: App): View {
                 @change=${(e: Event) => void app.updateSettings({ officerNumber: (e.target as HTMLInputElement).value.trim() })} /></label>
             <p class="text-xs text-neutral-600">Required to acknowledge hot-list alerts. Development build only: inside EnforcementMAPS the officer number comes from your sign-in.</p>
           </section>
+
+          ${backendSection()}
 
           <section class="card mt-4 grid gap-3" data-testid="list-rules">
             <h2 class="section-title">List rules</h2>

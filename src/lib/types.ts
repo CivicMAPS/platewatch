@@ -370,6 +370,55 @@ export interface InfringementRecord {
   timeTo: number;
   issuedAt?: number;
   officerNumber: string;
+  /** Derived internal 702 classification (702 / 702e, owner 25/11/2026); never shown as a code. */
+  internalVariant?: 'no_payment' | 'expired_session' | 'unknown';
+  /** This number replaced an earlier one on the same sighting (void + reissue, no approval). */
+  reissueOf?: string;
+  /** Void requested without a reissue: waits for supervisor approval in CommandMAPS (23/11/2026). */
+  voidRequest?: { reason: VoidReason; note?: string; requestedAt: number; decidedAt?: number; decision?: 'approved' | 'rejected'; decidedBy?: string };
+  /** Customer payment recorded by the infringement system (development backend: simulated). */
+  paidAt?: number;
+  /** Why the server refused the signed statements, when `sync` is 'rejected'. */
+  syncError?: string;
+}
+
+/** Owner examples (23/11/2026). Incorrect details go through a reissue instead. */
+export type VoidReason = 'officer_error' | 'permit_displayed' | 'incorrect_offence' | 'incorrect_vehicle_details' | 'non_conforming_signage' | 'other';
+
+export interface SignedStatementJson {
+  statement: Record<string, unknown>;
+  signature: string;
+  hash: string;
+}
+
+/** What the development host uploads for one infringement number. */
+export interface IssueBundle {
+  keyId: string;
+  allocation: SignedStatementJson;
+  /** Issue (or cancel) statement over the record. */
+  closing?: SignedStatementJson;
+  /** The issued record (absent for a cancelled number). */
+  record?: IssuedRecord;
+}
+
+/** The infringement as issued in the wizard; its canonical SHA-256 is signed by the issue statement. */
+export interface IssuedRecord {
+  number: string;
+  handoffId: string;
+  handoff: Record<string, unknown>;
+  offenceCode: '701' | '702';
+  offenceOverridden: boolean;
+  internalVariant?: 'no_payment' | 'expired_session' | 'unknown';
+  /** ISO 8601 with offset. */
+  timeFrom: string;
+  timeTo: string;
+  issuedAt: string;
+  notes: string;
+  evidenceOverride?: { reason: string };
+  vehicle: Record<string, unknown>;
+  officerNumber: string;
+  reissueOf?: string;
+  reissueReason?: VoidReason;
 }
 
 /** Where the officer checked payment (WF-S30). */
@@ -397,6 +446,8 @@ export interface ScanRecord {
   payment?: PaymentCheck;
   /** Infringement issued (or started and cancelled) from this scan, stored back from EnforcementMAPS (WF-S31). */
   infringement?: InfringementRecord;
+  /** Earlier infringements on this sighting, newest last (voided by a reissue, or cancelled reissues). */
+  infringementHistory?: InfringementRecord[];
   /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
   lookalikes?: LookalikeLink[];
   /** Overstay alert dismissed by the officer after checking the vehicle. */
@@ -541,6 +592,12 @@ export interface Settings {
    * build only: EnforcementMAPS supplies it from the operating context. Empty until set.
    */
   officerNumber: string;
+  /**
+   * PlateWatch backend (development and field testing, `docs/BACKEND.md`): base URL and device
+   * token. Empty = standalone. Inside EnforcementMAPS the host connection is used instead.
+   */
+  backendUrl: string;
+  backendToken: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -555,6 +612,8 @@ export const DEFAULT_SETTINGS: Settings = {
   listZoneFilter: null,
   theme: 'light',
   officerNumber: '',
+  backendUrl: '',
+  backendToken: '',
 };
 
 /* ─────────────────────────── Hot-list entry log (WF-S29) ─────────────────────────── */
@@ -598,5 +657,7 @@ export interface HotListEvent {
     attempts: number;
     lastAttemptAt?: number;
     sentAt?: number;
+    /** Recipients who acknowledged in CommandMAPS (from the backend; proposed: the officer is told, OQ29-x). */
+    acknowledgedBy?: { recipient: HotAlertRecipient; by: string; at: number }[];
   };
 }

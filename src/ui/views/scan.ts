@@ -45,6 +45,7 @@ import { host, officerNumber } from '../../lib/host';
 import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
 import { vehicleFields } from '../vehicleFields';
 import { applyInfringementResult, buildHandoff, canIssueInfringement, formatInfringementNumber } from '../../lib/infringement';
+import { isConfigured as backendConfigured, paymentLookup } from '../../lib/backend';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
   RISK_LEVEL_LABELS,
@@ -1313,6 +1314,9 @@ export function scanView(params: Record<string, string>, app: App): View {
         <dt class="text-neutral-600">Where</dt><dd>${where}</dd>
         <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber}</dd>
         <dt class="text-neutral-600">Alerted</dt><dd>${sent ? 'Dispatch · compliance coordinator' : html`Dispatch · compliance coordinator — <span class="text-pending-strong">queued, attempt ${a.notification?.attempts ?? 0}</span>`}</dd>
+        ${a.notification?.acknowledgedBy?.length
+          ? html`<dt class="text-neutral-600">Acknowledged</dt><dd data-testid="hot-acked-by">${a.notification.acknowledgedBy.map((k) => html`<span class="block">${k.recipient === 'dispatch' ? 'Dispatch' : 'Compliance coordinator'} · ${k.by} · <span class="font-plate">${formatClock(k.at)}</span></span>`)}</dd>`
+          : nothing}
       </dl>
       ${sent
         ? nothing
@@ -1529,6 +1533,7 @@ export function scanView(params: Record<string, string>, app: App): View {
             <label><span class="field-label">Paid to</span><input type="time" class="field font-plate" data-testid="pay-to" required .value=${f.paidTo} @input=${(e: Event) => (payForm = { ...payForm, paidTo: (e.target as HTMLInputElement).value })} /></label>
           </div>`
         : nothing}
+      ${backendConfigured() ? html`<button type="button" class="btn-ghost mt-2 w-full" data-testid="pay-lookup" @click=${() => void lookupPayment()}>Look up paid session (test provider)</button>` : nothing}
       ${f.error ? html`<div class="mt-3">${banner('alert', f.error)}</div>` : nothing}
       <button type="button" class="btn-primary mt-3 w-full" data-testid="pay-save" ?disabled=${phase === 'saving'} @click=${() => void savePaymentCheck()}>${icon('check')} Save payment check</button>
     </section>`;
@@ -1712,6 +1717,25 @@ export function scanView(params: Record<string, string>, app: App): View {
    */
   const paymentRequired = (r: ResultState): boolean =>
     r.decision.kind === 'timed_new' && r.decision.concession !== 'disability' && !r.observation?.paymentWaived && !!r.saved && !r.saved.payment && isPaidSpace();
+
+  /**
+   * Development backend: ask the test payment provider for a paid session covering the scan. It
+   * only fills the form; the officer still checks and saves (no provider is integrated, OQ27-4).
+   */
+  const lookupPayment = async () => {
+    if (!pending || !result?.saved) return;
+    const ref = payForm.source?.ref ?? pending.meta.payment?.easyPark?.[0];
+    try {
+      const sess = await paymentLookup(result.saved.plate, pending.meta.capturedAt, ref);
+      payForm = sess
+        ? { ...payForm, status: 'paid', source: { kind: sess.source as PaymentSource, ref: sess.sourceRef || undefined }, paidFrom: hhmm(sess.paidFrom), paidTo: hhmm(sess.paidTo), error: '' }
+        : { ...payForm, status: 'not_found', source: payForm.source ?? (ref ? { kind: 'easypark', ref } : null), error: '' };
+      app.toast(sess ? `Paid session found: ${hhmm(sess.paidFrom)}–${hhmm(sess.paidTo)}. Check and save.` : 'No paid session found for this plate. Check and save.', 'info');
+    } catch (e) {
+      payForm = { ...payForm, error: `Lookup failed: ${(e as Error).message}` };
+    }
+    app.update();
+  };
 
   /** 30a.5: save the payment check on the scan and carry it to the timing. */
   const savePaymentCheck = async () => {

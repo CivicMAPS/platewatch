@@ -12,6 +12,7 @@ import { OFFENCE_LABEL, PAID_TO_GRACE_MINUTES, shortfallMinutes, type InternalVa
 import { formatClock, formatDuration, toLocalIso } from './time';
 import type { InfringementRecord, LookalikeLink, Observation, PaymentCheck, ScanRecord, TimedList, VehicleDetails } from './types';
 import { plateReentry } from './vehicle';
+import { variantFor } from './issuance';
 import { normalisePlate } from './plate';
 
 export type InfringementHandoff = Record<string, unknown> & {
@@ -209,6 +210,7 @@ export function applyInfringementResult(args: { scan: ScanRecord; observation: O
     timeTo: result.timeTo ?? Date.parse(handoff.times.timeTo),
     ...(result.issuedAt !== undefined ? { issuedAt: result.issuedAt } : {}),
     officerNumber: handoff.officerNumber,
+    ...((result.offenceCode ?? suggested) === '702' ? { internalVariant: variantFor(handoff, '702') } : {}),
   };
   const issuedAt = result.issuedAt ?? args.now ?? Date.now();
   return {

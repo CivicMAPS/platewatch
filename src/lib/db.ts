@@ -15,7 +15,19 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
+
+/** What the backend sync sends (DB v7). The payload is read at send time, so one row per record. */
+export type OutboxKind = 'scan' | 'observation' | 'hotEvent' | 'infringement' | 'voidRequest' | 'evidence';
+export interface OutboxItem {
+  /** `${kind}:${id}` — a newer change to the same record replaces the row. */
+  key: string;
+  kind: OutboxKind;
+  id: string;
+  queuedAt: number;
+  attempts: number;
+  lastError?: string;
+}
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -36,6 +48,8 @@ interface PlateWatchDB extends DBSchema {
   flags: { key: string; value: PlateFlag };
   /** Version 4: hot-list entry log events (acknowledgements, look-alike decisions), WF-S29. */
   hotEvents: { key: string; value: HotListEvent; indexes: { 'by-entry': string; 'by-at': number } };
+  /** Version 7: records waiting for the PlateWatch backend (docs/BACKEND.md). */
+  outbox: { key: string; value: OutboxItem; indexes: { 'by-queued': number } };
 }
 
 /** Vehicle details in the infringement structure (DB v5, backups): no model, no free-text vehicle. */
@@ -95,6 +109,9 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
         const ev = database.createObjectStore('hotEvents', { keyPath: 'id' });
         ev.createIndex('by-entry', 'hotListEntryId');
         ev.createIndex('by-at', 'at');
+      }
+      if (oldVersion < 7) {
+        database.createObjectStore('outbox', { keyPath: 'key' }).createIndex('by-queued', 'queuedAt');
       }
       if (oldVersion >= 1 && oldVersion < 6) {
         // Versions 5–6: vehicle details in the infringement structure (registration type, make,
@@ -201,18 +218,26 @@ export async function getObservation(id: string): Promise<Observation | undefine
 }
 
 export async function putObservation(o: Observation): Promise<void> {
-  await (await db()).put('observations', o);
+  const tx = (await db()).transaction(['observations', 'outbox'], 'readwrite');
+  await tx.objectStore('observations').put(o);
+  await queue(tx.objectStore('outbox'), 'observation', o.id);
+  await tx.done;
+  queued();
 }
 
 export async function expireObservations(ids: readonly string[], at: number): Promise<void> {
   if (!ids.length) return;
   const d = await db();
-  const tx = d.transaction('observations', 'readwrite');
+  const tx = d.transaction(['observations', 'outbox'], 'readwrite');
   for (const id of ids) {
-    const o = await tx.store.get(id);
-    if (o && o.status === 'active') await tx.store.put({ ...o, status: 'expired', closedAt: at });
+    const o = await tx.objectStore('observations').get(id);
+    if (o && o.status === 'active') {
+      await tx.objectStore('observations').put({ ...o, status: 'expired', closedAt: at });
+      await queue(tx.objectStore('outbox'), 'observation', id);
+    }
   }
   await tx.done;
+  queued();
 }
 
 /* ────────────────────────────── Scans ────────────────────────────── */
@@ -220,10 +245,15 @@ export async function expireObservations(ids: readonly string[], at: number): Pr
 /** Atomically persist a scan and (optionally) the observation it creates/updates. */
 export async function saveScan(scan: ScanRecord, observation?: Observation): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['scans', 'observations'], 'readwrite');
+  const tx = d.transaction(['scans', 'observations', 'outbox'], 'readwrite');
   await tx.objectStore('scans').put(scan);
-  if (observation) await tx.objectStore('observations').put(observation);
+  await queue(tx.objectStore('outbox'), 'scan', scan.id);
+  if (observation) {
+    await tx.objectStore('observations').put(observation);
+    await queue(tx.objectStore('outbox'), 'observation', observation.id);
+  }
   await tx.done;
+  queued();
 }
 
 export async function getScan(id: string): Promise<ScanRecord | undefined> {
@@ -339,17 +369,96 @@ export async function deleteFlag(key: string): Promise<void> {
  * dismissed, and a disability / emergency dismissal tags the plate — all in one transaction.
  */
 export async function dismissOverstay(args: { scan: ScanRecord; observation: Observation; flag?: PlateFlag }): Promise<void> {
-  const tx = (await db()).transaction(['scans', 'observations', 'flags'], 'readwrite');
+  const tx = (await db()).transaction(['scans', 'observations', 'flags', 'outbox'], 'readwrite');
   await tx.objectStore('scans').put(args.scan);
   await tx.objectStore('observations').put(args.observation);
+  await queue(tx.objectStore('outbox'), 'scan', args.scan.id);
+  await queue(tx.objectStore('outbox'), 'observation', args.observation.id);
   if (args.flag) await tx.objectStore('flags').put(args.flag);
   await tx.done;
+  queued();
 }
 
 /* ───────────────────────────── Hot-list entry log ───────────────────────────── */
 
 export async function putHotEvent(e: HotListEvent): Promise<void> {
-  await (await db()).put('hotEvents', e);
+  const tx = (await db()).transaction(['hotEvents', 'outbox'], 'readwrite');
+  await tx.objectStore('hotEvents').put(e);
+  await queue(tx.objectStore('outbox'), 'hotEvent', e.id);
+  await tx.done;
+  queued();
+}
+
+export async function getHotEvent(id: string): Promise<HotListEvent | undefined> {
+  return (await db()).get('hotEvents', id);
+}
+
+/* ───────────────────────────── Backend outbox (v7) ───────────────────────────── */
+
+let outboxHook: (() => void) | null = null;
+/** Called after a change is queued (the backend client requests a sync). */
+export function setOutboxHook(fn: (() => void) | null): void {
+  outboxHook = fn;
+}
+const queued = () => outboxHook?.();
+
+type OutboxStore = { put(value: OutboxItem): Promise<unknown>; get(key: string): Promise<OutboxItem | undefined> };
+
+async function queue(store: OutboxStore, kind: OutboxKind, id: string, now = Date.now()): Promise<void> {
+  const key = `${kind}:${id}`;
+  const prev = await store.get(key);
+  // Strictly increasing, so a change made while a send is in flight is never dropped by removeOutbox.
+  await store.put({ key, kind, id, queuedAt: Math.max(now, (prev?.queuedAt ?? 0) + 1), attempts: 0 });
+}
+
+export async function enqueue(kind: OutboxKind, id: string): Promise<void> {
+  const tx = (await db()).transaction('outbox', 'readwrite');
+  await queue(tx.store, kind, id);
+  await tx.done;
+  queued();
+}
+
+export async function getOutbox(): Promise<OutboxItem[]> {
+  return (await db()).getAllFromIndex('outbox', 'by-queued');
+}
+
+export async function countOutbox(): Promise<number> {
+  return (await db()).count('outbox');
+}
+
+/** Remove a sent row, unless the record changed again after `queuedAt` was read. */
+export async function removeOutbox(key: string, queuedAt: number): Promise<void> {
+  const tx = (await db()).transaction('outbox', 'readwrite');
+  const cur = await tx.store.get(key);
+  if (cur && cur.queuedAt === queuedAt) await tx.store.delete(key);
+  await tx.done;
+}
+
+export async function markOutboxFailed(key: string, queuedAt: number, error: string): Promise<void> {
+  const tx = (await db()).transaction('outbox', 'readwrite');
+  const cur = await tx.store.get(key);
+  if (cur && cur.queuedAt === queuedAt) await tx.store.put({ ...cur, attempts: cur.attempts + 1, lastError: error });
+  await tx.done;
+}
+
+/** Queue every scan, timing and hot-list event on the device (Settings → Send everything). */
+export async function enqueueAll(): Promise<number> {
+  const d = await db();
+  const [scans, obs, events] = await Promise.all([d.getAllKeys('scans'), d.getAllKeys('observations'), d.getAllKeys('hotEvents')]);
+  const tx = d.transaction('outbox', 'readwrite');
+  for (const id of scans) await queue(tx.store, 'scan', id);
+  for (const id of obs) await queue(tx.store, 'observation', id);
+  for (const id of events) await queue(tx.store, 'hotEvent', id);
+  await tx.done;
+  return scans.length + obs.length + events.length;
+}
+
+export async function getKv<T>(key: string): Promise<T | undefined> {
+  return (await (await db()).get('kv', key)) as T | undefined;
+}
+
+export async function putKv(key: string, value: unknown): Promise<void> {
+  await (await db()).put('kv', value, key);
 }
 
 export async function getHotEventsForEntry(entryId: string): Promise<HotListEvent[]> {

@@ -336,6 +336,7 @@ async function main() {
   await page.waitForSelector('[data-testid=payment-saved]', { visible: true });
   await waitText('Paid');
   log('first sighting → recorded; payment check (paid session, PayStay zone of the restriction, paid to) saved before Next scan');
+  const gpsRecordUrl = await page.$eval('a[href^="#/record/"]', (a) => a.href);
   await shot('recorded');
 
   // Scan 2 (within allowance)
@@ -617,10 +618,9 @@ async function main() {
   if (!(await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Delete/.test(b.textContent))?.disabled))) throw new Error('Delete enabled on a record with an issued infringement');
   log('issue infringement (mock EnforcementMAPS host): 702 → vehicle details + licence plate entered twice (mismatch flagged) → hand-off payload → PIN 04471 261121 001 8363 93 shown, timing closed, record locked');
 
-  // Evidence record: EXIF + integrity.
-  await page.goto(timedUrl);
-  await waitText('Recent scan records');
-  await page.click('main ul li button');
+  // Verify the same first sighting whose GPS fix was checked at capture.
+  await page.goto(gpsRecordUrl);
+  await waitText('Capture metadata');
   // Thumbnails load after the record renders; wait so the layout is stable before clicking.
   await page.waitForFunction(() => [...document.images].every((i) => i.complete));
   // No sideways scroll on a phone (a pill row overflowing the card once did this).

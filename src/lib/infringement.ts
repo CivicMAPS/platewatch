@@ -8,7 +8,7 @@
  */
 import { host } from './host';
 import { sameVehicleLink } from './lookalike';
-import { OFFENCE_LABEL, PAID_TO_GRACE_MINUTES, type OffenceOffer } from './offence';
+import { OFFENCE_LABEL, PAID_TO_GRACE_MINUTES, shortfallMinutes, type InternalVariant, type OffenceOffer } from './offence';
 import { formatClock, formatDuration, toLocalIso } from './time';
 import type { InfringementRecord, LookalikeLink, Observation, PaymentCheck, ScanRecord, TimedList, VehicleDetails } from './types';
 import { plateReentry } from './vehicle';
@@ -19,7 +19,7 @@ export type InfringementHandoff = Record<string, unknown> & {
   handoffId: string;
   source: 'platewatch';
   officerNumber: string;
-  offence: { suggestedCode: '701' | '702'; basis: OffenceOffer['basis'] } & Record<string, unknown>;
+  offence: { suggestedCode: '701' | '702'; basis: OffenceOffer['basis']; internalVariant?: InternalVariant } & Record<string, unknown>;
   times: { timeFrom: string; timeTo: string } & Record<string, unknown>;
 };
 
@@ -58,7 +58,11 @@ export function notesTemplate(args: { offer: OffenceOffer; observation: Observat
     lines.push(`First sighted ${hms(o.startedAt)}, re-sighted ${hms(scanAt)}, ${args.code} allowance exceeded by ${formatDuration(scanAt - allowanceEnds)}.`);
     if (p?.status === 'paid' && p.paidTo !== undefined) lines.push(`Paid to ${hms(p.paidTo)} (${paidWith(p)}).`);
   } else if (offer.basis === 'no_payment_found') {
-    lines.push(`No paid session found at ${hms(o.startedAt)}${p ? ` (${paidWith(p)} checked)` : ''}.`);
+    lines.push(
+      p?.status === 'paid' && p.paidTo !== undefined
+        ? `No valid payment at ${hms(o.startedAt)}: paid session (${paidWith(p)}) ended ${hms(p.paidTo)}.`
+        : `No paid session found at ${hms(o.startedAt)}${p ? ` (${paidWith(p)} checked)` : ''}.`,
+    );
   } else if (p?.paidTo !== undefined) {
     lines.push(`Paid to ${hms(p.paidTo)} (${paidWith(p)}); vehicle still parked at ${hms(scanAt)}, ${formatDuration(scanAt - p.paidTo)} after paid to.`);
   }
@@ -141,7 +145,19 @@ export function buildHandoff(args: {
       suggestedCode: offer.code,
       paidToGraceMinutes: PAID_TO_GRACE_MINUTES,
       basis: offer.basis,
-      ...(offer.secondary ? { secondary: { code: offer.secondary.code, timeFrom: iso(offer.secondary.timeFrom) } } : {}),
+      // Internal 702 classification (702 / 702e): derived from the payment check, locked, never on the notice.
+      ...(offer.code === '702'
+        ? {
+            internalVariant: offer.internalVariant ?? 'unknown',
+            variantSource: 'derived',
+            variantBasis: {
+              ...(payment?.paidFrom !== undefined ? { paidFrom: iso(payment.paidFrom) } : {}),
+              ...(payment?.paidTo !== undefined ? { paidTo: iso(payment.paidTo) } : {}),
+              ...(payment ? { checkedAt: iso(payment.checkedAt) } : {}),
+              ...(shortfallMinutes(payment?.paidTo, scan.meta.capturedAt) !== null ? { shortfallMinutes: shortfallMinutes(payment?.paidTo, scan.meta.capturedAt) } : {}),
+            },
+          }
+        : {}),
       restrictionCode: o.restrictionCode,
       spaceType: spaceType(r?.description ?? ''),
       limitMinutes: o.limitMinutes,

@@ -243,21 +243,6 @@
             "no_payment_found"
           ]
         },
-        "secondary": {
-          "type": "object",
-          "properties": {
-            "code": {
-              "enum": [
-                "701",
-                "702"
-              ]
-            },
-            "timeFrom": {
-              "type": "string",
-              "format": "date-time"
-            }
-          }
-        },
         "restrictionCode": {
           "type": "string",
           "examples": [
@@ -283,8 +268,84 @@
           "enum": [
             "disability"
           ]
+        },
+        "internalVariant": {
+          "description": "Internal 702 classification (City of Melbourne 702 / 702e analytics split, owner 25/11/2026). Derived by PlateWatch from the payment check, never chosen by the officer, never printed on the notice or sent to the customer or Fines Victoria. Present only when suggestedCode is 702.",
+          "enum": [
+            "no_payment",
+            "expired_session",
+            "unknown"
+          ]
+        },
+        "variantSource": {
+          "const": "derived"
+        },
+        "variantBasis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paidFrom": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "paidTo": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "checkedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "shortfallMinutes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Scan time − paid to, whole minutes (expired sessions)."
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "suggestedCode": {
+                "const": "701"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "internalVariant"
+                  ]
+                },
+                {
+                  "required": [
+                    "variantSource"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "suggestedCode": {
+                "const": "702"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "internalVariant",
+              "variantSource"
+            ]
+          }
+        }
+      ]
     },
     "times": {
       "type": "object",

@@ -39,7 +39,7 @@ import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRE
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
 import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction, VehicleDetails } from '../../lib/types';
-import { effectivePayment, OFFENCE_LABEL, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
+import { effectivePayment, offenceChipText, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
 import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
 import { host, officerNumber } from '../../lib/host';
 import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
@@ -1476,13 +1476,18 @@ export function scanView(params: Record<string, string>, app: App): View {
     }
   };
 
-  /** 701 / 702 offer: amber, with the offence code chip and the locked time from (WF-S30). */
+  /**
+   * 701 / 702 offer: amber, with the offence code chip and the locked time from (WF-S30). Time first:
+   * past the allowance it is 701 whatever the payment state; 702 only within the allowance. The
+   * officer only ever sees 702 for a payment offence — the internal 702e split is derived (25/11/2026).
+   */
   const offerCard = (offer: OffenceOffer): TemplateResult => html`<section class="rounded-md border-2 border-alert bg-alert-bg p-4" data-testid="offence-offer" data-code=${offer.code}>
     <div class="flex flex-wrap items-center gap-2">${statusPill('overstay', `${offer.code} eligible`)}
-      <span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong" data-testid="offence-chip">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span></div>
-    <p class="mt-2 text-sm text-neutral-800">${offer.basis === 'no_payment_found' ? 'No payment found at the first scan.' : offer.basis === 'paid_to_passed' ? `Paid to passed (grace ${PAID_TO_GRACE_MINUTES} min ended).` : 'Allowance exceeded.'}
+      <span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong" data-testid="offence-chip">${offenceChipText(offer)}</span></div>
+    <p class="mt-2 text-sm text-neutral-800">${offer.basis === 'no_payment_found'
+      ? offer.internalVariant === 'expired_session' ? 'No valid payment at the first scan: the paid session had already ended.' : 'No payment found at the first scan.'
+      : offer.basis === 'paid_to_passed' ? `Paid to passed (grace ${PAID_TO_GRACE_MINUTES} min ended), within the time allowance.` : 'Time allowance exceeded. Payment does not change a 701.'}
       Offence from <span class="font-plate">${formatClock(offer.timeFrom)}</span>.</p>
-    ${offer.secondary ? html`<p class="mt-1 text-xs text-neutral-700" data-testid="offence-secondary">Also reached: <span class="font-plate">${offer.secondary.code}</span> · ${OFFENCE_LABEL[offer.secondary.code]} (from <span class="font-plate">${formatClock(offer.secondary.timeFrom)}</span>)</p>` : nothing}
     ${issueButton(offer)}
   </section>`;
 
@@ -1624,7 +1629,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     const check = plateReentry(first, plateSecond);
     return decisionSheet({
       testid: 'handoff-sheet',
-      pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span>`,
+      pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offenceChipText(offer)}</span>`,
       title: `Start infringement for ${first}`,
       onClose: () => { handoffOffer = null; app.update(); },
       body: html`<p>Filled in from this sighting: location, evidence images with their SHA-256, offence, locked time from (<span class="font-plate">${formatClock(offer.timeFrom)}</span>) and the payment check. The infringement number is allocated on this handset when you start.</p>

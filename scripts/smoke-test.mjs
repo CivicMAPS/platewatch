@@ -608,7 +608,7 @@ async function main() {
   await page.waitForSelector('[data-testid=pin-issued]', { visible: true });
   await waitText('04471 261121 001 8363 93');
   const handoff = await page.evaluate(() => window.__handoff);
-  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.vehicle.registration !== 'NOPAY1' || handoff.vehicle.make !== 'Holden' || handoff.vehicle.type !== 'hatchback' || handoff.vehicle.colour !== 'White' || handoff.vehicle.registrationType !== 'private' || handoff.vehicle.registrationState !== 'VIC' || !handoff.vehicle.plateReentry?.matched || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
+  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.offence.internalVariant !== 'no_payment' || handoff.vehicle.registration !== 'NOPAY1' || handoff.vehicle.make !== 'Holden' || handoff.vehicle.type !== 'hatchback' || handoff.vehicle.colour !== 'White' || handoff.vehicle.registrationType !== 'private' || handoff.vehicle.registrationState !== 'VIC' || !handoff.vehicle.plateReentry?.matched || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
     throw new Error(`unexpected hand-off ${JSON.stringify(handoff).slice(0, 300)}`);
   await shot('pin-issued');
   await page.evaluate(() => { delete window.EnforcementMAPS; });

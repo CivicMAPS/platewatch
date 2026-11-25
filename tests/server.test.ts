@@ -254,6 +254,8 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     // Every handset in branch "parking" sees it (not only team A); the raising officer sees it as own.
     const other = await call('GET', '/api/alerts/live', asOfficer('5123'));
     expect(other.json.branch_code1[0]).toMatchObject({ id: 'c1-sc1-h2', kind: 'code1', status: 'active', officerNumber: '4471', received: false, location: { lat: -37.8128 } });
+    // The escalated Code 1 keeps the hot-list hit: branch handsets see the plate.
+    expect(other.json.branch_code1[0].hit).toMatchObject({ plate: 'ZAF402' });
     expect((await call('GET', '/api/alerts/live', asOfficer('4471'))).json.own.map((a: { id: string }) => a.id)).toContain('c1-sc1-h2');
     await call('POST', '/api/alerts/c1-sc1-h2/receipt', asOfficer('5123'));
     expect((await call('GET', '/api/alerts/live', asOfficer('5123'))).json.branch_code1[0].received).toBe(true);
@@ -264,6 +266,10 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     const d = await call('GET', '/api/console/alerts/c1-sc1-h2', { staff: 'CL1' });
     expect(d.json.alert).toMatchObject({ status: 'cleared', outcome: 'Units attended, officer safe', escalatedFrom: 'sc1-h2', location: { lat: -37.8131 } });
     expect(d.json.receipts).toEqual([expect.objectContaining({ officerNumber: '5123' })]);
+    expect(d.json.profile).toMatchObject({ plate: 'ZAF402' });
+    expect(d.json.scanId).toBe('scan-h2');
+    // A CODE 1 the officer presses later for the same hit is a new emergency, never merged into the cleared one.
+    expect((await call('POST', '/api/code1', { body: { id: 'c1-late-h2', hit: hit('h2', t(8, 40)), at: t(8, 50) } })).json.id).toBe('c1-late-h2');
     expect(d.json.events.map((e: { action: string }) => e.action)).toEqual(['code1_raised', 'alarm_received', 'code1_acknowledged', 'code1_cleared']);
   });
 

@@ -181,6 +181,8 @@ async function escalate(q: Q, cfg: SafetyConfig, softId: string, by: { actor: st
   )).rows[0];
   if (!s) throw new HttpError(404, 'not_found', 'No such soft Code 1.');
   if (!['active', 'radio_requested'].includes(s.status)) throw new HttpError(409, 'state', `Soft Code 1 is ${s.status}.`);
+  // The hot-list hit stays on the soft Code 1 and is read through escalated_from (ALERT_HIT), so an
+  // officer's own CODE 1 for the same hit is never merged into this one (alerts_hit_kind index).
   const code1Id = `c1-${softId}`;
   await raiseAlert(q, cfg, { id: code1Id, kind: 'code1', escalatedFrom: softId, cause: 'no_radio_response', raisedBy: by.actor, officerNumber: s.officer_number, keyId: s.device_key_id, at: by.now, location: s.lat === null ? null : { lat: s.lat, lng: s.lng!, accuracyM: s.accuracy_m ?? undefined }, now: by.now });
   await q.query("update alerts set status = 'escalated', escalated_to = $2, closed_by = $3, closed_at = now(), updated_at = now(), change_no = nextval('change_seq') where id = $1", [softId, code1Id, by.actor]);
@@ -188,8 +190,11 @@ async function escalate(q: Q, cfg: SafetyConfig, softId: string, by: { actor: st
   return code1Id;
 }
 
-const ALERT_COLS = `a.*, (select json_build_object('lat', l.lat, 'lng', l.lng, 'accuracyM', l.accuracy_m, 'at', (extract(epoch from l.at) * 1000)::bigint) from alert_locations l where l.alert_id = a.id order by l.id desc limit 1) as last_location,
-  (select row_to_json(h) from (select plate, entry, response, responded_at, note, at from hot_hits where id = a.hit_id) h) as hit`;
+/** The alert's hot-list hit: its own, or the soft Code 1's it was escalated from. */
+const ALERT_HIT = `coalesce(a.hit_id, (select s.hit_id from alerts s where s.id = a.escalated_from))`;
+
+const ALERT_COLS = `a.*, ${ALERT_HIT} as resolved_hit_id, (select json_build_object('lat', l.lat, 'lng', l.lng, 'accuracyM', l.accuracy_m, 'at', (extract(epoch from l.at) * 1000)::bigint) from alert_locations l where l.alert_id = a.id order by l.id desc limit 1) as last_location,
+  (select row_to_json(h) from (select plate, entry, response, responded_at, note, at from hot_hits where id = ${ALERT_HIT}) h) as hit`;
 
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
 
@@ -198,7 +203,7 @@ export function alertJson(a: Record<string, any>) {
   return {
     id: a.id, kind: a.kind, status: a.status, cause: a.cause, raisedBy: a.raised_by, officerNumber: a.officer_number, officerName: a.officer_name, team: a.team, branch: a.branch,
     raisedAt: ms(a.raised_at), acknowledgedBy: a.acknowledged_by, acknowledgedAt: ms(a.acknowledged_at), closedBy: a.closed_by, closedAt: ms(a.closed_at), outcome: a.outcome,
-    escalatedFrom: a.escalated_from, escalatedTo: a.escalated_to, recipients: a.recipients, hitId: a.hit_id,
+    escalatedFrom: a.escalated_from, escalatedTo: a.escalated_to, recipients: a.recipients, hitId: a.resolved_hit_id ?? a.hit_id,
     location: last ? { ...last, at: Number(last.at) } : a.lat === null ? null : { lat: a.lat, lng: a.lng, accuracyM: a.accuracy_m, at: ms(a.location_at) },
     hit: a.hit ? { plate: a.hit.plate, entry: a.hit.entry, response: a.hit.response, note: a.hit.note, at: Date.parse(a.hit.at), respondedAt: a.hit.responded_at ? Date.parse(a.hit.responded_at) : null } : null,
     officerResponse: a.data?.officerResponse ?? null,
@@ -354,7 +359,7 @@ export function registerSafety(
       db.query('select officer_number, at from alert_receipts where alert_id = $1 order by at', [c.params.id]),
       db.query<{ id: string; name: string; role: string }>('select id, name, role from staff where id = any($1)', [(a.recipients as Recipients).staffIds]),
     ]);
-    const hit = a.hit_id ? (await db.query<{ plate: string; scan_id: string | null; hot_list_entry_id: string }>('select plate, scan_id, hot_list_entry_id from hot_hits where id = $1', [a.hit_id])).rows[0] : undefined;
+    const hit = a.resolved_hit_id ? (await db.query<{ plate: string; scan_id: string | null; hot_list_entry_id: string }>('select plate, scan_id, hot_list_entry_id from hot_hits where id = $1', [a.resolved_hit_id])).rows[0] : undefined;
     return {
       alert: alertJson(a),
       recipients: recips.rows,

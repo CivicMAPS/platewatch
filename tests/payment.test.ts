@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalisePayment, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
+import { manualPaidWindow, normalisePayment, topUpPaidTo, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
 import type { PaymentAreas } from '../src/lib/types';
 
 // Gladstone St, Boundary St – Montague St (north), as entered in the field: one PayStay zone per
@@ -106,5 +106,33 @@ describe('paid session from the provider lookup', () => {
     expect(paidSessionForScan(today, scan)).toBe(today);
     expect(paidSessionForScan(overnight, scan)).toBe(overnight);
     expect(paidSessionForScan(null, scan)).toBeNull();
+  });
+});
+
+describe('hand-entered paid times (never roll into tomorrow unasked)', () => {
+  const scanAt = new Date(2026, 10, 25, 10, 0).getTime();
+  const at = (h: number, m = 0, dayOffset = 0) => new Date(2026, 10, 25 + dayOffset, h, m).getTime();
+
+  it('an earlier paid to with the default paid from stays on the scan day (expired, not valid tomorrow)', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '10:00', paidTo: '09:00', endsTomorrow: false, fromIsDefault: true })).toEqual({ paidTo: at(9) });
+  });
+
+  it('an entered paid from after paid to started the day before', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '22:00', paidTo: '09:00', endsTomorrow: false, fromIsDefault: false })).toEqual({ paidFrom: at(22, 0, -1), paidTo: at(9) });
+  });
+
+  it('"Ends tomorrow" moves paid to to the next day', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '21:00', paidTo: '01:00', endsTomorrow: true, fromIsDefault: false })).toEqual({ paidFrom: at(21), paidTo: at(1, 0, 1) });
+  });
+
+  it('an ordinary same-day session is kept as entered', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '08:00', paidTo: '11:00', endsTomorrow: false, fromIsDefault: false })).toEqual({ paidFrom: at(8), paidTo: at(11) });
+    expect(manualPaidWindow({ scanAt, paidFrom: '', paidTo: 'x', endsTomorrow: false, fromIsDefault: true })).toEqual({ error: 'Enter paid to (HH:MM).' });
+  });
+
+  it('a top-up must be later than the current paid to unless it ends tomorrow', () => {
+    expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: false })).toHaveProperty('error');
+    expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: true })).toEqual({ paidTo: at(9, 30, 1) });
+    expect(topUpPaidTo({ scanAt, paidTo: '12:00', currentPaidTo: at(10), endsTomorrow: false })).toEqual({ paidTo: at(12) });
   });
 });

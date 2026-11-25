@@ -57,8 +57,11 @@ export function mountSafetyOverlay(app: App): void {
     busy = true;
     draw();
     try {
-      if (!currentOfficer() && officerDraft.trim()) await app.updateSettings({ officerNumber: officerDraft.trim() });
+      const typed = !currentOfficer() && officerDraft.trim();
+      // The answer (CODE 1 above all) goes first, with the typed number passed straight through;
+      // keeping the number in Settings is best-effort and never blocks the emergency.
       await respond(response, note, officer);
+      if (typed) void app.updateSettings({ officerNumber: typed }).catch(() => undefined);
       note = '';
       moreOpen = false;
     } finally {

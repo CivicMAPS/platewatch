@@ -1,7 +1,7 @@
 import { patrol, hasPatrol, frameUrlFor, type Sighting } from '../../lib/patrol';
 import { deviceTimeZone, localDateString, toLocalIso } from '../../lib/time';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { isPaidBy, paymentFor, paymentLines, paidSessionForScan } from '../../lib/payment';
+import { isPaidBy, manualPaidWindow, paymentFor, paymentLines, paidSessionForScan, topUpPaidTo } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { CameraController, CameraError, fileToCanvas, type CameraCapabilities } from '../../lib/camera';
@@ -39,7 +39,7 @@ import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRE
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
 import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction, VehicleDetails } from '../../lib/types';
-import { effectivePayment, offenceChipText, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
+import { effectivePayment, offenceChipText, offenceFor, PAID_TO_GRACE_MINUTES, type OffenceOffer } from '../../lib/offence';
 import { SAFE_CLEAR_LABEL } from '../../lib/hotlist';
 import { openHotAlert } from '../../lib/safety';
 import { host, officerNumber } from '../../lib/host';
@@ -108,8 +108,8 @@ interface ResultState {
 
 
 const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', error: '' }) as {
-  status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string;
+const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', endsTomorrow: false, error: '' }) as {
+  status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; endsTomorrow: boolean; error: string;
   /** Exact times from the test provider, used when the officer saves them unchanged (HH:MM loses the date). */
   lookedUp?: { paidFrom: number; paidTo: number };
 };
@@ -156,7 +156,7 @@ export function scanView(params: Record<string, string>, app: App): View {
   let dismissOpen = false;
   /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
   let payForm: ReturnType<typeof emptyPayForm> = emptyPayForm();
-  let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
+  let topUp: { open: boolean; paidTo: string; endsTomorrow: boolean; error: string } = { open: false, paidTo: '', endsTomorrow: false, error: '' };
   /** Issue infringement hand-off sheet (WF-S31 31a), with the vehicle details and second plate entry. */
   let handoffOffer: OffenceOffer | null = null;
   let handoffVehicle: VehicleDetails = { ...EMPTY_VEHICLE };
@@ -331,7 +331,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     lookalikePrompt = null;
     hintSources = null;
     payForm = emptyPayForm();
-    topUp = { open: false, paidTo: '', error: '' };
+    topUp = { open: false, paidTo: '', endsTomorrow: false, error: '' };
     handoffOffer = null;
     handoffVehicle = { ...EMPTY_VEHICLE };
     plateSecond = '';
@@ -1535,7 +1535,8 @@ export function scanView(params: Record<string, string>, app: App): View {
         ? html`<div class="mt-3 grid grid-cols-2 gap-3">
             <label><span class="field-label">Paid from</span><input type="time" class="field font-plate" data-testid="pay-from" .value=${f.paidFrom} @input=${(e: Event) => (payForm = { ...payForm, paidFrom: (e.target as HTMLInputElement).value })} /></label>
             <label><span class="field-label">Paid to</span><input type="time" class="field font-plate" data-testid="pay-to" required .value=${f.paidTo} @input=${(e: Event) => (payForm = { ...payForm, paidTo: (e.target as HTMLInputElement).value })} /></label>
-          </div>`
+          </div>
+          <label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" data-testid="pay-ends-tomorrow" .checked=${f.endsTomorrow} @change=${(e: Event) => (payForm = { ...payForm, endsTomorrow: (e.target as HTMLInputElement).checked })} /> Ends tomorrow (session runs past midnight)</label>`
         : nothing}
       ${backendConfigured() ? html`<button type="button" class="btn-ghost mt-2 w-full" data-testid="pay-lookup" @click=${() => void lookupPayment()}>Look up paid session (test provider)</button>` : nothing}
       ${f.error ? html`<div class="mt-3">${banner('alert', f.error)}</div>` : nothing}
@@ -1564,8 +1565,9 @@ export function scanView(params: Record<string, string>, app: App): View {
                 ? html`<div class="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
                     <label><span class="field-label">New paid to</span><input type="time" class="field font-plate" data-testid="topup-to" .value=${topUp.paidTo} @input=${(e: Event) => (topUp = { ...topUp, paidTo: (e.target as HTMLInputElement).value })} /></label>
                     <button type="button" class="btn-primary" data-testid="topup-save" @click=${() => void saveTopUp()}>Save</button>
-                  </div>${topUp.error ? html`<div class="mt-2">${banner('alert', topUp.error)}</div>` : nothing}`
-                : html`<button type="button" class="btn-secondary mt-2 w-full" data-testid="topup-open" @click=${() => { topUp = { open: true, paidTo: '', error: '' }; app.update(); }}>Payment extended — update paid to</button>`}
+                  </div>
+                  <label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" data-testid="topup-ends-tomorrow" .checked=${topUp.endsTomorrow} @change=${(e: Event) => (topUp = { ...topUp, endsTomorrow: (e.target as HTMLInputElement).checked })} /> Ends tomorrow (runs past midnight)</label>${topUp.error ? html`<div class="mt-2">${banner('alert', topUp.error)}</div>` : nothing}`
+                : html`<button type="button" class="btn-secondary mt-2 w-full" data-testid="topup-open" @click=${() => { topUp = { open: true, paidTo: '', endsTomorrow: false, error: '' }; app.update(); }}>Payment extended — update paid to</button>`}
             </section>`
           : nothing}`;
     }
@@ -1752,13 +1754,15 @@ export function scanView(params: Record<string, string>, app: App): View {
     let paidFrom: number | undefined;
     let paidTo: number | undefined;
     if (f.status === 'paid') {
-      paidFrom = timeOnDay(scanAt, f.paidFrom || hhmm(scanAt)) ?? undefined;
-      paidTo = timeOnDay(scanAt, f.paidTo) ?? undefined;
-      // Unchanged lookup values: keep the provider's exact times (dates included).
-      if (f.lookedUp && f.paidFrom === hhmm(f.lookedUp.paidFrom) && f.paidTo === hhmm(f.lookedUp.paidTo)) ({ paidFrom, paidTo } = f.lookedUp);
-      if (paidTo === undefined) return void ((payForm = { ...f, error: 'Enter paid to (HH:MM).' }), app.update());
-      // A session that crosses midnight: paid to earlier than paid from ends the next day.
-      if (paidFrom !== undefined && paidTo <= paidFrom) paidTo += 86_400_000;
+      if (f.lookedUp && f.paidFrom === hhmm(f.lookedUp.paidFrom) && f.paidTo === hhmm(f.lookedUp.paidTo)) {
+        // Unchanged lookup values: keep the provider's exact times (dates included).
+        ({ paidFrom, paidTo } = f.lookedUp);
+      } else {
+        // Typed times: paid to moves to tomorrow only when the officer ticks it (never inferred).
+        const w = manualPaidWindow({ scanAt, paidFrom: f.paidFrom || hhmm(scanAt), paidTo: f.paidTo, endsTomorrow: f.endsTomorrow, fromIsDefault: !f.paidFrom || f.paidFrom === hhmm(scanAt) });
+        if ('error' in w) return void ((payForm = { ...f, error: w.error }), app.update());
+        ({ paidFrom, paidTo } = w);
+      }
     }
     const check: PaymentCheck = {
       status: f.status,
@@ -1790,10 +1794,9 @@ export function scanView(params: Record<string, string>, app: App): View {
     const obs = result?.comparison?.observation;
     if (!result || !obs || !pending || obs.payment?.status !== 'paid') return;
     const scanAt = pending.meta.capturedAt;
-    let paidTo = timeOnDay(scanAt, topUp.paidTo);
-    if (paidTo === null) return void ((topUp = { ...topUp, error: 'Enter paid to (HH:MM).' }), app.update());
-    // Extended past midnight: earlier than the current paid to means the next day.
-    if (obs.payment.paidTo !== undefined && paidTo <= obs.payment.paidTo) paidTo += 86_400_000;
+    const t = topUpPaidTo({ scanAt, paidTo: topUp.paidTo, currentPaidTo: obs.payment.paidTo, endsTomorrow: topUp.endsTomorrow });
+    if ('error' in t) return void ((topUp = { ...topUp, error: t.error }), app.update());
+    const { paidTo } = t;
     const first = await getScan(obs.firstScanId);
     const now = Date.now();
     const by = officerNumber(settings().officerNumber);
@@ -1802,7 +1805,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       const p = first.payment;
       await saveScan({ ...first, payment: { ...p, paidTo, history: [...(p.history ?? []), ...(p.paidTo !== undefined ? [{ paidTo: p.paidTo, checkedAt: p.checkedAt, checkedBy: p.checkedBy }] : [])], checkedAt: now, checkedBy: by } }, updatedObs);
     } else await putObservation(updatedObs);
-    topUp = { open: false, paidTo: '', error: '' };
+    topUp = { open: false, paidTo: '', endsTomorrow: false, error: '' };
     result = { ...result, comparison: { ...result.comparison!, observation: updatedObs } };
     app.update();
   };

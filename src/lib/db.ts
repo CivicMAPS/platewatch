@@ -1,10 +1,13 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { registrationTypeCode, vehicleTypeCode } from './vehicle';
 import {
   DEFAULT_SETTINGS,
   type AllowList,
   type DismissedCapture,
   type HotList,
+  type HotListEvent,
   type Observation,
+  type PlateFlag,
   type PlateList,
   type ScanRecord,
   type Settings,
@@ -12,7 +15,7 @@ import {
 } from './types';
 
 const DB_NAME = 'platewatch';
-const DB_VERSION = 2;
+const DB_VERSION = 6;
 
 interface PlateWatchDB extends DBSchema {
   lists: { key: string; value: PlateList; indexes: { 'by-type': string } };
@@ -29,13 +32,47 @@ interface PlateWatchDB extends DBSchema {
   kv: { key: string; value: unknown };
   /** Version 2: patrol captures dismissed at review (one global list). */
   dismissed: { key: string; value: DismissedCapture; indexes: { 'by-created': number } };
+  /** Version 3: plate record tags (known disability / emergency vehicles), keyed by plate key. */
+  flags: { key: string; value: PlateFlag };
+  /** Version 4: hot-list entry log events (acknowledgements, look-alike decisions), WF-S29. */
+  hotEvents: { key: string; value: HotListEvent; indexes: { 'by-entry': string; 'by-at': number } };
+}
+
+/** Vehicle details in the infringement structure (DB v5, backups): no model, no free-text vehicle. */
+export function migrateVehicleDetails(l: PlateList): PlateList {
+  /** Registration type / type as codes where the value is on the list (kept as entered otherwise). */
+  const codes = <T extends { registrationType?: string; bodyType?: string }>(e: T): T => {
+    const rt = e.registrationType ? registrationTypeCode(e.registrationType) : e.registrationType;
+    const bt = e.bodyType ? vehicleTypeCode(e.bodyType) : e.bodyType;
+    return { ...e, ...(rt ? { registrationType: rt } : {}), ...(bt ? { bodyType: bt } : {}) };
+  };
+  if (l.type === 'hot') {
+    return {
+      ...l,
+      entries: l.entries.map((e) => {
+        const { model, ...rest } = e;
+        const notes = model?.trim() && !rest.notes.includes(`Model: ${model.trim()}`) ? [rest.notes, `Model: ${model.trim()}`].filter(Boolean).join(' · ') : rest.notes;
+        return codes({ ...rest, registrationType: rest.registrationType ?? '', notes });
+      }),
+    };
+  }
+  if (l.type === 'allow') {
+    return {
+      ...l,
+      entries: l.entries.map((e) => {
+        const { vehicle, ...rest } = e as typeof e & { vehicle?: unknown };
+        return codes(typeof vehicle === 'string' && vehicle.trim() && !rest.make ? { ...rest, make: vehicle.trim() } : rest);
+      }),
+    };
+  }
+  return l;
 }
 
 let dbPromise: Promise<IDBPDatabase<PlateWatchDB>> | null = null;
 
 export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
   dbPromise ??= openDB<PlateWatchDB>(DB_NAME, DB_VERSION, {
-    upgrade(database, oldVersion) {
+    upgrade(database, oldVersion, _newVersion, tx) {
       if (oldVersion < 1) {
         const lists = database.createObjectStore('lists', { keyPath: 'id' });
         lists.createIndex('by-type', 'type');
@@ -50,6 +87,24 @@ export function db(): Promise<IDBPDatabase<PlateWatchDB>> {
       }
       if (oldVersion < 2) {
         database.createObjectStore('dismissed', { keyPath: 'id' }).createIndex('by-created', 'createdAt');
+      }
+      if (oldVersion < 3) {
+        database.createObjectStore('flags', { keyPath: 'key' });
+      }
+      if (oldVersion < 4) {
+        const ev = database.createObjectStore('hotEvents', { keyPath: 'id' });
+        ev.createIndex('by-entry', 'hotListEntryId');
+        ev.createIndex('by-at', 'at');
+      }
+      if (oldVersion >= 1 && oldVersion < 6) {
+        // Versions 5–6: vehicle details in the infringement structure (registration type, make,
+        // type, colour). Hot-list model → notes; a permit's free-text vehicle → make; registration
+        // type and type values → the fixed lists' codes.
+        void tx.objectStore('lists').getAll().then(async (lists) => {
+          for (const l of lists) {
+            if (l.type !== 'timed') await tx.objectStore('lists').put(migrateVehicleDetails(l));
+          }
+        });
       }
     },
     blocked() {
@@ -99,6 +154,13 @@ export const getTimedLists = () => getListsByType('timed') as Promise<TimedList[
 
 export async function putList(list: PlateList): Promise<void> {
   await (await db()).put('lists', { ...list, updatedAt: Date.now() });
+}
+
+/** Save many lists in one transaction (bulk import); keeps each list's own updatedAt. */
+export async function putLists(lists: readonly PlateList[]): Promise<void> {
+  const tx = (await db()).transaction('lists', 'readwrite');
+  for (const l of lists) await tx.store.put(l);
+  await tx.done;
 }
 
 /** Delete a list and everything recorded against it; unlink deleted allow lists. */
@@ -203,14 +265,18 @@ export async function purgeScansOlderThan(days: number, now = Date.now()): Promi
   for (const store of ['scans', 'dismissed'] as const) {
     let cursor = await tx.objectStore(store).index('by-created').openCursor(IDBKeyRange.upperBound(cutoff, true));
     while (cursor) {
-      await cursor.delete();
-      n++;
+      // An infringement's evidence is kept until the PIN's own retention allows (WF-S31 IR-23).
+      const v = cursor.value as ScanRecord | DismissedCapture;
+      if (!('infringement' in v && v.infringement && v.infringement.status !== 'cancelled')) {
+        await cursor.delete();
+        n++;
+      }
       cursor = await cursor.continue();
     }
   }
   const obsStore = tx.objectStore('observations');
   for (const o of await obsStore.getAll()) {
-    if (o.status !== 'active' && (o.closedAt ?? o.startedAt) < cutoff) await obsStore.delete(o.id);
+    if (o.status !== 'active' && o.status !== 'issued' && (o.closedAt ?? o.startedAt) < cutoff) await obsStore.delete(o.id);
   }
   await tx.done;
   return n;
@@ -250,6 +316,50 @@ export async function saveSettings(s: Settings): Promise<void> {
   await (await db()).put('kv', s, 'settings');
 }
 
+/* ───────────────────────────── Plate flags ───────────────────────────── */
+
+export async function getFlags(): Promise<PlateFlag[]> {
+  return (await db()).getAll('flags');
+}
+
+export async function getFlag(key: string): Promise<PlateFlag | undefined> {
+  return (await db()).get('flags', key);
+}
+
+export async function putFlag(f: PlateFlag): Promise<void> {
+  await (await db()).put('flags', f);
+}
+
+export async function deleteFlag(key: string): Promise<void> {
+  await (await db()).delete('flags', key);
+}
+
+/**
+ * Overstay alert dismissed after a vehicle check: the scan keeps the reason, the timing closes as
+ * dismissed, and a disability / emergency dismissal tags the plate — all in one transaction.
+ */
+export async function dismissOverstay(args: { scan: ScanRecord; observation: Observation; flag?: PlateFlag }): Promise<void> {
+  const tx = (await db()).transaction(['scans', 'observations', 'flags'], 'readwrite');
+  await tx.objectStore('scans').put(args.scan);
+  await tx.objectStore('observations').put(args.observation);
+  if (args.flag) await tx.objectStore('flags').put(args.flag);
+  await tx.done;
+}
+
+/* ───────────────────────────── Hot-list entry log ───────────────────────────── */
+
+export async function putHotEvent(e: HotListEvent): Promise<void> {
+  await (await db()).put('hotEvents', e);
+}
+
+export async function getHotEventsForEntry(entryId: string): Promise<HotListEvent[]> {
+  return (await (await db()).getAllFromIndex('hotEvents', 'by-entry', entryId)).sort((a, b) => b.at - a.at);
+}
+
+export async function getAllHotEvents(): Promise<HotListEvent[]> {
+  return (await db()).getAll('hotEvents');
+}
+
 /* ───────────────────────────── Backup ───────────────────────────── */
 
 export async function replaceAll(data: {
@@ -258,10 +368,22 @@ export async function replaceAll(data: {
   scans: ScanRecord[];
   /** Only when the backup includes the Dismissed list; otherwise dismissed captures are untouched. */
   dismissed?: DismissedCapture[];
+  /** Only when the backup includes plate tags; otherwise tags on the device are untouched. */
+  flags?: PlateFlag[];
+  /** Only when the backup includes hot-list events; otherwise the device's log is untouched. */
+  hotEvents?: HotListEvent[];
   merge: boolean;
 }): Promise<void> {
   const d = await db();
-  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed'], 'readwrite');
+  const tx = d.transaction(['lists', 'scans', 'observations', 'dismissed', 'flags', 'hotEvents'], 'readwrite');
+  if (data.hotEvents) {
+    if (!data.merge) await tx.objectStore('hotEvents').clear();
+    for (const e of data.hotEvents) await tx.objectStore('hotEvents').put(e);
+  }
+  if (data.flags) {
+    if (!data.merge) await tx.objectStore('flags').clear();
+    for (const f of data.flags) await tx.objectStore('flags').put(f);
+  }
   if (!data.merge) {
     await tx.objectStore('lists').clear();
     await tx.objectStore('scans').clear();

@@ -1,0 +1,60 @@
+{
+  "street": "Little Bourke Street",
+  "segments": [
+    {
+      "between": {
+        "from": "Swanston Street",
+        "to": "Russell Street"
+      },
+      "side": "south",
+      "parking_area_number": 644,
+      "sub_segments": [
+        {
+          "from": "Russell Street",
+          "to": "234 Little Bourke Street",
+          "easypark_area": 7510,
+          "signs": [
+            {
+              "type": "loading_zone",
+              "rules": [
+                {
+                  "time": "07:00-16:00",
+                  "days": "Mon-Fri"
+                }
+              ]
+            },
+            {
+              "type": "2p_meter",
+              "rules": [
+                {
+                  "time": "16:00-22:00",
+                  "days": "Mon-Fri"
+                },
+                {
+                  "time": "07:00-22:00",
+                  "days": "Sat-Sun"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "from": "234 Little Bourke Street",
+          "to": "Swanston Street",
+          "easypark_area": 7505,
+          "signs": [
+            {
+              "type": "2p_meter",
+              "rules": [
+                {
+                  "time": "07:00-22:00",
+                  "days": "Mon-Sun"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

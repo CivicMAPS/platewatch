@@ -31,6 +31,20 @@ public class PlateRulesTest {
         assertTrue("vectors read",checked>20);
     }
 
+    /** Look-alike classes shared with tests/plate.test.ts (tests/fixtures/plate-lookalikes.tsv). */
+    @Test public void lookalikes() throws Exception {
+        File f = new File("../../tests/fixtures/plate-lookalikes.tsv");
+        if (!f.exists()) f = new File("tests/fixtures/plate-lookalikes.tsv");
+        int checked = 0;
+        for (String line:Files.readAllLines(f.toPath(),StandardCharsets.UTF_8)) {
+            if (line.isBlank() || line.startsWith("#")) continue;
+            String[] c = line.split("\t");
+            assertEquals("lookalike "+c[0]+" / "+c[1],"possible".equals(c[2]),PlateRules.lookalike(c[0],c[1]));
+            checked++;
+        }
+        assertTrue("look-alike vectors read",checked>10);
+    }
+
     @Test public void variants() {
         assertTrue(PlateRules.variant("1UR6YF","1UP6YF"));
         assertTrue(PlateRules.variant("1UR6YF","1UD6YF"));

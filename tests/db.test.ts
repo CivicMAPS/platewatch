@@ -11,9 +11,18 @@ import {
   getScansForList,
   purgeScansOlderThan,
   putList,
+  putLists,
+  getLists,
   saveDismissed,
   saveScan,
+  dismissOverstay,
+  getFlag,
+  getFlags,
+  deleteFlag,
+  getObservations,
+  getScan,
 } from '../src/lib/db';
+import { applyDismissal } from '../src/lib/dismissal';
 import { newObservation } from '../src/lib/engine';
 import type { DismissedCapture, ScanRecord } from '../src/lib/types';
 import { allow, at, r2P, timed } from './fixtures';
@@ -45,6 +54,48 @@ beforeEach(async () => {
 });
 
 describe('db', () => {
+  it('retention purge keeps scans with an issued infringement and their timing (WF-S31 IR-23)', async () => {
+    const list = timed();
+    await putList(list);
+    const old = at(2026, 1, 1, 9);
+    const obs = { ...newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: old, instance: { restriction: r2P(), start: old, end: old + 3600_000 } }), status: 'issued' as const, closedAt: old };
+    await saveScan({ ...scan('s1', list.id, old, 'o1'), infringement: { status: 'issued', sync: 'synced', pinSource: 'device', handoffId: 'h', number: '04471261121001836393', offenceCode: '701', offenceOverridden: false, timeFrom: old, timeTo: old, officerNumber: '4471' } }, obs);
+    await saveScan(scan('s2', list.id, old));
+    expect(await purgeScansOlderThan(30, at(2026, 11, 1))).toBe(1);
+    expect(await getScan('s1')).toBeDefined();
+    expect(await getScan('s2')).toBeUndefined();
+    expect((await getObservations(list.id)).map((o) => o.id)).toEqual(['o1']);
+  });
+
+  it('a disability dismissal keeps the timing running against twice the allowance', async () => {
+    const list = timed();
+    await putList(list);
+    const t = at(2026, 11, 16, 9);
+    const obs = newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: t, instance: { restriction: r2P(), start: t, end: t + 9 * 3600_000 } });
+    const s2 = { ...scan('s2', list.id, t + 7_500_000, 'o1'), outcome: 'overstay' as const };
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    await dismissOverstay(applyDismissal({ scan: s2, observation: obs, reason: 'disability_permit', at: t + 7_600_000 }));
+    expect(await getActiveObservations(list.id)).toEqual([expect.objectContaining({ limitMinutes: 240, concession: { kind: 'disability', baseLimitMinutes: 120 } })]);
+    expect(await getFlag('ABC123')).toMatchObject({ kind: 'disability' });
+  });
+
+  it('dismissing an overstay keeps the scan with its reason, closes the timing and tags the plate in one go', async () => {
+    const list = timed();
+    await putList(list);
+    const t = at(2026, 11, 16, 9);
+    const obs = newObservation({ id: 'o1', list, plate: 'ABC123', scanId: 's1', at: t, instance: { restriction: r2P(), start: t, end: t + 9 * 3600_000 } });
+    const s2 = scan('s2', list.id, t + 7_500_000, 'o1');
+    await saveScan(scan('s1', list.id, t, 'o1'), obs);
+    await saveScan({ ...s2, outcome: 'overstay' }, obs);
+    await dismissOverstay(applyDismissal({ scan: { ...s2, outcome: 'overstay' }, observation: obs, reason: 'emergency_vehicle', at: t + 7_600_000 }));
+    expect((await getScan('s2'))?.alertDismissal?.reason).toBe('emergency_vehicle');
+    expect((await getObservations(list.id))[0]).toMatchObject({ status: 'dismissed', dismissReason: 'emergency_vehicle' });
+    expect(await getActiveObservations(list.id)).toHaveLength(0);
+    expect(await getFlag('ABC123')).toMatchObject({ kind: 'emergency', confirmedDay: '2026-11-16' });
+    await deleteFlag('ABC123');
+    expect(await getFlags()).toEqual([]);
+  });
+
   it('persists a scan and its observation atomically', async () => {
     const list = timed();
     await putList(list);
@@ -169,5 +220,13 @@ describe('dismissed patrol captures (global list)', () => {
     expect((await getScansForList(list.id)).map((s) => s.id)).toEqual(['s1']);
     await saveDismissed(dismissed('d1', at(2026, 11, 20, 9)));
     expect(await getDismissed()).toHaveLength(1);
+  });
+});
+
+describe('putLists (bulk import)', () => {
+  it('saves many lists in one go', async () => {
+    const many = Array.from({ length: 500 }, (_, i) => timed({ id: `t${i}`, name: `Segment ${i}` }));
+    await putLists(many);
+    expect(await getLists()).toHaveLength(500);
   });
 });

@@ -6,6 +6,13 @@
  */
 
 const STRICT_MAP: Record<string, string> = { O: '0', Q: '0', I: '1' };
+/**
+ * OCR look-alike classes (WF-S28 OQ28-1): every member of a class is a look-alike of every other.
+ * 0·O·Q·D, 1·I·L, 8·B, 5·S, 2·Z, 6·G, 7·T, V·U; owner decision 23/11/2026 adds R·P (the field
+ * misread 1UP6YF / 1UR6YF) and the proposed A·4, F·E, N·M. D stays in the 0 class, so P/R are not
+ * look-alikes of 0/O/Q/D. Mirrored in PlateRules.java LOOSE; shared vectors in
+ * tests/fixtures/plate-lookalikes.tsv.
+ */
 const LOOSE_MAP: Record<string, string> = {
   ...STRICT_MAP,
   D: '0',
@@ -16,6 +23,10 @@ const LOOSE_MAP: Record<string, string> = {
   L: '1',
   T: '7',
   U: 'V',
+  P: 'R',
+  '4': 'A',
+  E: 'F',
+  M: 'N',
 };
 
 export const PLATE_MIN = 1;

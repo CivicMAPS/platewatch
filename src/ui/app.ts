@@ -3,6 +3,7 @@ import { getSettings, saveSettings } from '../lib/db';
 import { configureDiagnostics } from '../lib/diagnostics';
 import type { Settings } from '../lib/types';
 import { DEFAULT_SETTINGS } from '../lib/types';
+import { icon, type IconName } from './components';
 
 export interface View {
   render(): TemplateResult;
@@ -35,12 +36,23 @@ interface ConfirmRequest {
   resolve: (ok: boolean) => void;
 }
 
-const TOAST_CLASS: Record<ToastTone, string> = {
-  info: 'border-sky-500/60 bg-sky-950 text-sky-100',
-  success: 'border-emerald-500/60 bg-emerald-950 text-emerald-100',
-  warn: 'border-amber-500/60 bg-amber-950 text-amber-100',
-  error: 'border-red-500/60 bg-red-950 text-red-100',
+/** Toasts are for non-blocking confirmations only; anything the officer must act on is shown as a
+ *  persistent banner in the view (assessment D6). Colour + icon + text, never red (Code 1 only). */
+const TOAST_STYLE: Record<ToastTone, { cls: string; icon: IconName }> = {
+  info: { cls: 'border-pending text-pending-strong', icon: 'info' },
+  success: { cls: 'border-active text-active-strong', icon: 'checkCircle' },
+  warn: { cls: 'border-alert text-alert-strong', icon: 'alert' },
+  error: { cls: 'border-alert text-alert-strong', icon: 'alert' },
 };
+
+/** Apply the CivicMAPS theme tokens ([data-theme="dark"] = the design system's low-light theme). */
+export function applyTheme(theme: Settings['theme']): void {
+  const root = document.documentElement;
+  if (theme === 'dark') root.dataset.theme = 'dark';
+  else delete root.dataset.theme;
+  root.style.colorScheme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--civic-primary-dark').trim() || '#0F1A32');
+}
 
 export class App {
   private routes: Route[] = [];
@@ -69,6 +81,7 @@ export class App {
 
   async start(): Promise<void> {
     this.settings = await getSettings();
+    applyTheme(this.settings.theme);
     configureDiagnostics(this.settings.diagnostics);
     window.addEventListener('hashchange', () => void this.resolve());
     await this.resolve();
@@ -76,6 +89,7 @@ export class App {
 
   async updateSettings(patch: Partial<Settings>): Promise<void> {
     this.settings = { ...this.settings, ...patch };
+    if (patch.theme) applyTheme(patch.theme);
     configureDiagnostics(this.settings.diagnostics);
     await saveSettings(this.settings);
     this.update();
@@ -139,8 +153,8 @@ export class App {
         ${this.view?.render() ?? nothing}
         <div class="pointer-events-none fixed inset-x-0 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-[60] flex flex-col items-center gap-2 p-3" aria-live="polite">
           ${this.toasts.map(
-            (t) => html`<div class="w-full max-w-md rounded-xl border px-4 py-3 text-sm font-medium shadow-lg ${TOAST_CLASS[t.tone]}">
-              ${t.message}
+            (t) => html`<div class="civic-notification flex w-full max-w-md items-start gap-2 rounded-md border-2 bg-surface px-4 py-3 text-sm font-medium shadow-lg ${TOAST_STYLE[t.tone].cls}">
+              ${icon(TOAST_STYLE[t.tone].icon, 'h-5 w-5')}<span class="text-neutral-900">${t.message}</span>
             </div>`,
           )}
         </div>
@@ -180,13 +194,14 @@ export class App {
   }
 
   private renderConfirm(c: ConfirmRequest): TemplateResult {
-    return html`<div class="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div class="card w-full max-w-md shadow-2xl">
+    // Bottom sheet on the handset (design system: modal backdrop rgba(0,0,0,.40), no blur; shadow-xl).
+    return html`<div class="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="w-full max-w-md rounded-t-xl border border-neutral-200 bg-surface p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-xl sm:rounded-xl sm:pb-4">
         <h2 id="confirm-title" class="text-lg font-bold">${c.title}</h2>
-        <p class="mt-2 whitespace-pre-line text-slate-300">${c.body}</p>
+        <p class="mt-2 whitespace-pre-line">${c.body}</p>
         <div class="mt-5 grid grid-cols-2 gap-3">
           <button type="button" class="btn-secondary" @click=${() => c.resolve(false)}>${c.cancelLabel}</button>
-          <button type="button" class=${c.danger ? 'btn-danger' : 'btn-primary'} @click=${() => c.resolve(true)}>${c.confirmLabel}</button>
+          <button type="button" class=${c.danger ? 'btn-danger' : 'btn-primary'} data-testid="confirm-ok" @click=${() => c.resolve(true)}>${c.confirmLabel}</button>
         </div>
       </div>
     </div>`;

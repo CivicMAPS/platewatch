@@ -164,15 +164,62 @@ async function main() {
   await click('Create list');
   await click('Allow list');
   await type('#name', 'Zone 12 residents');
-  await type('#allow-plate', 'RES001');
-  await type('#allow-label', '12 Smith St');
+  // Permits follow the permit structure: number (types), council, dates, registered address, vehicle.
+  const setValue = (sel, v) => page.$eval(sel, (el, val) => { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, v);
+  const fillPermit = async (plate, number, streetNumber) => {
+    await type('#allow-plate', plate);
+    await type('#allow-permit', number);
+    await type('#allow-council', 'com');
+    await setValue('#allow-from', '2026-01-01');
+    await setValue('#allow-to', '2027-12-31');
+    await type('#allow-street-number', streetNumber);
+    await type('#allow-street', 'Smith Street');
+    await page.select('#allow-registrationType', 'private');
+    await type('#allow-make', 'Toyota');
+    await page.select('#allow-bodyType', 'sedan');
+    await page.select('#allow-colour', 'White');
+  };
+  await fillPermit('RES001', 'RSP-2026-0001', '12');
   await click('Add to list');
   // A permit typed but not yet added must still be saved with the list.
-  await type('#allow-plate', 'RES002');
-  await type('#allow-label', '14 Smith St');
+  await fillPermit('RES002', 'RSP-2026-0002', '14');
   await click('Save list');
   await waitText('Allowed plates (2)');
   log('allow list saved, including a permit typed but not yet added');
+
+  // Create and patrol a non-timed permit zone from the normal list picker.
+  await page.goto(`${ORIGIN}/#/new`);
+  await click('Non-timed permit zone');
+  await type('#name', 'Smith Street residents');
+  await type('#street', 'Smith St');
+  await type('#from', 'Johnston Street');
+  await type('#to', 'Gertrude Street');
+  await type('#councilCode', 'com');
+  await type('#rpa', '12');
+  await click('Save list');
+  await waitText('Permit zone segment');
+  const permitZoneUrl = page.url();
+  await click('Scan number plate');
+  for (const plate of ['RES001', 'XYZ777']) {
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+    if (plate === 'RES001') {
+      await page.waitForSelector('[data-testid=permit-hit][data-scope=applies]');
+      await page.click('[data-testid=permit-exempt]');
+      await page.waitForSelector('[data-testid=result-exempt]');
+      await page.click('[data-testid=next-scan]');
+    } else {
+      await page.waitForSelector('[data-testid=result-zone-unconfirmed]');
+    }
+  }
+  await page.goto(permitZoneUrl);
+  await waitText('Recent scan records');
+  await waitText('Permit unconfirmed');
+  await waitText('Permit valid');
+  log('permit zone created from the list picker and both residential permit check outcomes saved');
 
   // Hot list
   await page.goto(`${ORIGIN}/#/new/hot`);
@@ -182,8 +229,10 @@ async function main() {
   await click('Aggressive');
   await click('Spitting');
   await click('Extreme risk');
+  // Vehicle details in the infringement structure: registration type, make, type, colour.
+  await page.select('#hot-registrationType', 'private');
   await type('#hot-make', 'Toyota');
-  await page.select('#hot-body', 'Wagon');
+  await page.select('#hot-bodyType', 'wagon');
   await page.select('#hot-colour', 'Blue');
   await click('Add vehicle');
   await click('Save list');
@@ -205,12 +254,18 @@ async function main() {
   await page.click('#payStay');
   await click('Save list');
   await page.waitForFunction(() => document.body.innerText.includes('PayStay ParkingZone is required.'));
-  // Port Phillip PayStay: a zone number only, no meter ID.
+  // Port Phillip PayStay zone, a meter that serves it, and the restriction tied to it.
   await type('#payStayzone-0', '338851200001');
+  await page.click('[data-testid=add-meter]');
+  await type('#meter-0', 'GLP1');
+  await page.click('[data-testid=meter-0-338851200001]');
+  await page.click('[data-testid^=paid-][data-testid$="-338851200001"]');
+  await waitText('paid with PayStay 338851200001');
   await shot('timed-form');
   await click('Save list');
   await waitText('Tracked vehicles (0)');
-  log('timed list saved (segment, between streets, restriction, linked allow list)');
+  await waitText('PayStay 338851200001 (meter GLP1)');
+  log('timed list saved (segment, between streets, restriction paid with PayStay + meter, linked allow list)');
   const timedUrl = page.url();
 
   // Home: grouped by patrol zone, found by a bay kerb sign (parking area 637 + bay 58) and by PayStay number.
@@ -254,7 +309,7 @@ async function main() {
   await page.mouse.up();
   await page.waitForSelector('[data-testid=zoom-slider]', { visible: true, timeout: 5000 });
   if ((await page.evaluate(() => window.__zoom)) !== 3.5) throw new Error('long-press changed the zoom');
-  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; ● DIAG shown');
+  log('zoom button steps 1×/1.75×/3.5×/5× and wraps; long-press opens the slider; DIAG shown');
   await shot('camera');
   await page.click('[data-testid=shutter]');
   await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 90000 });
@@ -267,7 +322,21 @@ async function main() {
   await shot('confirm');
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
-  log('first sighting → scan record created with time allowance');
+  // WF-S30: a first sighting in a paid space needs the payment check before Next scan. The
+  // numbers offered are the restriction's own PayStay zone and its meter.
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true });
+  await waitText('PayStay 338851200001');
+  await waitText('Meter GLP1');
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before the payment check');
+  await shot('payment-check');
+  await page.click('[data-testid=pay-found]');
+  await click('PayStay 338851200001');
+  await page.$eval('[data-testid=pay-to]', (el) => { el.value = '23:59'; el.dispatchEvent(new Event('input')); });
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=payment-saved]', { visible: true });
+  await waitText('Paid');
+  log('first sighting → recorded; payment check (paid session, PayStay zone of the restriction, paid to) saved before Next scan');
+  const gpsRecordUrl = await page.$eval('a[href^="#/record/"]', (a) => a.href);
   await shot('recorded');
 
   // Scan 2 (within allowance)
@@ -312,8 +381,118 @@ async function main() {
   const over = await page.$eval('[data-testid=comparison]', (el) => el.innerText);
   if (!/overstay/i.test(over)) throw new Error('expected overstay');
   const elapsed = await page.$eval('[data-testid=elapsed]', (el) => el.textContent);
-  log(`overstay alert with both evidence images, elapsed ${elapsed}`);
+  // Paid to 23:59 still valid, allowance exceeded → 701 (WF-S30 30d).
+  await page.waitForSelector('[data-testid=offence-offer][data-code="701"]', { visible: true });
+  // Development build: no EnforcementMAPS host, so Issue infringement is hidden (WF-S31 IR-3).
+  if (await page.$('[data-testid=issue-infringement]')) throw new Error('Issue infringement shown without an EnforcementMAPS host');
+  log(`overstay alert with both evidence images, elapsed ${elapsed}; 701 offered (paid to still valid)`);
   await shot('overstay');
+
+  // Dismiss the offence alert after checking the vehicle: disability permit displayed. The scan is
+  // kept with the reason, the vehicle is re-timed against twice the allowance (2h05m of 4P: not an
+  // overstay), and the plate is tagged for later days.
+  await page.click('[data-testid=dismiss-alert]');
+  await page.waitForSelector('[data-testid=dismiss-sheet]', { visible: true });
+  await shot('dismiss-sheet');
+  await page.click('[data-testid=dismiss-disability_permit]');
+  await page.waitForSelector('[data-testid=alert-dismissed]', { visible: true });
+  await page.waitForSelector('[data-testid=dismiss-sheet]', { hidden: true });
+  await waitText('Allowance doubled to 4h');
+  await page.waitForSelector('[data-testid=comparison][data-tone=pending]');
+  await page.waitForSelector('[data-testid=disability-doubled]');
+  await shot('disability-doubled');
+  const rescan = async (plate) => {
+    await page.click('[data-testid=next-scan]');
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    if (plate) await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+  };
+  // A later day (no eval: the production CSP forbids it): the tag was last confirmed in the past
+  // and the dismissed timing has ended.
+  const newDay = () => page.evaluate(() => new Promise((res, rej) => {
+    const req = indexedDB.open('platewatch');
+    req.onsuccess = () => {
+      const tx = req.result.transaction(['flags', 'observations'], 'readwrite');
+      const f = tx.objectStore('flags');
+      f.getAll().onsuccess = (e) => { for (const x of e.target.result) f.put({ ...x, confirmedDay: '2000-01-01' }); };
+      const o = tx.objectStore('observations');
+      // Yesterday's restriction periods have ended (running and dismissed timings alike).
+      o.getAll().onsuccess = (e) => { for (const x of e.target.result) if (x.status === 'dismissed' || x.status === 'active') o.put({ ...x, windowEndsAt: 1 }); };
+      tx.oncomplete = () => res(undefined);
+      tx.onerror = () => rej(tx.error);
+    };
+  }));
+  // Same day: re-sighting timed against 4P, still within allowance.
+  await rescan();
+  await page.waitForSelector('[data-testid=comparison][data-tone=pending]', { timeout: 20000 });
+  await page.waitForSelector('[data-testid=disability-doubled]');
+  log('overstay dismissed for a disability permit: scan kept with reason; re-timed against 2 × allowance (within 4P)');
+
+  await newDay();
+  await rescan();
+  await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
+  await waitText('Previous disability permit vehicle — check vehicle for displayed permit');
+  await shot('flag-sheet');
+  await page.click('[data-testid=flag-confirm]');
+  // Disability confirmed: a new sighting timed against twice the allowance.
+  await page.waitForSelector('[data-testid=result-recorded] [data-testid=disability-doubled]', { timeout: 20000 });
+  // End that timing so the next scan is a new sighting again.
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('observations', 'readwrite');
+      const o = tx.objectStore('observations');
+      o.getAll().onsuccess = (ev) => { for (const x of ev.target.result) if (x.status === 'active') o.put({ ...x, status: 'reset' }); };
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
+  await newDay();
+  await rescan();
+  await page.waitForSelector('[data-testid=flag-sheet]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=flag-dismiss]');
+  await page.waitForSelector('[data-testid=result-recorded]', { timeout: 20000 });
+  // Timed as signed in a paid space: payment check; no payment found → 702 at the first scan (WF-S30 30c).
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=offence-offer][data-code="702"]', { visible: true });
+  await shot('702-no-payment');
+  const tags = await page.evaluate(() => new Promise((res) => { indexedDB.open('platewatch').onsuccess = (e) => { e.target.result.transaction('flags').objectStore('flags').count().onsuccess = (c) => res(c.target.result); }; }));
+  if (tags !== 0) throw new Error('tag not removed after Dismiss');
+  log('next day: known-vehicle check — Confirmed (timed against 2 ×, tag kept), then Dismiss (tag removed, timed as signed); no payment found → 702 offered');
+
+  // WF-S28: A8C123 is a look-alike (8·B) of ABC123, timed on this segment → "Possible earlier
+  // sighting" straight away (no near-match sheet); Next scan stays disabled until a choice.
+  await rescan('A8C123');
+  await page.waitForSelector('[data-testid=result-possible]', { visible: true, timeout: 20000 });
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled during a look-alike decision');
+  await shot('possible-earlier-sighting');
+  await page.click('[data-testid=possible-same]');
+  await page.waitForSelector('[data-testid=lookalike-link]', { visible: true });
+  await waitText('A8C123 read as ABC123');
+  // 8AD999 is a look-alike of the hot-list plate BAD999 → verify interrupt; "Not the hot-list vehicle".
+  await rescan('8AD999');
+  await page.waitForSelector('[data-testid=hot-lookalike]', { visible: true, timeout: 20000 });
+  await shot('hot-lookalike');
+  await page.click('[data-testid=hot-lookalike-not]');
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=offence-offer]', { visible: true });
+  // End the 8AD999 test timing: it is itself a look-alike of BAD999 and would (rightly) route the
+  // next BAD999 scan to "Possible earlier sighting".
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('observations', 'readwrite');
+      const o = tx.objectStore('observations');
+      o.getAll().onsuccess = (ev) => { for (const x of ev.target.result) if (x.plate === '8AD999') o.put({ ...x, status: 'reset' }); };
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
+  log('look-alikes: timed (8·B) → possible earlier sighting → linked as same vehicle; hot-list look-alike → verify → not the hot-list vehicle');
 
   // Hot list alert while working the timed list (manual correction of OCR text).
   await page.click('[data-testid=next-scan]');
@@ -324,8 +503,28 @@ async function main() {
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=hot-alert]', { timeout: 20000 });
   const hotText = await page.$eval('[data-testid=hot-alert]', (el) => el.innerText);
-  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
-  log('hot-list match raises officer-safety alert (risk, make, type, colour)');
+  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota Wagon · Private/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
+  // WF-S29: Next scan stays disabled until the officer acknowledges; needs an officer number.
+  await page.waitForSelector('[data-testid=hot-ack-officer-required]', { visible: true });
+  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before acknowledging');
+  // Set the officer number (development build), scan the plate again and acknowledge.
+  await page.goto(`${ORIGIN}/#/settings`);
+  await type('[data-testid=officer-number]', '4471');
+  await page.$eval('[data-testid=officer-number]', (el) => el.dispatchEvent(new Event('change')));
+  await sleep(300);
+  await page.goto(timedUrl.replace('#/list/', '#/scan/'));
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 });
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'BAD999');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=hot-acknowledge]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=hot-acknowledge]');
+  await page.waitForSelector('[data-testid=hot-ack-queued]', { visible: true });
+  await waitText('4471');
+  await shot('hot-acknowledged');
+  if (await page.$eval('[data-testid=next-scan]', (b) => b.disabled)) throw new Error('Next scan still disabled after acknowledging');
+  log('hot-list match raises officer-safety alert; Next scan blocked until acknowledged (time, GPS, officer 4471; soft Code 1 queued)');
   await shot('hot-alert');
 
   // Permit holder on a linked allow list: recorded, green "Permit valid", and still valid when
@@ -337,20 +536,96 @@ async function main() {
     await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
     await type('[data-testid=plate-input]', plate);
     await page.click('[data-testid=check]');
+    // The permit pop-up shows the permit details; the officer decides it exempts here.
+    await page.waitForSelector('[data-testid=permit-sheet]', { visible: true, timeout: 20000 });
+    await page.waitForSelector('[data-testid=permit-hit][data-validity=valid][data-scope=applies].permit-valid');
+    if (plate === 'RES002') await shot('permit-sheet');
+    await page.click('[data-testid=permit-exempt]');
     await page.waitForSelector('[data-testid=result-exempt]', { timeout: 20000 });
     const permitText = await page.$eval('[data-testid=result-exempt]', (el) => el.textContent);
     const permitClass = await page.$eval('[data-testid=result-exempt]', (el) => el.className);
     if (!/Permit valid/.test(permitText) || !/Sighting recorded/.test(permitText)) throw new Error(`permit result for ${plate} was "${permitText}"`);
-    if (!/border-emerald-500/.test(permitClass)) throw new Error('permit result is not green');
+    if (!/border-active\b/.test(permitClass)) throw new Error('permit result is not green (CivicMAPS --status-active)');
     await waitText('Saved · SHA-256');
   }
   await shot('permit-valid');
-  log('linked permit plate: green "Permit valid", sighting recorded, still valid on re-scan (no overstay)');
+  log('RSP permit on the street: permit pop-up (VALID, solid green, applies here) → Exempt here → green "Permit valid", recorded; again on re-scan');
 
-  // Evidence record: EXIF + integrity.
-  await page.goto(timedUrl);
-  await waitText('Recent scan records');
-  await page.click('main ul li button');
+  // Tagged vehicles (development build): an emergency dismissal tags the plate; the tag is removed
+  // from Settings → Tagged vehicles (CommandMAPS dashboard once integrated).
+  await page.evaluate(() => new Promise((res) => {
+    indexedDB.open('platewatch').onsuccess = (e) => {
+      const tx = e.target.result.transaction('flags', 'readwrite');
+      tx.objectStore('flags').put({ key: 'EMR001', plate: 'EMR001', kind: 'emergency', createdAt: Date.now(), sourceScanId: 'x', confirmedDay: '2000-01-01' });
+      tx.oncomplete = () => res(undefined);
+    };
+  }));
+  await page.goto(`${ORIGIN}/#/settings`);
+  await page.click('[data-testid=settings-tags]');
+  await page.waitForSelector('[data-testid=tag-row]', { visible: true });
+  await shot('tags');
+  await page.click('[data-testid=tag-remove]');
+  await page.waitForSelector('[data-testid=confirm-ok]', { visible: true });
+  await page.click('[data-testid=confirm-ok]');
+  await waitText('No tagged vehicles');
+  log('tagged vehicles: listed and removed in the development build');
+
+  // WF-S31 with a mock EnforcementMAPS host: no payment found → 702 → Issue infringement → hand-off
+  // sheet → the wizard (mocked) issues → PIN shown, timing closed, record locked.
+  await page.goto(timedUrl.replace('#/list/', '#/scan/'));
+  await page.evaluate(() => {
+    window.EnforcementMAPS = {
+      startInfringement: async (h) => { window.__handoff = h; return { status: 'issued', number: '04471261121001836393', offenceCode: h.offence.suggestedCode, issuedAt: Date.now(), sync: 'pending' }; },
+    };
+  });
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 });
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+  await type('[data-testid=plate-input]', 'NOPAY1');
+  await page.click('[data-testid=check]');
+  await page.waitForSelector('[data-testid=payment-check-form]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=pay-not-found]');
+  await click('PayStay 338851200001');
+  await page.click('[data-testid=pay-save]');
+  await page.waitForSelector('[data-testid=issue-infringement]', { visible: true });
+  await page.click('[data-testid=issue-infringement]');
+  await page.waitForSelector('[data-testid=handoff-sheet]', { visible: true });
+  // Vehicle details in the infringement structure, then the licence plate a second time.
+  if (!(await page.$eval('[data-testid=handoff-start]', (b) => b.disabled))) throw new Error('Start enabled before vehicle details');
+  await page.select('#handoff-registrationType', 'private');
+  await type('#handoff-make', 'Holden');
+  await page.select('#handoff-bodyType', 'hatchback');
+  await page.select('#handoff-colour', 'White');
+  await type('[data-testid=handoff-plate-again]', 'N0PAY1');
+  await page.waitForSelector('[data-testid=handoff-plate-mismatch]', { visible: true });
+  if (!(await page.$eval('[data-testid=handoff-start]', (b) => b.disabled))) throw new Error('Start enabled with mismatched plate entries');
+  await shot('handoff-plate-mismatch');
+  await page.$eval('[data-testid=handoff-plate-again]', (el) => { el.value = ''; el.dispatchEvent(new Event('input')); });
+  await type('[data-testid=handoff-plate-again]', 'NOPAY1');
+  await page.waitForSelector('[data-testid=handoff-plate-match]', { visible: true });
+  await shot('handoff-sheet');
+  await page.click('[data-testid=handoff-start]');
+  await page.waitForSelector('[data-testid=pin-issued]', { visible: true });
+  await waitText('04471 261121 001 8363 93');
+  const handoff = await page.evaluate(() => window.__handoff);
+  if (handoff.schemaVersion !== '1.0' || handoff.offence.suggestedCode !== '702' || handoff.offence.basis !== 'no_payment_found' || handoff.vehicle.registration !== 'NOPAY1' || handoff.vehicle.make !== 'Holden' || handoff.vehicle.type !== 'hatchback' || handoff.vehicle.colour !== 'White' || handoff.vehicle.registrationType !== 'private' || handoff.vehicle.registrationState !== 'VIC' || !handoff.vehicle.plateReentry?.matched || !/^[0-9a-f]{64}$/.test(handoff.evidence[0].sha256))
+    throw new Error(`unexpected hand-off ${JSON.stringify(handoff).slice(0, 300)}`);
+  await shot('pin-issued');
+  await page.evaluate(() => { delete window.EnforcementMAPS; });
+  await click('view record');
+  await page.waitForSelector('[data-testid=record-infringement]', { visible: true });
+  await page.waitForSelector('[data-testid=record-locked]', { visible: true });
+  if (!(await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Delete/.test(b.textContent))?.disabled))) throw new Error('Delete enabled on a record with an issued infringement');
+  log('issue infringement (mock EnforcementMAPS host): 702 → vehicle details + licence plate entered twice (mismatch flagged) → hand-off payload → PIN 04471 261121 001 8363 93 shown, timing closed, record locked');
+
+  // Verify the same first sighting whose GPS fix was checked at capture.
+  await page.goto(gpsRecordUrl);
+  await waitText('Capture metadata');
+  // Thumbnails load after the record renders; wait so the layout is stable before clicking.
+  await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+  // No sideways scroll on a phone (a pill row overflowing the card once did this).
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  if (overflow > 0) throw new Error(`record page scrolls sideways by ${overflow}px`);
   await click('Verify image integrity');
   await waitText('Image hash matches');
   const recText = await page.evaluate(() => document.body.innerText);
@@ -358,6 +633,59 @@ async function main() {
   if (!/DateTimeOriginal \d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2} \+1[01]:00/.test(recText)) throw new Error('EXIF DateTimeOriginal/offset missing');
   log('evidence JPEG: SHA-256 verified, EXIF GPS + DateTimeOriginal (+offset) embedded');
   await shot('record');
+
+  // Bulk import: the timed-segments template and a CivicMAPS-preview kerbside file together.
+  await page.goto(`${ORIGIN}/#/import`);
+  await waitText('Choose files');
+  const picker = await page.$('[data-testid=import-file]');
+  await picker.uploadFile(
+    join(root, 'templates', 'platewatch-timed-segments-template.csv'),
+    join(root, 'tests', 'fixtures', 'civicmaps-preview', 'kerbside-chinatown-20055.json'),
+  );
+  await waitText('CivicMAPS kerbside segment');
+  // Coventry St (S), Little Bourke St Bay 58–72 (in both files), Lonsdale St (N) and Little Bourke St Bay 72 – Elizabeth St.
+  await waitText('4 timed lists created');
+  await waitText('2 without restrictions yet');
+  await shot('import-plan');
+  await page.click('[data-testid=import-save]');
+  await waitText('Imported: 4 list(s) created');
+  await type('[data-testid=list-search]', '64558');
+  await waitText('64558 = area 645 · bay 58');
+  await page.$eval('[data-testid=list-search]', (el) => { el.value = ''; el.dispatchEvent(new Event('input')); });
+  await waitText('Restrictions to enter');
+  log('bulk import: CSV template + CivicMAPS kerbside JSON → 4 timed lists, found by bay sign');
+
+  // Imported lists are system lists (OQ26-5). In the development build they stay editable and
+  // deletable here, with a SYSTEM tag; import is reachable from the Home header.
+  await page.waitForSelector('[data-testid=header-import]', { visible: true });
+  await type('[data-testid=list-search]', '64558');
+  await waitText('64558 = area 645 · bay 58');
+  await page.click('[data-testid=timed-row] button');
+  await page.waitForSelector('[data-testid=system-tag]', { visible: true });
+  await waitText('Imported from');
+  await page.waitForSelector('[data-testid=edit-list]', { visible: true });
+  await page.waitForSelector('[data-testid=delete-list]', { visible: true });
+  await shot('system-list');
+  await page.click('[data-testid=edit-list]');
+  await page.waitForSelector('[data-testid=dev-override]', { visible: true });
+  await waitText('Paid parking (optional)');
+  await shot('system-list-edit');
+  await page.goto(`${ORIGIN}/#/`);
+  await page.waitForSelector('[data-testid=list-search]', { visible: true });
+  log('imported list: SYSTEM tag and provenance; editable and deletable in the development build');
+
+  // The kerbside release for City of Port Phillip Patrol Area 10: 55 segments, signs not yet surveyed.
+  await page.goto(`${ORIGIN}/#/import`);
+  await waitText('Choose files');
+  await (await page.$('[data-testid=import-file]')).uploadFile(join(root, 'datasets', 'copp-patrol-area-10.release.json'));
+  await waitText('civicmaps.kerbside_release');
+  // Normanby Rd Boundary–Montague is already on the device from the template: 54 created, 1 updated.
+  await waitText('54 timed lists created');
+  await waitText('1 timed list updated');
+  await page.click('[data-testid=import-save]');
+  await waitText('Imported: 54 list(s) created, 1 updated');
+  await waitText('Zone 10');
+  log('civicmaps.kerbside_release import: Patrol Area 10 → 54 new placeholders + 1 matched by extent ID');
 
   // Text reader route renders.
   await page.goto(`${ORIGIN}/#/text`);

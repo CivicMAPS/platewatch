@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civicmaps.example/schemas/civicmaps-parking-permit.v1.json",
+  "title": "CivicMAPS residential parking permit",
+  "description": "A council-issued residential parking permit and its vehicle (owner direction 23/11/2026). The permit number is authoritative: prefix, issue year, sequential ID and amendment are derived from it (and checked when also given). Status shown to officers is only valid / expired: valid from 00:00 on validFrom until midnight at the end of validTo.",
+  "type": "object",
+  "required": ["authority", "permitNumber", "validFrom", "validTo", "address", "vehicle"],
+  "additionalProperties": false,
+  "properties": {
+    "authority": {
+      "type": "object",
+      "description": "Issuing council: the user-facing council code (e.g. com) and, once onboarded, the CivicMAPS linking ID. Areas are com-rpa7 user facing, <linkingId>-com-rpa7 operationally.",
+      "required": ["councilCode"],
+      "additionalProperties": false,
+      "properties": {
+        "councilCode": { "type": "string", "pattern": "^[a-z]{2,8}$", "examples": ["com", "copp"] },
+        "linkingId": { "type": ["string", "null"], "pattern": "^[0-9]+$", "examples": ["919379201"] }
+      }
+    },
+    "permitNumber": {
+      "type": "string",
+      "description": "Permit types, issue year, four-digit sequential ID and optional amendment suffix. Types: RPA (residential parking area), RSP (residential street permit), RP (resident permit), FS (foreshore); a combination lists each type with COMB, e.g. RPA/COMB/FS.",
+      "pattern": "^(RPA|RSP|RP|FS|COMB)(/(RPA|RSP|RP|FS|COMB))*-\\d{4}-\\d{4}(/\\d+)?$",
+      "examples": ["RPA-2026-0789", "RSP-2026-0790/1", "RPA/COMB/FS-2026-0791"]
+    },
+    "prefix": { "type": "string", "description": "Derived from permitNumber; must match when given." },
+    "issueYear": { "type": "integer", "minimum": 2000, "maximum": 2099, "description": "Derived; must match when given." },
+    "sequentialId": { "type": "string", "pattern": "^\\d{4}$", "description": "Derived; must match when given." },
+    "amendmentVersion": { "type": ["integer", "null"], "minimum": 1, "description": "Derived; must match when given." },
+    "validFrom": { "type": "string", "format": "date", "description": "Valid from 00:00 on this date." },
+    "validTo": { "type": "string", "format": "date", "description": "Expires at midnight at the end of this date." },
+    "parkingAreaCode": { "type": "string", "pattern": "^\\d{1,2}[A-Z]?$", "description": "Residential parking area code (required for RPA permits).", "examples": ["7", "4B", "15A"] },
+    "address": {
+      "type": "object",
+      "description": "Registered address of the vehicle (RSP: its street segment; RP: directly in front of it).",
+      "required": ["streetNumber", "street"],
+      "additionalProperties": false,
+      "properties": {
+        "streetNumber": { "type": "string", "minLength": 1, "examples": ["12", "12A", "3/45"] },
+        "street": { "type": "string", "minLength": 1, "examples": ["Gladstone Street"] }
+      }
+    },
+    "vehicle": {
+      "type": "object",
+      "required": ["registrationNumber", "registrationType", "vehicleType", "make", "colour"],
+      "additionalProperties": false,
+      "properties": {
+        "registrationNumber": { "type": "string", "pattern": "^[A-Z0-9]{1,10}$" },
+        "registrationState": { "enum": ["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"], "default": "VIC" },
+        "registrationType": { "enum": ["private", "commercial", "company", "lease", "diplomatic", "other"] },
+        "vehicleType": { "enum": ["sedan", "hatchback", "suv", "wagon", "coupe", "convertible", "ute", "van", "people_mover", "light_truck", "truck", "bus", "motorcycle", "scooter", "other"] },
+        "make": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "colour": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

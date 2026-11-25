@@ -6,12 +6,15 @@ import { warmUpOcr } from './lib/ocr';
 import { App } from './ui/app';
 import { homeView, newListTypeView } from './ui/views/home';
 import { dismissedView } from './ui/views/dismissed';
+import { importView } from './ui/views/importView';
 import { listDetailView } from './ui/views/listDetail';
 import { listFormView } from './ui/views/listForm';
 import { recordView } from './ui/views/record';
 import { scanView } from './ui/views/scan';
 import { settingsView } from './ui/views/settings';
 import { textReaderView } from './ui/views/textReader';
+import { tagsView } from './ui/views/tags';
+import { hotLogView } from './ui/views/hotLog';
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app root missing');
@@ -26,6 +29,9 @@ const app = new App(root)
   .route('/record/:id', recordView)
   .route('/text', textReaderView)
   .route('/dismissed', dismissedView)
+  .route('/tags', tagsView)
+  .route('/hotlog/:entryId', hotLogView)
+  .route('/import', importView)
   .route('/settings', settingsView);
 
 await app.start();

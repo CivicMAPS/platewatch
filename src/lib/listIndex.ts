@@ -21,7 +21,7 @@ export interface SearchResult {
 }
 
 type Field = FieldMatch & { kind: FieldKind };
-type FieldKind = 'zone' | 'rpa' | 'street' | 'cross' | 'suburb' | 'name' | 'parkingarea' | 'easypark' | 'paystay' | 'meter';
+type FieldKind = 'zone' | 'rpa' | 'street' | 'cross' | 'suburb' | 'name' | 'segmentid' | 'parkingarea' | 'easypark' | 'paystay' | 'meter';
 
 /** Fields whose numbers start a bay's kerb sign: parking area 637 + bay 58 = sign 63758. */
 const BAY_SIGN_KINDS = new Set<FieldKind>(['parkingarea', 'easypark']);
@@ -36,6 +36,7 @@ const FIELD_WORDS: Record<string, FieldKind[]> = {
   area: ['parkingarea', 'easypark'],
   parking: ['parkingarea'],
   bay: ['parkingarea', 'easypark'],
+  segment: ['segmentid'],
   meter: ['meter'],
   easypark: ['easypark'],
   paystay: ['paystay', 'meter'],
@@ -57,6 +58,12 @@ function fields(l: TimedList): Field[] {
   add('street', 'Road segment', l.segment.street);
   add('cross', 'Between', l.segment.fromStreet);
   add('cross', 'And', l.segment.toStreet);
+  add('cross', 'Part from', l.segment.subFrom);
+  add('cross', 'Part to', l.segment.subTo);
+  add('segmentid', 'Segment ID', l.roadSegmentId);
+  add('segmentid', 'Segment', l.displayId);
+  // Kerb plates that do not follow parking area + bay carry their own number.
+  for (const p of l.bayPoints ?? []) if (p.sign) add('parkingarea', 'Bay sign', p.sign);
   add('suburb', 'Suburb', l.segment.suburb);
   add('name', 'List', l.name);
   add('parkingarea', 'Parking area', l.payment?.parkingArea);
@@ -65,6 +72,7 @@ function fields(l: TimedList): Field[] {
     add('paystay', 'PayStay zone', p.zone);
     add('meter', 'Meter ID', p.meter);
   }
+  for (const m of l.payment?.meters ?? []) add('meter', 'Meter ID', m.id);
   return f;
 }
 
@@ -100,12 +108,15 @@ function tokenScore(t: string, value: string): number {
  * A bay's kerb sign is its parking area (or EasyPark area) number followed by a bay number of one
  * to three digits. Longer area numbers score higher, so area 637 beats area 63 for sign 63758.
  */
-function baySign(t: string, f: Field): (FieldMatch & { s: number }) | null {
+function baySign(t: string, f: Field, bays: readonly number[] | undefined): (FieldMatch & { s: number }) | null {
   const area = norm(f.value);
   if (!BAY_SIGN_KINDS.has(f.kind) || !/^\d+$/.test(t) || !/^\d+$/.test(area)) return null;
   const bay = t.slice(area.length);
   if (!t.startsWith(area) || bay.length < 1 || bay.length > 3) return null;
-  return { label: 'Bay sign', value: `${t} = area ${area} · bay ${bay}`, s: Math.min(95, 85 + area.length) };
+  // A list that records its bays only takes signs for those bays, and ranks above one that does not record them.
+  const listed = bays?.length ? bays.includes(Number(bay)) : null;
+  if (listed === false) return null;
+  return { label: 'Bay sign', value: `${t} = area ${area} · bay ${Number(bay)}`, s: Math.min(95, 85 + area.length) + (listed ? 4 : 0) };
 }
 
 type Scored = FieldMatch & { s: number };
@@ -120,7 +131,7 @@ function matchList(list: TimedList, tokens: readonly string[], allowed: Set<Fiel
     for (const f of fs) {
       const s = tokenScore(t, f.value);
       if (s > (best?.s ?? 0)) best = { label: f.label, value: f.value, s };
-      const sign = bayLookup && s < 100 ? baySign(t, f) : null;
+      const sign = bayLookup && s < 100 ? baySign(t, f, list.bays) : null;
       if (sign && sign.s > (best?.s ?? 0)) best = sign;
     }
     if (!best) return null;
@@ -227,7 +238,13 @@ export function groupByZone(lists: readonly TimedList[]): ZoneGroup[] {
         .sort(([a], [b]) => compareText(a, b))
         .map(([street, ls]) => ({
           street,
-          lists: ls.sort((a, b) => compareText(a.segment.fromStreet, b.segment.fromStreet) || compareText(a.segment.toStreet, b.segment.toStreet)),
+          lists: ls.sort(
+            (a, b) =>
+              compareText(a.segment.fromStreet, b.segment.fromStreet) ||
+              compareText(a.segment.toStreet, b.segment.toStreet) ||
+              compareText(a.segment.side, b.segment.side) ||
+              compareText(a.segment.subFrom ?? '', b.segment.subFrom ?? ''),
+          ),
         })),
     }));
 }

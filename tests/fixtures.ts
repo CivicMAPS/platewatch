@@ -63,6 +63,7 @@ export const hot = (plates: string[], patch: Partial<HotList> = {}): HotList => 
     key: plateKey(p),
     risks: ['aggressive', 'spitting'],
     riskLevel: 'high',
+    registrationType: 'Standard',
     make: 'Toyota',
     model: 'Corolla',
     bodyType: 'Wagon',

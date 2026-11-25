@@ -27,7 +27,8 @@ final class PlateRules {
         String[][] asDigit = {{"O","0"},{"Q","0"},{"D","0"},{"I","1"},{"L","1"},{"Z","2"},{"S","5"},{"G","6"},{"B","8"},{"T","7"}};
         for (String[] p:asDigit) LETTER_AS_DIGIT.put(p[0].charAt(0),p[1].charAt(0));
         // looseKey in plate.ts
-        String[][] loose = {{"O","0"},{"Q","0"},{"I","1"},{"D","0"},{"B","8"},{"S","5"},{"Z","2"},{"G","6"},{"L","1"},{"T","7"},{"U","V"}};
+        // Look-alike classes (WF-S28 OQ28-1): adds R·P (owner) and A·4, F·E, N·M (proposed).
+        String[][] loose = {{"O","0"},{"Q","0"},{"I","1"},{"D","0"},{"B","8"},{"S","5"},{"Z","2"},{"G","6"},{"L","1"},{"T","7"},{"U","V"},{"P","R"},{"4","A"},{"E","F"},{"M","N"}};
         for (String[] p:loose) LOOSE.put(p[0].charAt(0),p[1].charAt(0));
     }
 
@@ -81,6 +82,12 @@ final class PlateRules {
         StringBuilder out = new StringBuilder();
         for (char c:p.toCharArray()) out.append(LOOSE.getOrDefault(c,c));
         return out.toString();
+    }
+
+    /** comparePlates(a, b) === 'possible' in src/lib/plate.ts: equal after the look-alike classes, not exactly equal. */
+    static boolean lookalike(String a,String b) {
+        String x = normalise(a), y = normalise(b);
+        return !x.equals(y) && looseKey(x).equals(looseKey(y));
     }
 
     /** See isPlateVariant in src/lib/plate.ts. */

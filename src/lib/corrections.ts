@@ -21,7 +21,11 @@ export async function correctRecord(id: string, input: string, expectedPlate: st
   const eligible = histories.filter(o => o.plate === plate && o.windowEndsAt > at && (!o.closedAt || o.closedAt > at));
   const result = evaluate({at, plate, list, hotLists: lists.filter(l => l.type === 'hot'),
     allowLists: lists.filter(l => l.type === 'allow'), observations: eligible.filter(o => o.startedAt <= at).map(o => ({...o,status:'active'}))});
-  const decision = result.decision;
+  // A permit pop-up cannot be asked again here: a permit applying here keeps the record exempt;
+  // otherwise the timing behind it applies.
+  let decision = result.decision;
+  while (decision.kind === 'timed_permit' || decision.kind === 'timed_flag_check')
+    decision = decision.kind === 'timed_permit' && decision.hits[0]?.validity === 'valid' && decision.hits[0].scope === 'applies' ? { kind: 'timed_exempt', hit: decision.hits[0] } : decision.then;
   let target: Observation | undefined;
   if (decision.kind === 'timed_resighting') target = histories.find(o => o.id === decision.observation.id);
   if ((decision.kind === 'timed_new' || decision.kind === 'timed_possible') && list.type === 'timed') {
@@ -33,6 +37,11 @@ export async function correctRecord(id: string, input: string, expectedPlate: st
   const amended: ScanRecord = {...s, plate,key:plate,corrected:true,revisions,observationId:target?.id ?? null,
     outcome:target ? 'recorded' : decision.kind === 'timed_exempt' ? 'permit_valid' : decision.kind === 'hot_match' && result.hotHits.some(h => h.strength === 'exact' && h.list.id === list.id) ? 'hot_sighting' : 'reviewed',
     amendmentResult:decision.kind, amendmentMatches:result.hotHits.map(h => h.entry.plate+' · '+h.list.name+' · '+h.strength)};
+  if (list.type === 'permit_zone') {
+    // Changing the plate invalidates the officer's confirmation for the original vehicle.
+    delete amended.exemption;
+    amended.outcome = 'permit_unconfirmed';
+  }
   await scans.put(amended);
   for (const group of [histories.find(o => o.id === previousId),target]) {
     if (!group) continue;

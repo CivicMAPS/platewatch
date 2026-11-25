@@ -1,6 +1,25 @@
 /** Domain model for PlateWatch. All timestamps are epoch milliseconds (UTC). */
 
-export type ListType = 'allow' | 'timed' | 'hot';
+export type ListType = 'allow' | 'timed' | 'hot' | 'permit_zone';
+
+/**
+ * Where a list came from (WF-S26 OQ26-5, owner decision 23/11/2026).
+ * - `system`: applied to the device from outside — imported from a file today; in EnforcementMAPS,
+ *   published from the CommandMAPS dashboard by a team leader or parking services management.
+ * - `officer`: created on the device by the officer for their patrol (a daily digital chalking list).
+ * Lists saved before this field existed have none and are treated as `officer` lists with no day.
+ */
+export type ListOrigin = 'system' | 'officer';
+
+export interface ListSource {
+  origin: ListOrigin;
+  /** File name(s) a system list was imported from, joined with ", ". */
+  importedFrom?: string;
+  /** When a system list was last imported or updated by an import. */
+  importedAt?: number;
+  /** Officer lists: the local day ("YYYY-MM-DD") the list was created for. */
+  serviceDay?: string;
+}
 
 export interface BaseList {
   id: string;
@@ -9,7 +28,37 @@ export interface BaseList {
   notes: string;
   createdAt: number;
   updatedAt: number;
+  /** Provenance; absent on lists saved before it existed. See `lib/listPolicy.ts`. */
+  source?: ListSource;
 }
+
+/* ───────────────────────────── Vehicle details ───────────────────────────── */
+
+/**
+ * Vehicle details as infringement issuance requires them (owner direction 23/11/2026): Licence
+ * plate (the entry's own plate), Registration type, Make, Type, Colour. The same structure is used
+ * wherever PlateWatch holds a vehicle description (hot lists, permits, the infringement hand-off).
+ */
+export interface VehicleDetails {
+  /** Code from REGISTRATION_TYPES (private, commercial, company, lease, diplomatic, other). */
+  registrationType: string;
+  make: string;
+  /** Vehicle type (body type) code from VEHICLE_TYPES, shown as "Type". */
+  bodyType: string;
+  colour: string;
+  /** State or territory of registration; VIC when not given. */
+  registrationState?: string;
+}
+
+/**
+ * Residential permit types (owner direction 23/11/2026):
+ * - RPA — residential parking area: any time-restricted or paid space within the area.
+ * - RSP — residential street permit: anywhere on the street segment of the registered address.
+ * - RP  — resident permit: directly in front of the registered address.
+ * - FS  — foreshore: free parking in paid foreshore spaces in the council area; time limits apply.
+ * A combination (prefix with COMB, e.g. RPA/COMB/FS) holds every listed type.
+ */
+export type PermitType = 'RPA' | 'RSP' | 'RP' | 'FS';
 
 /* ───────────────────────────── Allow list ───────────────────────────── */
 
@@ -27,6 +76,22 @@ export interface AllowEntry {
   validFrom: string;
   validTo: string;
   addedAt: number;
+  /** Vehicle details held with the permit (licence plate is `plate`). */
+  registrationType?: string;
+  make?: string;
+  bodyType?: string;
+  colour?: string;
+  registrationState?: string;
+  /** Permit types from the permit number prefix (RPA, RSP, RP, FS; COMB for a combination). */
+  permitTypes?: PermitType[];
+  /** Issuing council: user-facing code (com) and, once onboarded, the CivicMAPS linking ID. */
+  council?: { code: string; linkingId?: string };
+  /** Registered address the permit is tied to (RSP: its street segment; RP: in front of it). */
+  address?: { streetNumber: string; street: string };
+  /** Residential parking area the permit applies to, as the issuing council holds it (e.g. "12"). */
+  rpa?: string;
+  /** Streets a street-specific resident permit applies to. */
+  streets?: string[];
 }
 
 export interface AllowList extends BaseList {
@@ -36,7 +101,7 @@ export interface AllowList extends BaseList {
 
 /* ───────────────────────────── Timed list ───────────────────────────── */
 
-export type StreetSide = 'both' | 'north' | 'south' | 'east' | 'west' | 'odd' | 'even';
+export type StreetSide = 'both' | 'north' | 'south' | 'east' | 'west' | 'centre' | 'odd' | 'even';
 
 export interface StreetSegment {
   /** Street the segment is on, e.g. "Smith Street". */
@@ -47,6 +112,12 @@ export interface StreetSegment {
   toStreet: string;
   side: StreetSide;
   suburb: string;
+  /**
+   * Part of the side, where signs change part way along: from and to a bay ("Bay 58"), an
+   * address ("234 Little Bourke Street") or a cross street. Absent when the list covers the side.
+   */
+  subFrom?: string;
+  subTo?: string;
 }
 
 /** 0 = Sunday … 6 = Saturday (matches Date#getDay). */
@@ -69,6 +140,26 @@ export interface TimedRestriction {
   allDay: boolean;
   /** Free description, e.g. "Permit zone 12 excepted". */
   description: string;
+  /**
+   * The segment's EasyPark areas and PayStay zones that pay for this restriction (values from the
+   * list's payment). Absent or empty: not tied to a payment number.
+   */
+  paidBy?: PaidBy;
+}
+
+/** Payment numbers tied to a restriction or a meter. */
+export interface PaidBy {
+  easyPark: string[];
+  payStay: string[];
+}
+
+/**
+ * A parking meter. It pays for the whole segment (and its parking area) when it lists no numbers,
+ * otherwise for the EasyPark areas and PayStay zones it lists; one meter can serve several.
+ */
+export interface Meter extends PaidBy {
+  /** As printed on the meter, e.g. "GLP1". */
+  id: string;
 }
 
 export interface PaymentAreas {
@@ -79,8 +170,35 @@ export interface PaymentAreas {
   parkingArea?: string;
   /** EasyPark area numbers; a segment can have several (e.g. one side changes restriction mid-day). */
   easyPark: string[];
-  /** PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side. */
-  payStay: { zone: string; meter: string }[];
+  /**
+   * PayStay zones; City of Port Phillip numbers are 3388 + segment number + four digits for the side.
+   * `meter` is only on lists saved before meters were separate (one meter per zone entry);
+   * normalisePayment moves it into `meters`.
+   */
+  payStay: { zone: string; meter?: string }[];
+  /** Meters on this segment and what each pays for. */
+  meters?: Meter[];
+}
+
+export interface BayPoint {
+  bay: number;
+  lat: number;
+  lng: number;
+  /** Kerb plate number, when the council does not number plates as parking area + bay. */
+  sign?: string;
+}
+
+/** A signed control without a time allowance; kept for reference and export, not timed. */
+export interface UntimedControl {
+  /** civicmaps.kerbside_release rule type: no_stopping, no_parking, permit_zone, loading_zone… */
+  control: 'time_limit' | 'metered' | 'ticket' | 'loading_zone' | 'permit_zone' | 'no_stopping' | 'no_parking' | 'clearway' | 'bus_zone' | 'taxi_zone' | 'accessible' | 'works_zone' | 'other';
+  /** As shown, e.g. "No stopping", "Loading zone (no time limit given)". */
+  label: string;
+  days: Weekday[];
+  allDay: boolean;
+  startTime: string;
+  endTime: string;
+  description: string;
 }
 
 export interface TimedList extends BaseList {
@@ -92,6 +210,21 @@ export interface TimedList extends BaseList {
   patrolZoneName?: string;
   /** Residential permit area, e.g. "12". */
   rpa?: string;
+  /** Council road segment ID (e.g. City of Melbourne road corridor 20055). */
+  roadSegmentId?: string;
+  /** Bay numbers in this list; with the parking area they make each bay's kerb sign (645 + 58). */
+  bays?: number[];
+  /** Bay positions (WGS84) where known, with the kerb plate number when it is not area + bay. */
+  bayPoints?: BayPoint[];
+  /** Signs on this stretch with no time allowance (No Stopping, No Parking, Permit Zone…). */
+  untimedControls?: UntimedControl[];
+  /**
+   * The extent this list came from in a civicmaps.kerbside_release: "<segment_id>:<side>:<part>".
+   * Re-imports match on it before street names; exports keep it.
+   */
+  externalId?: string;
+  /** What users see for the segment: council code + asset ID (com-20567), or + asset name until it has one. */
+  displayId?: string;
   segment: StreetSegment;
   restrictions: TimedRestriction[];
   /** Linked allow lists (e.g. residential permits) exempt on this segment. */
@@ -137,10 +270,13 @@ export interface HotEntry {
   key: string;
   risks: RiskTag[];
   riskLevel: RiskLevel;
+  /** Vehicle details (licence plate is `plate`). */
+  registrationType: string;
   make: string;
-  model: string;
   bodyType: string;
   colour: string;
+  /** Not part of the vehicle-details structure: kept only on entries saved before it; shown in notes. */
+  model?: string;
   notes: string;
   addedAt: number;
 }
@@ -150,7 +286,14 @@ export interface HotList extends BaseList {
   entries: HotEntry[];
 }
 
-export type PlateList = AllowList | TimedList | HotList;
+export interface PermitZoneList extends BaseList {
+  type: 'permit_zone';
+  segment: StreetSegment;
+  councilCode: string;
+  rpa: string;
+}
+
+export type PlateList = AllowList | TimedList | HotList | PermitZoneList;
 
 /* ─────────────────────────── Capture metadata ─────────────────────────── */
 
@@ -189,10 +332,79 @@ export type ScanOutcome =
   | 'within_allowance' // re-sighting, still inside allowance
   | 'overstay' // re-sighting, allowance (+grace) exceeded
   | 'hot_sighting' // hot list match evidence
-  | 'permit_valid'; // on a linked allow list, valid at capture — sighting recorded, no allowance clock
+  | 'permit_unconfirmed' // no applicable permit confirmed during this permit-zone check
+  | 'permit_valid' // officer confirmed a permit exempts the vehicle here — sighting recorded, no allowance clock
+  | 'flag_confirmed'; // known disability / emergency vehicle confirmed on check — recorded, no allowance clock
+
+/** Where a look-alike candidate came from (WF-S28). */
+export type LookalikeSource = 'timed' | 'hot' | 'allow';
+/** The officer's choice on a look-alike candidate (WF-S28). */
+export type LookalikeChoice = 'same' | 'different' | 'hot_confirmed' | 'not_hot' | 'permit_plate' | 'not_permit';
+
+/**
+ * A look-alike candidate shown to the officer and what they chose (WF-S28). Every candidate shown
+ * is kept (OQ28-7); `readAs` is always the plate as read on this scan.
+ */
+export interface LookalikeLink {
+  readAs: string;
+  candidatePlate: string;
+  source: LookalikeSource;
+  /** Timed: observation id; hot: hot-list entry id; allow: allow entry id. */
+  candidateId: string;
+  choice: LookalikeChoice;
+  decidedAt: number;
+}
+
+/** Requirements §11: what PlateWatch stores back after the EnforcementMAPS wizard. */
+export interface InfringementRecord {
+  status: 'allocated' | 'cancelled' | 'issued' | 'void_requested' | 'voided';
+  /** 'pending' while statements wait in the handset queue; 'rejected' if the server refused them. */
+  sync: 'pending' | 'synced' | 'rejected';
+  pinSource: 'device';
+  handoffId: string;
+  /** Infringement number (I-N, 20 digits). */
+  number: string;
+  offenceCode: string;
+  offenceOverridden: boolean;
+  timeFrom: number;
+  timeTo: number;
+  issuedAt?: number;
+  officerNumber: string;
+}
+
+/** Where the officer checked payment (WF-S30). */
+export type PaymentSource = 'easypark' | 'paystay' | 'meter' | 'ticket' | 'other';
+
+/** The officer's payment check on a first sighting in a paid space (WF-S30). */
+export interface PaymentCheck {
+  status: 'paid' | 'not_found';
+  source: PaymentSource;
+  /** The number checked, e.g. "7514" (EasyPark area) or a meter ID. */
+  sourceRef?: string;
+  /** Epoch ms; paidTo required when status is 'paid'. */
+  paidFrom?: number;
+  paidTo?: number;
+  checkedAt: number;
+  /** Officer number. */
+  checkedBy: string;
+  /** Earlier paid-to values when updated at a later scan (top-up, OQ30-1). */
+  history?: { paidTo: number; checkedAt: number; checkedBy: string }[];
+}
 
 export interface ScanRecord {
   revisions?: {at:number; plate:string; outcome:ScanOutcome}[];
+  /** Officer's payment check (first sighting in a paid space, WF-S30). */
+  payment?: PaymentCheck;
+  /** Infringement issued (or started and cancelled) from this scan, stored back from EnforcementMAPS (WF-S31). */
+  infringement?: InfringementRecord;
+  /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
+  lookalikes?: LookalikeLink[];
+  /** Overstay alert dismissed by the officer after checking the vehicle. */
+  alertDismissal?: { reason: DismissReason; at: number };
+  /** Known-vehicle check on this scan: confirmed (tag kept) or not confirmed (tag removed). */
+  flagCheck?: { kind: PlateFlagKind; result: 'confirmed' | 'removed' };
+  /** Why the scan started no clock: the permit the officer accepted, or an earlier dismissal. */
+  exemption?: { by: 'permit'; permitNo: string; listName: string; status: string } | { by: 'dismissed_earlier'; reason: DismissReason };
   amendmentResult?: string;
   amendmentMatches?: string[];
   id: string;
@@ -241,7 +453,31 @@ export interface DismissedCapture {
   createdAt: number;
 }
 
-export type ObservationStatus = 'active' | 'expired' | 'reset';
+/** `dismissed`: an overstay alert the officer dismissed with a reason (see DismissReason). */
+/** `issued`: closed by an infringement issued from this sighting (WF-S31 31f.2). */
+export type ObservationStatus = 'active' | 'expired' | 'reset' | 'dismissed' | 'issued';
+
+/** Why an officer dismissed an overstay alert after checking the vehicle. */
+export type DismissReason = 'disability_permit' | 'emergency_vehicle' | 'permit_displayed';
+
+/** A plate tagged after a disability-permit or emergency-services dismissal. */
+export type PlateFlagKind = 'disability' | 'emergency';
+
+/**
+ * Plate record tag: from the next day on, every scan of this plate on a timed list asks the
+ * officer to check the vehicle (Confirmed keeps the tag, no timer; Dismiss removes it, timer runs).
+ */
+export interface PlateFlag {
+  /** plateKey(plate). */
+  key: string;
+  plate: string;
+  kind: PlateFlagKind;
+  createdAt: number;
+  /** Scan whose dismissal created the tag. */
+  sourceScanId: string;
+  /** Local day ("YYYY-MM-DD") the vehicle was last confirmed; scans that day need no check. */
+  confirmedDay: string;
+}
 
 /**
  * An observation is the "chalk" for one vehicle in one timed segment: it
@@ -268,6 +504,19 @@ export interface Observation {
   overstayFlaggedAt: number | null;
   closedAt: number | null;
   scanCount: number;
+  /** Set when status is `dismissed`. */
+  dismissReason?: DismissReason;
+  /** Scans that joined this timing through a look-alike link ("Same vehicle", WF-S28). */
+  linkedScanIds?: string[];
+  /** A valid FS permit in a paid foreshore space: no payment required (no payment check, never 702); time limits apply. */
+  paymentWaived?: 'foreshore';
+  /** Payment check result carried forward from the first scan so a re-scan can compare (WF-S30). */
+  payment?: { status: 'paid' | 'not_found'; paidTo?: number };
+  /**
+   * Disability permit displayed: the allowance is twice the signed time (timed and paid + timed
+   * spaces). `limitMinutes` / `allowanceEndsAt` hold the doubled values; this keeps the signed one.
+   */
+  concession?: { kind: 'disability'; baseLimitMinutes: number };
 }
 
 export interface Settings {
@@ -285,6 +534,13 @@ export interface Settings {
   diagnostics: boolean;
   /** Home: patrol zone shown (null = all zones, '' = lists without a zone). */
   listZoneFilter: string | null;
+  /** CivicMAPS display theme: light civic surfaces, or the design system's low-light dark theme. */
+  theme: 'light' | 'dark';
+  /**
+   * Officer number for hot-list acknowledgements and payment checks (WF-S29 OQ29-4). Development
+   * build only: EnforcementMAPS supplies it from the operating context. Empty until set.
+   */
+  officerNumber: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -297,4 +553,50 @@ export const DEFAULT_SETTINGS: Settings = {
   // On during the development field-test stage; turn the default off before production.
   diagnostics: true,
   listZoneFilter: null,
+  theme: 'light',
+  officerNumber: '',
 };
+
+/* ─────────────────────────── Hot-list entry log (WF-S29) ─────────────────────────── */
+
+/** Who a soft Code 1 (hot-list sighting) alert goes to in CommandMAPS (OQ29-6). */
+export type HotAlertRecipient = 'dispatch' | 'compliance_coordinator';
+
+/**
+ * One event on a hot-list entry's log, saved on the device (sightings are the `hot_sighting`
+ * scan records themselves):
+ * - `acknowledged`: the officer acknowledged a hot-list alert (date, time, location, officer
+ *   number) — raises a soft Code 1 with dispatch and the compliance coordinator (queued; sent only
+ *   by the EnforcementMAPS build).
+ * - `lookalike_not_matched`: the officer decided a look-alike was not the hot-list vehicle (WF-S28 28e.5).
+ */
+export interface HotListEvent {
+  id: string;
+  kind: 'acknowledged' | 'lookalike_not_matched';
+  /** Hot-list entry plate. */
+  plate: string;
+  key: string;
+  hotListId: string;
+  hotListEntryId: string;
+  /** The scan this event belongs to (the hot_sighting record for an acknowledgement). */
+  scanId: string | null;
+  /** Epoch ms (device clock). */
+  at: number;
+  /** ISO 8601 with offset, e.g. 2026-11-21T10:41:07.402+11:00. */
+  atLocal: string;
+  officerNumber: string;
+  location: { lat: number; lng: number; accuracyM: number } | null;
+  device: string;
+  /** Plate as read, for a look-alike decision. */
+  readAs?: string;
+  /** Soft Code 1 notification for an acknowledgement (OQ29-2). */
+  notification?: {
+    severity: 'soft_code1';
+    recipients: HotAlertRecipient[];
+    /** `queued` until EnforcementMAPS accepts it; the development build has no connection. */
+    status: 'queued' | 'sent';
+    attempts: number;
+    lastAttemptAt?: number;
+    sentAt?: number;
+  };
+}

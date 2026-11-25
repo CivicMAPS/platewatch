@@ -1,0 +1,192 @@
+{
+  "_meta": {
+    "schema": "civicmaps.parking_segment",
+    "schema_version": "1.0.0",
+    "file_name": "LittleBourke-spencer-king.json",
+    "segment_id": "little-bourke-spencer-king",
+    "created_at": "2026-05-06T09:51:15+10:00",
+    "source": "user_supplied_field_survey",
+    "status": "ready_for_review"
+  },
+  "street": "Little Bourke Street",
+  "between": {
+    "from": "Spencer Street",
+    "to": "King Street"
+  },
+  "travel_direction": "west_to_east",
+  "parking_area_number": 649,
+  "easypark_area": 7504,
+  "sides": [
+    {
+      "side": "north",
+      "restrictions": [
+        {
+          "from": "Spencer Street",
+          "to": "King Street",
+          "restriction": "no_stopping",
+          "rules": [
+            {
+              "days": "all_days",
+              "time": "all_times"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "side": "south",
+      "restrictions": [
+        {
+          "location_reference": "Outside 639 Little Bourke Street",
+          "bay_numbers": [49],
+          "restriction": "loading_zone_30_min",
+          "rules": [
+            {
+              "days": "Mon-Fri",
+              "time": "06:00-16:00"
+            }
+          ]
+        },
+        {
+          "location_reference": "Outside 639 Little Bourke Street",
+          "bay_numbers": [49],
+          "restriction": "2p_meter",
+          "rules": [
+            {
+              "days": "Mon-Fri",
+              "time": "16:00-22:00"
+            },
+            {
+              "days": "Sat-Sun",
+              "time": "07:00-22:00"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 638 Little Bourke Street",
+          "bay_numbers": [46, 45],
+          "restriction": "loading_zone_30_min",
+          "rules": [
+            {
+              "days": "Mon-Fri",
+              "time": "07:00-16:00"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 638 Little Bourke Street",
+          "bay_numbers": [46, 45],
+          "restriction": "2p_meter",
+          "rules": [
+            {
+              "days": "Mon-Fri",
+              "time": "16:00-22:00"
+            },
+            {
+              "days": "Sat-Sun",
+              "time": "07:00-22:00"
+            }
+          ]
+        },
+        {
+          "bay_numbers": [44, 43],
+          "restriction": "no_parking",
+          "rules": [
+            {
+              "days": "all_days",
+              "time": "all_times"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 632 Little Bourke Street",
+          "bay_numbers": [42],
+          "restriction": "no_parking",
+          "rules": [
+            {
+              "days": "all_days",
+              "time": "all_times"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 600 Little Bourke Street",
+          "bay_numbers": [41, 40],
+          "restriction": "loading_zone_30_min",
+          "rules": [
+            {
+              "days": "Mon-Fri",
+              "time": "06:00-16:00"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 600 Little Bourke Street",
+          "bay_numbers": [41, 40],
+          "restriction": "no_parking",
+          "rules": [
+            {
+              "days": "all_days",
+              "time": "all_other_times"
+            }
+          ]
+        },
+        {
+          "location_reference": "Opposite 590-592 Little Bourke Street",
+          "bay_numbers": [39],
+          "restriction": "no_stopping",
+          "rules": [
+            {
+              "days": "all_days",
+              "time": "all_times"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "laneways": [
+    {
+      "street": "Cleve Lane",
+      "between": {
+        "from": "Little Bourke Street",
+        "to": "Dead End"
+      },
+      "restriction": "no_stopping",
+      "rules": [
+        {
+          "days": "all_days",
+          "time": "all_times"
+        }
+      ]
+    },
+    {
+      "street": "Pender Alley",
+      "between": {
+        "from": "Little Bourke Street",
+        "to": "Dead End"
+      },
+      "restriction": "no_stopping",
+      "rules": [
+        {
+          "days": "all_days",
+          "time": "all_times"
+        }
+      ]
+    },
+    {
+      "street": "Uniacke Court",
+      "between": {
+        "from": "Little Bourke Street",
+        "to": "Dead End"
+      },
+      "restriction": "no_stopping_area",
+      "rules": [
+        {
+          "days": "all_days",
+          "time": "all_times"
+        }
+      ]
+    }
+  ]
+}

@@ -20,15 +20,15 @@ const svg = (opts = {}) => {
   const T = (v) => (o + v * s) * 512;
   const L = (v) => v * s * 512;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  ${background ? `<rect width="512" height="512" rx="${maskable ? 0 : 112}" fill="#0b1220"/>` : ''}
-  <g fill="none" stroke="#4fd1c5" stroke-width="${L(0.055)}" stroke-linecap="round" stroke-linejoin="round">
+  ${background ? `<rect width="512" height="512" rx="${maskable ? 0 : 112}" fill="#1B2A4A"/>` : ''}
+  <g fill="none" stroke="#D4A843" stroke-width="${L(0.055)}" stroke-linecap="round" stroke-linejoin="round">
     <path d="M${T(0.08)} ${T(0.3)} V${T(0.12)} H${T(0.26)}"/>
     <path d="M${T(0.74)} ${T(0.12)} H${T(0.92)} V${T(0.3)}"/>
     <path d="M${T(0.92)} ${T(0.7)} V${T(0.88)} H${T(0.74)}"/>
     <path d="M${T(0.26)} ${T(0.88)} H${T(0.08)} V${T(0.7)}"/>
   </g>
-  <rect x="${T(0.16)}" y="${T(0.34)}" width="${L(0.68)}" height="${L(0.32)}" rx="${L(0.05)}" fill="#ffffff" stroke="#0f172a" stroke-width="${L(0.018)}"/>
-  <text x="${T(0.5)}" y="${T(0.565)}" text-anchor="middle" font-family="DejaVu Sans Mono, Roboto Mono, monospace" font-weight="700" font-size="${L(0.17)}" fill="#0f172a" letter-spacing="${L(0.01)}">ABC123</text>
+  <rect x="${T(0.16)}" y="${T(0.34)}" width="${L(0.68)}" height="${L(0.32)}" rx="${L(0.05)}" fill="#ffffff" stroke="#111827" stroke-width="${L(0.018)}"/>
+  <text x="${T(0.5)}" y="${T(0.565)}" text-anchor="middle" font-family="JetBrains Mono, DejaVu Sans Mono, monospace" font-weight="700" font-size="${L(0.17)}" fill="#111827" letter-spacing="${L(0.01)}">ABC123</text>
 </svg>`;
 };
 
@@ -89,11 +89,38 @@ try {
   const bg = join(res, 'values', 'ic_launcher_background.xml');
   try {
     const xml = await readFile(bg, 'utf8');
-    await writeFile(bg, xml.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, '<color name="ic_launcher_background">#0B1220</color>'));
+    await writeFile(bg, xml.replace(/<color name="ic_launcher_background">[^<]*<\/color>/, '<color name="ic_launcher_background">#1B2A4A</color>'));
   } catch {
     /* template without background colour resource */
   }
   console.log('[icons] Android launcher icons updated');
+
+  // Splash screens (CivicMAPS design system): Civic Navy with the plate mark, every existing
+  // drawable*/splash.png re-rendered at its own size. Replaces the Capacitor template splash.
+  const { readdir } = await import('node:fs/promises');
+  for (const dir of (await readdir(res)).filter((d) => d.startsWith('drawable'))) {
+    const file = join(res, dir, 'splash.png');
+    let png;
+    try { png = await readFile(file); } catch { continue; }
+    const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+    const mark = Math.round(Math.min(w, h) * 0.42);
+    await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+    await page.setContent(`<html><body style="margin:0;width:${w}px;height:${h}px;background:#1B2A4A;display:flex;align-items:center;justify-content:center">${svg({ maskable: true, background: false }).replace('<svg ', `<svg width="${mark}" height="${mark}" `)}</body></html>`);
+    await writeFile(file, await page.screenshot({ clip: { x: 0, y: 0, width: w, height: h } }));
+  }
+  // Activity theme colours: Civic Navy / dark / Patrol Gold (the template's defaults otherwise).
+  await writeFile(
+    join(res, 'values', 'colors.xml'),
+    `<?xml version="1.0" encoding="utf-8"?>\n<!-- CivicMAPS design system tokens (src/styles/civicmaps/colors_and_type.css). Written by scripts/generate-icons.mjs. -->\n<resources>\n    <color name="colorPrimary">#1B2A4A</color>\n    <color name="colorPrimaryDark">#0F1A32</color>\n    <color name="colorAccent">#D4A843</color>\n</resources>\n`,
+  );
+  // Legacy adaptive background drawable (unused by the launcher, which reads @color): keep it on brand.
+  const legacy = join(res, 'drawable', 'ic_launcher_background.xml');
+  try {
+    await writeFile(legacy, (await readFile(legacy, 'utf8')).replace(/android:fillColor="#26A69A"/i, 'android:fillColor="#1B2A4A"'));
+  } catch {
+    /* not present */
+  }
+  console.log('[icons] Android splash screens and theme colours updated');
 } catch {
   /* no android project yet */
 }

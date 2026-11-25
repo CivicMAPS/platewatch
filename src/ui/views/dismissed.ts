@@ -10,7 +10,7 @@ import { describeOcr } from '../../lib/recordSummary';
 import { formatDateTime } from '../../lib/time';
 import type { DismissedCapture } from '../../lib/types';
 import type { App, View } from '../app';
-import { emptyState, header, icon, page, plateBadge, UrlBag } from '../components';
+import { emptyState, header, icon, page, plateBadge, statusPill, UrlBag } from '../components';
 
 export function dismissedView(_p: Record<string, string>, app: App): View {
   let items: DismissedCapture[] = [];
@@ -51,14 +51,14 @@ export function dismissedView(_p: Record<string, string>, app: App): View {
     const loc = d.meta.location;
     return html`<li class="card flex gap-3" data-testid="dismissed-item">
       <a href=${urls.get(d.image)} target="_blank" rel="noopener" class="flex-none" aria-label="Open evidence image">
-        <img src=${urls.get(d.thumb)} alt="" class="h-16 w-24 rounded-lg object-cover" loading="lazy" />
+        <img src=${urls.get(d.thumb)} alt="" class="h-16 w-24 rounded-md object-cover" loading="lazy" />
       </a>
       <div class="min-w-0 flex-1 text-sm">
-        <div class="flex items-center gap-2">${plateBadge(d.plate, 'sm')}<span class="truncate text-slate-400">for ${d.intendedListName}</span></div>
-        <p class="mt-1 text-slate-300">${formatDateTime(d.meta.capturedAt)}${loc ? html` · <span class="text-slate-400">${formatLatLng(loc)} ±${Math.round(loc.accuracy)} m</span>` : nothing}</p>
-        <p class="text-xs text-slate-400">${describeOcr({ ocrEngine: d.ocrEngine, ocrText: d.ocrText, ocrConfidence: null })}</p>
+        <div class="flex flex-wrap items-center gap-2">${plateBadge(d.plate, 'sm')}${statusPill('dismissed')}<span class="truncate text-neutral-600">for ${d.intendedListName}</span></div>
+        <p class="mt-1 text-neutral-700">${formatDateTime(d.meta.capturedAt)}${loc ? html` · <span class="font-plate text-neutral-600">${formatLatLng(loc)}</span> <span class="text-neutral-600">±${Math.round(loc.accuracy)} m</span>` : nothing}</p>
+        <p class="text-xs text-neutral-600">${describeOcr({ ocrEngine: d.ocrEngine, ocrText: d.ocrText, ocrConfidence: null })}</p>
       </div>
-      <button type="button" class="btn-ghost min-h-11 flex-none px-2 text-red-300" aria-label=${`Delete ${d.plate || 'capture'}`} @click=${() => void remove(d)}>${icon('trash')}</button>
+      <button type="button" class="btn-ghost min-h-11 flex-none px-2" aria-label=${`Delete ${d.plate || 'capture'}`} @click=${() => void remove(d)}>${icon('trash')}</button>
     </li>`;
   };
 
@@ -75,12 +75,12 @@ export function dismissedView(_p: Record<string, string>, app: App): View {
           subtitle: 'Patrol captures dismissed at review',
           back: () => app.back(),
           actions: items.length
-            ? html`<button type="button" class="btn-ghost min-h-11 px-3 text-red-300" @click=${() => void clearAll()}>Clear all</button>`
+            ? html`<button type="button" class="btn-chrome" @click=${() => void clearAll()}>${icon('trash')} Clear all</button>`
             : nothing,
         })}
         ${page(
           !loaded
-            ? html`<p class="text-slate-400">Loading…</p>`
+            ? html`<p class="text-neutral-600">Loading…</p>`
             : items.length
               ? html`<ul class="grid gap-3">${items.map(row)}</ul>`
               : emptyState('Nothing dismissed', 'Patrol captures you dismiss at review appear here, apart from every list.'),

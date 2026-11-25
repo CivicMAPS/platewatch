@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { comparePlates, extractPlateCandidates, isValidPlate, looseKey, normalisePlate, plateKey } from '../src/lib/plate';
 
@@ -28,5 +29,16 @@ describe('plate normalisation', () => {
     expect(extractPlateCandidates('VICTORIA\n1AB 2CD\n')[0]).toBe('1AB2CD');
     expect(extractPlateCandidates('ABC123 | THE EDUCATION STATE')[0]).toBe('ABC123');
     expect(extractPlateCandidates('')).toEqual([]);
+  });
+});
+
+describe('look-alike classes (shared vectors with the native reader, WF-S28)', () => {
+  const rows = readFileSync(new URL('./fixtures/plate-lookalikes.tsv', import.meta.url), 'utf8')
+    .split('\n')
+    .filter((l) => l.trim() && !l.startsWith('#'))
+    .map((l) => l.split('\t') as [string, string, 'possible' | 'none' | 'exact']);
+  it.each(rows)('%s / %s → %s', (a, b, expected) => {
+    expect(comparePlates(a, b)).toBe(expected);
+    expect(comparePlates(b, a)).toBe(expected);
   });
 });

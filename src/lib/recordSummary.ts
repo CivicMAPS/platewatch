@@ -21,7 +21,7 @@ export function describeOcr(r: Pick<ScanRecord, 'ocrEngine' | 'ocrText' | 'ocrCo
 export function timingState(
   o: Pick<Observation, 'status' | 'startedAt' | 'limitMinutes' | 'graceMinutes'>,
   now: number,
-): 'running' | 'overdue' | 'expired' | 'reset' {
+): 'running' | 'overdue' | 'expired' | 'reset' | 'dismissed' | 'issued' {
   if (o.status !== 'active') return o.status;
   return now - o.startedAt >= (o.limitMinutes + o.graceMinutes) * 60_000 ? 'overdue' : 'running';
 }

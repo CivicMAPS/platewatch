@@ -1,11 +1,12 @@
 /** JSON backup / restore. Images are embedded as base64 data URLs when included. */
-import { getAllObservations, getAllScans, getDismissed, getLists, replaceAll } from './db';
+import { getAllHotEvents, getAllObservations, getAllScans, getDismissed, getFlags, getLists, migrateVehicleDetails, replaceAll } from './db';
 import { dataUrlToBlob } from './exif';
 import { plateKey } from './plate';
-import type { DismissedCapture, Observation, PaymentAreas, PlateList, ScanRecord } from './types';
+import { normalisePayment, prunePaidBy } from './payment';
+import type { DismissedCapture, HotListEvent, Observation, PaidBy, PaymentAreas, PlateFlag, PlateList, ScanRecord } from './types';
 
 export const BACKUP_SCHEMA = 'platewatch.backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 
 type SerialScan = Omit<ScanRecord, 'image' | 'thumb'> & { image: string | null; thumb: string | null };
 type SerialDismissed = Omit<DismissedCapture, 'image' | 'thumb'> & { image: string; thumb: string };
@@ -22,6 +23,10 @@ export interface BackupFile {
   /** Optional: patrol captures dismissed at review (absent in backups made before 21 Nov 2026). */
   includesDismissed?: boolean;
   dismissed?: SerialDismissed[];
+  /** Plate record tags (known disability / emergency vehicles); exported with scan records. */
+  flags?: PlateFlag[];
+  /** Hot-list entry log events (acknowledgements, look-alike decisions); exported with scan records. */
+  hotEvents?: HotListEvent[];
 }
 
 export interface BackupOptions {
@@ -53,7 +58,8 @@ export async function createBackup(includeScans: boolean, appVersion: string, op
   }
   const file: BackupFile = {
     schema: BACKUP_SCHEMA,
-    version: BACKUP_VERSION,
+    // Older builds silently discard unknown list types. Keep v1 compatibility for other backups.
+    version: lists.some(l => l.type === 'permit_zone') ? BACKUP_VERSION : 1,
     exportedAt: new Date().toISOString(),
     appVersion,
     includesScans: includeScans,
@@ -62,6 +68,7 @@ export async function createBackup(includeScans: boolean, appVersion: string, op
     scans,
     includesDismissed: !!options.includeDismissed,
     dismissed,
+    ...(includeScans ? { flags: await getFlags(), hotEvents: await getAllHotEvents() } : {}),
   };
   return new Blob([JSON.stringify(file)], { type: 'application/json' });
 }
@@ -82,7 +89,17 @@ export function sanitisePayment(v: unknown): PaymentAreas | undefined {
     .filter((p): p is Record<string, unknown> => isObj(p) && typeof p.zone === 'string' && p.zone.trim() !== '')
     .map((p) => ({ zone: str(p.zone), meter: str(p.meter) }));
   const parkingArea = typeof v.parkingArea === 'string' && v.parkingArea.trim() ? v.parkingArea.trim() : undefined;
-  return parkingArea ? { parkingArea, easyPark, payStay } : { easyPark, payStay };
+  const meters = (Array.isArray(v.meters) ? v.meters : [])
+    .filter((m): m is Record<string, unknown> => isObj(m) && typeof m.id === 'string' && m.id.trim() !== '')
+    .map((m) => ({ id: str(m.id), ...sanitisePaidBy(m) }));
+  return normalisePayment({ ...(parkingArea ? { parkingArea } : {}), easyPark, payStay, ...(meters.length ? { meters } : {}) });
+}
+
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []);
+
+/** EasyPark areas and PayStay zones a restriction or meter is tied to. */
+export function sanitisePaidBy(v: unknown): PaidBy {
+  return isObj(v) ? { easyPark: strings(v.easyPark), payStay: strings(v.payStay) } : { easyPark: [], payStay: [] };
 }
 
 /** Validate and sanitise lists from an untrusted file. Throws with a readable message. */
@@ -92,6 +109,8 @@ export function parseBackup(text: string): {
   scans: ScanRecord[];
   /** Undefined when the backup does not include the Dismissed list. */
   dismissed?: DismissedCapture[];
+  flags?: PlateFlag[];
+  hotEvents?: HotListEvent[];
 } {
   let raw: unknown;
   try {
@@ -107,21 +126,76 @@ export function parseBackup(text: string): {
   const lists: PlateList[] = [];
   for (const l of raw.lists) {
     if (!isObj(l) || typeof l.id !== 'string' || typeof l.name !== 'string') continue;
-    if (l.type !== 'allow' && l.type !== 'timed' && l.type !== 'hot') continue;
+    if (l.type !== 'allow' && l.type !== 'timed' && l.type !== 'hot' && l.type !== 'permit_zone') continue;
+    if (l.type === 'permit_zone') {
+      const seg = l.segment;
+      if (!isObj(seg) || ![seg.street, seg.fromStreet, seg.toStreet].every(v => typeof v === 'string' && v.trim())
+        || typeof seg.suburb !== 'string' || !['both', 'north', 'south', 'east', 'west', 'centre', 'odd', 'even'].includes(str(seg.side))
+        || typeof l.councilCode !== 'string' || !/^[a-z]{2,8}$/.test(l.councilCode)
+        || typeof l.rpa !== 'string' || !/^\d{1,2}[A-Z]?$/.test(l.rpa)) continue;
+    }
     // Re-derive keys so tampered/old keys cannot cause false matches.
     if ((l.type === 'allow' || l.type === 'hot') && Array.isArray(l.entries)) {
       l.entries = (l.entries as Record<string, unknown>[])
         .filter((e) => isObj(e) && typeof e.plate === 'string')
-        .map((e) => ({ ...e, key: plateKey(str(e.plate)) }));
+        .map((e) => {
+          const out: Record<string, unknown> = { ...e, key: plateKey(str(e.plate)) };
+          // Permit details: strings only; streets a list of strings.
+          for (const k of ['vehicle', 'rpa', 'registrationType', 'make', 'bodyType', 'colour', 'registrationState'] as const) if (typeof out[k] !== 'string' || !out[k]) delete out[k];
+          // Permit details (schemas/civicmaps-parking-permit.v1.schema.json).
+          if (Array.isArray(out.permitTypes)) out.permitTypes = (out.permitTypes as unknown[]).filter((t) => t === 'RPA' || t === 'RSP' || t === 'RP' || t === 'FS');
+          if (!Array.isArray(out.permitTypes) || !(out.permitTypes as unknown[]).length) delete out.permitTypes;
+          const c = out.council as Record<string, unknown> | undefined;
+          if (isObj(c) && typeof c.code === 'string' && c.code) out.council = { code: c.code, ...(typeof c.linkingId === 'string' && c.linkingId ? { linkingId: c.linkingId } : {}) };
+          else delete out.council;
+          const ad = out.address as Record<string, unknown> | undefined;
+          if (isObj(ad) && typeof ad.street === 'string' && ad.street) out.address = { streetNumber: typeof ad.streetNumber === 'string' ? ad.streetNumber : '', street: ad.street };
+          else delete out.address;
+          if (Array.isArray(out.streets)) out.streets = (out.streets as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim());
+          if (!Array.isArray(out.streets) || !(out.streets as string[]).length) delete out.streets;
+          return out;
+        });
     }
     if (l.type === 'timed' && (!isObj(l.segment) || !Array.isArray(l.restrictions))) continue;
     if (l.type === 'timed') {
       if (!Array.isArray(l.allowListIds)) l.allowListIds = [];
       l.allowListIds = (l.allowListIds as unknown[]).filter((x): x is string => typeof x === 'string');
       l.payment = sanitisePayment(l.payment);
-      for (const k of ['patrolZone', 'patrolZoneName', 'rpa'] as const) if (typeof l[k] !== 'string') delete l[k];
+      // A restriction may only be tied to payment numbers the list has.
+      for (const r of l.restrictions as Record<string, unknown>[]) {
+        if (!isObj(r)) continue;
+        const paidBy = 'paidBy' in r ? prunePaidBy(sanitisePaidBy(r.paidBy), l.payment as PaymentAreas | undefined) : undefined;
+        if (paidBy) r.paidBy = paidBy;
+        else delete r.paidBy;
+      }
+      for (const k of ['patrolZone', 'patrolZoneName', 'rpa', 'roadSegmentId', 'displayId'] as const) if (typeof l[k] !== 'string') delete l[k];
+      const seg = l.segment as Record<string, unknown>;
+      for (const k of ['subFrom', 'subTo'] as const) if (typeof seg[k] !== 'string') delete seg[k];
+      if (Array.isArray(l.bays)) l.bays = (l.bays as unknown[]).filter((b): b is number => typeof b === 'number' && Number.isInteger(b) && b >= 0);
+      else delete l.bays;
+      if (typeof l.externalId !== 'string') delete l.externalId;
+      if (Array.isArray(l.bayPoints))
+        l.bayPoints = (l.bayPoints as unknown[]).filter(
+          (p) => isObj(p) && Number.isInteger(p.bay) && typeof p.lat === 'number' && typeof p.lng === 'number' && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180,
+        );
+      else delete l.bayPoints;
+      if (Array.isArray(l.untimedControls))
+        l.untimedControls = (l.untimedControls as unknown[]).filter(
+          (u) => isObj(u) && typeof u.control === 'string' && typeof u.label === 'string' && Array.isArray(u.days) && typeof u.allDay === 'boolean',
+        );
+      else delete l.untimedControls;
     }
-    lists.push(l as unknown as PlateList);
+    // Provenance (OQ26-5): keep only a well-formed source; anything else counts as an officer list.
+    if (isObj(l.source) && (l.source.origin === 'system' || l.source.origin === 'officer')) {
+      const src = l.source;
+      l.source = {
+        origin: src.origin,
+        ...(typeof src.importedFrom === 'string' ? { importedFrom: src.importedFrom } : {}),
+        ...(typeof src.importedAt === 'number' && Number.isFinite(src.importedAt) ? { importedAt: src.importedAt } : {}),
+        ...(typeof src.serviceDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(src.serviceDay) ? { serviceDay: src.serviceDay } : {}),
+      };
+    } else delete l.source;
+    lists.push(migrateVehicleDetails(l as unknown as PlateList));
   }
 
   const observations = (Array.isArray(raw.observations) ? raw.observations : []).filter(
@@ -155,7 +229,25 @@ export function parseBackup(text: string): {
       });
     }
   }
-  return { lists, observations, scans, dismissed };
+  const flags = Array.isArray(raw.flags)
+    ? (raw.flags as unknown[])
+        .filter((f): f is Record<string, unknown> => isObj(f) && typeof f.plate === 'string' && (f.kind === 'disability' || f.kind === 'emergency'))
+        .map((f): PlateFlag => ({
+          key: plateKey(str(f.plate)),
+          plate: str(f.plate),
+          kind: f.kind as PlateFlag['kind'],
+          createdAt: typeof f.createdAt === 'number' ? f.createdAt : 0,
+          sourceScanId: str(f.sourceScanId),
+          confirmedDay: typeof f.confirmedDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f.confirmedDay) ? f.confirmedDay : '',
+        }))
+    : undefined;
+  const hotEvents = Array.isArray(raw.hotEvents)
+    ? (raw.hotEvents as unknown[]).filter(
+        (e): e is HotListEvent =>
+          isObj(e) && typeof e.id === 'string' && (e.kind === 'acknowledged' || e.kind === 'lookalike_not_matched') && typeof e.hotListEntryId === 'string' && typeof e.at === 'number',
+      )
+    : undefined;
+  return { lists, observations, scans, dismissed, ...(flags ? { flags } : {}), ...(hotEvents ? { hotEvents } : {}) };
 }
 
 export async function restoreBackup(text: string, merge: boolean): Promise<{ lists: number; scans: number; dismissed: number }> {

@@ -1,0 +1,11 @@
+list_name,plate,permit_no,council,linking_id,valid_from,valid_to,parking_area,street_number,street,registration_state,registration_type,type,make,colour,label
+FT RPA 7 residents,PWP101,RPA-2026-0101,copp,,2026-01-01,2027-12-31,7,12,Gladstone Street,VIC,private,sedan,Toyota,White,RPA (in area)
+FT RPA 7 residents,PWP2E7,RPA-2026-0207,copp,,2026-01-01,2027-12-31,7,14,Gladstone Street,VIC,private,hatchback,Mazda,Grey,RPA (look-alike target)
+FT RPA 7 residents,PWP303,RPA-2025-0303,copp,,2025-01-01,2025-12-31,7,16,Gladstone Street,VIC,private,hatchback,Hyundai,Blue,RPA (expired)
+FT RPA 7 residents,PWP404,RPA-2027-0404,copp,,2027-07-01,2028-06-30,7,18,Gladstone Street,VIC,private,hatchback,Kia,Red,RPA (not yet valid)
+FT RPA 5A residents,PWP505,RPA-2026-0505,copp,,2026-01-01,2027-12-31,5A,8,Bank Street,VIC,company,sedan,Subaru,Black,RPA (other area)
+FT Street and address permits,PWP606,RSP-2026-0606,copp,,2026-01-01,2027-12-31,,40,Gladstone Street,VIC,private,hatchback,Honda,Silver,RSP (street segment)
+FT Street and address permits,PWP707,RP-2026-0707/1,copp,,2026-01-01,2027-12-31,,21,Buckhurst Street,NSW,lease,suv,Mitsubishi,Green,RP (in front of address)
+FT Foreshore and combination permits,PWP808,FS-2026-0808,copp,,2026-01-01,2027-12-31,,3,Bank Street,VIC,private,wagon,Volvo,Blue,FS (foreshore)
+FT Foreshore and combination permits,PWP909,RPA/COMB/FS-2026-0909,copp,,2026-01-01,2027-12-31,7,22,Gladstone Street,VIC,private,ute,Ford,White,RPA + FS combination
+FT Other council permits,PWP110,RPA-2026-0110,com,919379201,2026-01-01,2027-12-31,7,5,Gladstone Street,VIC,private,sedan,Nissan,Silver,com RPA 7 (other council)

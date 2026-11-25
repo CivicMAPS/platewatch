@@ -1,0 +1,596 @@
+{
+  "dataset_title": "City of Port Phillip Parking Enforcement Zones 9 and 9A - Working Street Segment and Restriction Template",
+  "dataset_status": "working_template_not_enforcement_ready",
+  "scope": {
+    "municipality": "City of Port Phillip",
+    "area_depicted": "South Melbourne around Clarendon Street, Market Street, York Street and Dorcas Street",
+    "requested_enforcement_zones": [
+      "9",
+      "9A"
+    ],
+    "important_distinction": "Parking enforcement zones are not residential parking permit areas."
+  },
+  "schema_notes": {
+    "segment_granularity": "One record per road section. Split into separate road-side records when authoritative kerb data becomes available.",
+    "multiple_controls": "Add one parking_restrictions object for every distinct day, time and control combination.",
+    "null_policy": "Null and empty values mean the information was not available from accessible sources and has not been guessed.",
+    "colour_policy": "Coloured lines in the screenshot have not been translated into restrictions because no legend or authoritative mapping was available."
+  },
+  "accessible_sources": [
+    {
+      "name": "User supplied enforcement-map screenshot",
+      "reference": "10270.jpg",
+      "data_used": [
+        "visible street names",
+        "approximate intersections",
+        "visible road network"
+      ],
+      "limitations": [
+        "no readable restriction legend",
+        "no days or times",
+        "zone 9 and 9A boundaries not labelled",
+        "colours cannot safely be decoded"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Open Data Portal asset catalogue",
+      "url": "https://opendata.portphillip.vic.gov.au/explore/",
+      "data_used": [
+        "catalogue availability"
+      ],
+      "limitations": [
+        "no publicly discoverable parking-restriction or enforcement-zone layer found"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Open Data Portal map builder",
+      "url": "https://opendata.portphillip.vic.gov.au/map/",
+      "data_used": [
+        "public map interface availability"
+      ],
+      "limitations": [
+        "no accessible zone 9 or 9A restriction layer identified"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Parking Machines",
+      "url": "https://data.gov.au/data/en/dataset/city-of-port-phillip-parking-machines",
+      "data_used": [],
+      "limitations": [
+        "machine points only",
+        "signed time restrictions are not supplied as segment controls"
+      ]
+    },
+    {
+      "name": "City of Port Phillip Accessible Parking",
+      "url": "https://data.gov.au/data/dataset/874498ce-a720-43c3-b7d5-0a750653ffa2",
+      "data_used": [],
+      "limitations": [
+        "accessible-parking points only",
+        "not a complete kerb-restriction network"
+      ]
+    }
+  ],
+  "field_definitions": {
+    "segment_id": "Locally assigned identifier for the working road segment.",
+    "enforcement_zone": "Authoritative operational parking-enforcement zone. Null until verified.",
+    "enforcement_zone_candidates": "Possible zones based on the stated scope, not an authoritative assignment.",
+    "road_segment_name": "Road containing the parking-control segment.",
+    "between_street_name": "Cross street or visible map boundary at the beginning of the segment.",
+    "and_street_name": "Cross street or visible map boundary at the end of the segment.",
+    "road_side": "Side of the road to which the restriction applies: north, south, east, west or both.",
+    "parking_restrictions": "One or more parking controls applying to the segment.",
+    "applicable_days": "Explicit days on which the parking restriction operates.",
+    "applicable_times": "Local start and end times in 24-hour HH:MM format.",
+    "restriction_applied": "Signed restriction, such as No Stopping, Loading Zone, 1P, 2P, Metered Parking or Permit Zone.",
+    "permit_or_vehicle_exceptions": "Any permit, vehicle-class or activity exceptions shown on the authoritative sign.",
+    "source_sign_or_asset_id": "Council sign, parking-control or asset identifier supporting the restriction.",
+    "effective_from": "Date from which the restriction is effective.",
+    "effective_to": "Date on which the restriction ceases, if applicable.",
+    "verification_status": "Whether the restriction has been verified against an authoritative source.",
+    "geometry": "Authoritative GeoJSON LineString or MultiLineString for the controlled kerb section."
+  },
+  "street_segments": [
+    {
+      "segment_id": "clarendon-st-market-st-york-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Clarendon Street",
+      "between_street_name": "Market Street",
+      "and_street_name": "York Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "clarendon-st-york-st-dorcas-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Clarendon Street",
+      "between_street_name": "York Street",
+      "and_street_name": "Dorcas Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "market-st-west-boundary-clarendon-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Market Street",
+      "between_street_name": "Western map boundary",
+      "and_street_name": "Clarendon Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "market-st-clarendon-st-moray-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Market Street",
+      "between_street_name": "Clarendon Street",
+      "and_street_name": "Moray Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "york-st-west-boundary-clarendon-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "York Street",
+      "between_street_name": "Western map boundary",
+      "and_street_name": "Clarendon Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "york-st-clarendon-st-moray-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "York Street",
+      "between_street_name": "Clarendon Street",
+      "and_street_name": "Moray Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "dorcas-st-west-boundary-clarendon-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Dorcas Street",
+      "between_street_name": "Western map boundary",
+      "and_street_name": "Clarendon Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "dorcas-st-clarendon-st-moray-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Dorcas Street",
+      "between_street_name": "Clarendon Street",
+      "and_street_name": "Moray Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "moray-st-market-st-ross-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Moray Street",
+      "between_street_name": "Market Street",
+      "and_street_name": "Ross Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "moray-st-ross-st-dorcas-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Moray Street",
+      "between_street_name": "Ross Street",
+      "and_street_name": "Dorcas Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "ross-st-clarendon-st-moray-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Ross Street",
+      "between_street_name": "Clarendon Street",
+      "and_street_name": "Moray Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "chessell-st-clarendon-st-moray-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Chessell Street",
+      "between_street_name": "Clarendon Street",
+      "and_street_name": "Moray Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "crane-st-ross-st-dorcas-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Crane Street",
+      "between_street_name": "Ross Street",
+      "and_street_name": "Dorcas Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": true,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    },
+    {
+      "segment_id": "clarke-st-north-boundary-chessell-st",
+      "enforcement_zone": null,
+      "enforcement_zone_candidates": [
+        "9",
+        "9A"
+      ],
+      "road_segment_name": "Clarke Street",
+      "between_street_name": "Northern map boundary",
+      "and_street_name": "Chessell Street",
+      "road_side": "both",
+      "parking_restrictions": [
+        {
+          "applicable_days": [],
+          "applicable_times": {
+            "start": null,
+            "end": null
+          },
+          "restriction_applied": null,
+          "permit_or_vehicle_exceptions": [],
+          "source_sign_or_asset_id": null,
+          "effective_from": null,
+          "effective_to": null,
+          "verification_status": "unknown_not_available_in_accessible_public_data"
+        }
+      ],
+      "geometry": null,
+      "data_quality": {
+        "street_segment_source": "user_supplied_screenshot_10270.jpg",
+        "street_names_visually_confirmed": false,
+        "endpoints_status": "visible_or_map_boundary; requires GIS validation",
+        "zone_assignment_status": "zone unknown",
+        "restriction_status": "not inferred from coloured map lines"
+      }
+    }
+  ],
+  "missing_authoritative_fields": [
+    "exact zone 9 and 9A boundary geometry",
+    "segment-to-zone assignment",
+    "road-side-specific kerb geometry",
+    "restriction type",
+    "applicable days",
+    "applicable start and end times",
+    "permit or vehicle exceptions",
+    "sign or parking-asset identifiers",
+    "effective dates"
+  ]
+}

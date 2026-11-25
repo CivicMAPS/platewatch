@@ -1,0 +1,1282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civicmaps.au/schemas/civicmaps-kerbside-release.v1.schema.json",
+  "title": "civicmaps.kerbside_release v1",
+  "description": "CivicMAPS road segment and kerbside data standard (lean pilot core) as an interchange package: flat tables, every record in a table with exactly the same keys (null or [] when unknown), linked by ID. Keys start with the owner prefix (linking ID, or council code in development). References between tables, uniqueness and the owner prefix are checked by validateRelease in src/lib/kerbsideRelease.ts. See docs/KERBSIDE-RELEASE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "release",
+    "sources",
+    "segments",
+    "segment_source_refs",
+    "extents",
+    "bays",
+    "zone_schemes",
+    "zones",
+    "zone_assignments",
+    "provider_areas",
+    "provider_area_assignments",
+    "meters",
+    "meter_assignments",
+    "rules",
+    "rule_assignments"
+  ],
+  "properties": {
+    "schema": {
+      "const": "civicmaps.kerbside_release"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "release": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/releaseRow"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "segment_source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segmentSourceRef"
+      }
+    },
+    "extents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/extent"
+      }
+    },
+    "bays": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bay"
+      }
+    },
+    "zone_schemes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/zoneScheme"
+      }
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/zone"
+      }
+    },
+    "zone_assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/zoneAssignment"
+      }
+    },
+    "provider_areas": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/providerArea"
+      }
+    },
+    "provider_area_assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/providerAreaAssignment"
+      }
+    },
+    "meters": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/meter"
+      }
+    },
+    "meter_assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/meterAssignment"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    },
+    "rule_assignments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ruleAssignment"
+      }
+    }
+  },
+  "$defs": {
+    "releaseRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release_id",
+        "dataset_id",
+        "council_code",
+        "linking_id",
+        "municipality_name",
+        "state",
+        "country",
+        "timezone",
+        "version",
+        "kind",
+        "status",
+        "effective_from",
+        "generated_at",
+        "notes"
+      ],
+      "properties": {
+        "release_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "council_code": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$",
+          "description": "Shown to users, e.g. com, copp. May repeat between councils."
+        },
+        "linking_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+$",
+          "description": "Unique linking ID for the council (null during development). The secret CivicMAPS ID never appears in a release."
+        },
+        "municipality_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "country": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "snapshot",
+            "delta"
+          ]
+        },
+        "status": {
+          "enum": [
+            "candidate",
+            "approved",
+            "superseded"
+          ]
+        },
+        "effective_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "generated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "name",
+        "issuer",
+        "dataset",
+        "url",
+        "format",
+        "licence",
+        "reference_date",
+        "data_used",
+        "limitations"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "issuer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dataset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data_used": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "display_id",
+        "asset_id",
+        "asset_name",
+        "road_name",
+        "locality",
+        "from_label",
+        "from_type",
+        "to_label",
+        "to_type",
+        "geometry",
+        "status",
+        "verification",
+        "source_id",
+        "notes"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "<owner>-<asset_id>, or <owner>-<asset_name> until the asset ID is acquired."
+        },
+        "display_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+-\\S+$",
+          "description": "What users see: <council_code>-<asset_id | asset_name>, e.g. com-20567."
+        },
+        "asset_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The council's road segment asset ID, as text; null until acquired."
+        },
+        "asset_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+-from-[a-z0-9-]+-to-[a-z0-9-]+$",
+          "description": "What the segment is known as, e.g. bourke-street-from-russell-to-swanston."
+        },
+        "road_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locality": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_type": {
+          "enum": [
+            "intersection",
+            "segment_end",
+            "dead_end",
+            "boundary",
+            "bay",
+            "address",
+            "point"
+          ]
+        },
+        "to_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to_type": {
+          "enum": [
+            "intersection",
+            "segment_end",
+            "dead_end",
+            "boundary",
+            "bay",
+            "address",
+            "point"
+          ]
+        },
+        "geometry": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "coordinates"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "LineString",
+                    "MultiLineString"
+                  ]
+                },
+                "coordinates": {
+                  "type": "array"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "candidate",
+            "active",
+            "retired"
+          ]
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "segmentSourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "segment_id",
+        "source_id",
+        "external_id",
+        "id_scheme",
+        "notes"
+      ],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "segment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "source_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier as issued, as text (leading zeroes kept)."
+        },
+        "id_scheme": {
+          "enum": [
+            "road_segment_asset_id",
+            "source_row_id"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "extent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extent_id",
+        "segment_id",
+        "side",
+        "start_m",
+        "end_m",
+        "from_label",
+        "from_type",
+        "to_label",
+        "to_type",
+        "restrictions_status",
+        "verification",
+        "notes"
+      ],
+      "properties": {
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "<segment_id>:<side>:<part>, part = all or from its bounds."
+        },
+        "segment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "side": {
+          "enum": [
+            "north",
+            "south",
+            "east",
+            "west",
+            "centre",
+            "both",
+            "odd",
+            "even"
+          ]
+        },
+        "start_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "end_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "from_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from_type": {
+          "enum": [
+            "intersection",
+            "segment_end",
+            "dead_end",
+            "boundary",
+            "bay",
+            "address",
+            "point",
+            null
+          ]
+        },
+        "to_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_type": {
+          "enum": [
+            "intersection",
+            "segment_end",
+            "dead_end",
+            "boundary",
+            "bay",
+            "address",
+            "point",
+            null
+          ]
+        },
+        "restrictions_status": {
+          "enum": [
+            "supplied",
+            "pending_field_capture",
+            "no_parking_spaces"
+          ]
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "bay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bay_id",
+        "extent_id",
+        "bay_number",
+        "plate_number",
+        "lat",
+        "lng",
+        "kind",
+        "status",
+        "verification",
+        "notes"
+      ],
+      "properties": {
+        "bay_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "bay_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "plate_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -180,
+          "maximum": 180
+        },
+        "kind": {
+          "enum": [
+            "standard",
+            "accessible",
+            "loading",
+            "motorcycle",
+            "ev",
+            "other",
+            null
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "zoneScheme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheme_id",
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "scheme_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "kind": {
+          "enum": [
+            "rpa",
+            "patrol",
+            "parking_area",
+            "operational"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zone_id",
+        "scheme_id",
+        "code",
+        "name"
+      ],
+      "properties": {
+        "zone_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "<owner>-<scheme>-<code>, e.g. copp-rpa-7, copp-patrol-10."
+        },
+        "scheme_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exactly as issued: 9, 9a, 009."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "zoneAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment_id",
+        "zone_id",
+        "extent_id",
+        "valid_from",
+        "valid_to",
+        "source_id",
+        "verification"
+      ],
+      "properties": {
+        "assignment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "zone_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        }
+      }
+    },
+    "providerArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_area_id",
+        "provider",
+        "area_code",
+        "account",
+        "name"
+      ],
+      "properties": {
+        "provider_area_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "provider": {
+          "enum": [
+            "easypark",
+            "paystay",
+            "other"
+          ]
+        },
+        "area_code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "As text."
+        },
+        "account": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "providerAreaAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment_id",
+        "provider_area_id",
+        "extent_id",
+        "valid_from",
+        "valid_to",
+        "source_id",
+        "verification"
+      ],
+      "properties": {
+        "assignment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "provider_area_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        }
+      }
+    },
+    "meter": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A parking meter, as printed on it.",
+      "required": [
+        "meter_id",
+        "code",
+        "lat",
+        "lng",
+        "notes"
+      ],
+      "properties": {
+        "meter_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "As printed on the meter, e.g. GLP1."
+        },
+        "lat": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lng": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -180,
+          "maximum": 180
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "meterAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A meter serving an extent: the whole extent (and its parking area) when provider_area_id is null, otherwise that provider area on the extent.",
+      "required": [
+        "assignment_id",
+        "meter_id",
+        "extent_id",
+        "provider_area_id",
+        "valid_from",
+        "valid_to",
+        "source_id",
+        "verification"
+      ],
+      "properties": {
+        "assignment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "meter_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "provider_area_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "type",
+        "sign_code",
+        "max_stay_minutes",
+        "days",
+        "all_day",
+        "start",
+        "end",
+        "public_holidays",
+        "exempt_zone_ids",
+        "exceptions",
+        "description"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "type": {
+          "enum": [
+            "time_limit",
+            "metered",
+            "ticket",
+            "loading_zone",
+            "permit_zone",
+            "no_stopping",
+            "no_parking",
+            "clearway",
+            "bus_zone",
+            "taxi_zone",
+            "accessible",
+            "works_zone",
+            "other"
+          ]
+        },
+        "sign_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_stay_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "days": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          }
+        },
+        "all_day": {
+          "type": "boolean"
+        },
+        "start": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$|^24:00$"
+        },
+        "end": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$|^24:00$"
+        },
+        "public_holidays": {
+          "enum": [
+            "applies",
+            "excluded",
+            null
+          ]
+        },
+        "exempt_zone_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]+-\\S+$",
+            "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+          }
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "all_day": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "start": {
+                "type": "null"
+              },
+              "end": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "start": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "time_limit",
+                  "metered",
+                  "ticket"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "max_stay_minutes": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ruleAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment_id",
+        "rule_id",
+        "extent_id",
+        "grace_minutes",
+        "provider_area_ids",
+        "valid_from",
+        "valid_to",
+        "source_id",
+        "source_sign_id",
+        "verification"
+      ],
+      "properties": {
+        "assignment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "extent_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+-\\S+$",
+          "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+        },
+        "grace_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 120
+        },
+        "provider_area_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]+-\\S+$",
+            "description": "Starts with the owner prefix: the linking ID, or the council code during development."
+          },
+          "uniqueItems": true,
+          "description": "The extent's provider areas (EasyPark, PayStay) that pay for this rule here; [] when not tied to a payment number."
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9]+-\\S+$"
+        },
+        "source_sign_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verification": {
+          "enum": [
+            "verified",
+            "field_checked",
+            "unverified",
+            "inferred",
+            "pending_field_capture"
+          ]
+        }
+      }
+    }
+  }
+}

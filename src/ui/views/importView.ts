@@ -1,0 +1,225 @@
+/**
+ * Bulk import: pick CSV templates or CivicMAPS-preview JSON files, review what will be created,
+ * updated and skipped, then save in one transaction. Templates can be downloaded from here.
+ */
+import { html, nothing, type TemplateResult } from 'lit-html';
+import { createRef, ref } from 'lit-html/directives/ref.js';
+import { getLists, getTimedLists, putLists } from '../../lib/db';
+import { releaseToCsv } from '../../lib/kerbsideRelease';
+import { councilCode, listsToRelease } from '../../lib/releaseAdapters';
+import { zipStore } from '../../lib/zip';
+import { deviceTimeZone } from '../../lib/time';
+import { saveFile } from '../../lib/files';
+import { CSV_TEMPLATES, parseImportFile, planImport, templateCsv, type ImportPlan, type ImportResult } from '../../lib/importer';
+import type { PlateList } from '../../lib/types';
+import type { App, View } from '../app';
+import { banner, header, icon, page, spinner, statusPill } from '../components';
+import { canImportOnDevice, policyContext } from '../../lib/listPolicy';
+
+const KIND_LABEL: Record<ImportResult['kind'], string> = {
+  'timed-csv': 'Timed segments (CSV)',
+  'allow-csv': 'Allow list (CSV)',
+  'hot-csv': 'Hot list (CSV)',
+  'bays-csv': 'Numbered bays (CSV)',
+  'civicmaps-kerbside': 'CivicMAPS kerbside segment',
+  'civicmaps-road-segment': 'CivicMAPS road segment',
+  'civicmaps-survey': 'CivicMAPS field survey',
+  'civicmaps-parking-areas': 'CivicMAPS parking areas',
+  'civicmaps-mixed': 'CivicMAPS (several kinds)',
+  'civicmaps-release': 'civicmaps.kerbside_release',
+  'area-dataset': 'Area dataset (street segments)',
+  'permits-json': 'Residential parking permits (JSON)',
+  unknown: 'Not recognised',
+};
+
+const ISSUES_SHOWN = 50;
+
+export function importView(_p: Record<string, string>, app: App): View {
+  const fileRef = createRef<HTMLInputElement>();
+  let results: ImportResult[] = [];
+  let existing: PlateList[] = [];
+  let updateExisting = true;
+  let busy = false;
+  let showAllIssues = false;
+  /** Blocking failure (assessment D6: a persistent banner, never a toast). */
+  let failure: { title: string; body: string } | null = null;
+  /** Export: the council the lists belong to, and its linking ID once onboarded (optional). */
+  let municipality = '';
+  let linkingId = '';
+
+  const plan = (): ImportPlan => planImport(results.flatMap((r) => r.drafts), existing, { updateExisting });
+
+  const read = async (files: FileList | null) => {
+    if (!files?.length) return;
+    busy = true;
+    failure = null;
+    app.update();
+    try {
+      existing = await getLists();
+      const read = await Promise.all([...files].map(async (f) => parseImportFile(await f.text(), f.name)));
+      // Picking more files adds to the selection; the same file name replaces its earlier reading.
+      const names = new Set(read.map((r) => r.file));
+      results = [...results.filter((r) => !names.has(r.file)), ...read];
+    } catch (e) {
+      failure = { title: 'Could not read the file', body: (e as Error).message };
+    } finally {
+      busy = false;
+      if (fileRef.value) fileRef.value.value = '';
+      app.update();
+    }
+  };
+
+  const save = async () => {
+    const p = plan();
+    const lists = [...p.created, ...p.updated];
+    if (!lists.length) return;
+    busy = true;
+    failure = null;
+    app.update();
+    try {
+      await putLists(lists);
+      app.toast(`Imported: ${p.created.length} list(s) created, ${p.updated.length} updated.`, 'success');
+      app.navigate('/', true);
+    } catch (e) {
+      failure = { title: 'Import failed — nothing was saved', body: (e as Error).message };
+      busy = false;
+      app.update();
+    }
+  };
+
+  const download = (kind: keyof typeof CSV_TEMPLATES) =>
+    void saveFile(new Blob([templateCsv(kind)], { type: 'text/csv' }), CSV_TEMPLATES[kind].fileName, 'PlateWatch import template').catch((e: Error) =>
+      app.toast(`Could not save the template: ${e.message}`, 'error'),
+    );
+
+  const exportRelease = async (as: 'json' | 'csv') => {
+    const timed = await getTimedLists();
+    if (!timed.length) {
+      app.toast('There are no timed lists to export.', 'warn');
+      return;
+    }
+    if (linkingId.trim() && !/^[A-Za-z0-9]+$/.test(linkingId.trim())) {
+      app.toast('A linking ID is letters and digits only.', 'error');
+      return;
+    }
+    const name = municipality.trim() || 'Unspecified council';
+    const release = listsToRelease(timed, { municipality: name, linkingId: linkingId.trim() || null, timezone: deviceTimeZone() });
+    const base = release.release[0]!.release_id;
+    const file =
+      as === 'json'
+        ? { blob: new Blob([JSON.stringify(release, null, 2)], { type: 'application/json' }), name: `${base}.release.json` }
+        : { blob: zipStore(Object.entries(releaseToCsv(release)).map(([t, csv]) => ({ name: `${base}/${t}.csv`, data: csv }))), name: `${base}.csv.zip` };
+    await saveFile(file.blob, file.name, 'PlateWatch release').catch((e: Error) => app.toast(`Could not save the export: ${e.message}`, 'error'));
+  };
+
+  const counts = (p: ImportPlan) => {
+    const by = (type: PlateList['type'], ls: PlateList[]) => ls.filter((l) => l.type === type).length;
+    const entries = [...p.created, ...p.updated].reduce((n, l) => n + ('entries' in l ? l.entries.length : 0), 0);
+    return { timedNew: by('timed', p.created), timedUpd: by('timed', p.updated), otherNew: p.created.length - by('timed', p.created), otherUpd: p.updated.length - by('timed', p.updated), entries };
+  };
+
+  const summary = (): TemplateResult => {
+    const p = plan();
+    const c = counts(p);
+    const issues = results.flatMap((r) => r.issues);
+    const skipped = results.flatMap((r) => r.skipped.map((s) => `${r.file}: ${s}`));
+    const shown = showAllIssues ? issues : issues.slice(0, ISSUES_SHOWN);
+    return html`<section class="card mt-4" data-testid="import-summary">
+        <h2 class="section-title">Files</h2>
+        <ul class="divide-y divide-neutral-200 text-sm">
+          ${results.map(
+            (r) => html`<li class="flex items-center justify-between gap-2 py-2">
+              <span class="min-w-0"><span class="block truncate font-semibold">${r.file}</span><span class="text-xs ${r.kind === 'unknown' ? 'font-semibold text-alert-strong' : 'text-neutral-600'}">${r.kind === 'unknown' ? html`<span class="inline-flex items-center gap-1">${icon('alert', 'h-3.5 w-3.5')}${KIND_LABEL[r.kind]}</span>` : KIND_LABEL[r.kind]}</span></span>
+              <span class="flex flex-none items-center gap-1.5 text-xs text-neutral-600">${r.drafts.length} list${r.drafts.length === 1 ? '' : 's'}${r.issues.length ? statusPill('verify', `${r.issues.length} issue${r.issues.length === 1 ? '' : 's'}`) : nothing}</span>
+            </li>`,
+          )}
+        </ul>
+      </section>
+      <section class="card mt-4" data-testid="import-plan">
+        <h2 class="section-title">What will happen</h2>
+        <ul class="grid gap-1 text-sm">
+          <li><strong>${c.timedNew}</strong> timed list${c.timedNew === 1 ? '' : 's'} created${p.placeholders ? html` ${statusPill('restrictions_to_enter', `${p.placeholders} without restrictions yet`)}` : nothing}</li>
+          <li><strong>${c.timedUpd}</strong> timed list${c.timedUpd === 1 ? '' : 's'} updated</li>
+          ${c.otherNew || c.otherUpd ? html`<li><strong>${c.otherNew}</strong> allow/hot list(s) created, <strong>${c.otherUpd}</strong> updated · ${c.entries} plate${c.entries === 1 ? '' : 's'}</li>` : nothing}
+          ${p.unchanged ? html`<li class="text-neutral-600">${p.unchanged} matching list(s) left as they are</li>` : nothing}
+          ${p.unmatchedBays.length
+            ? html`<li class="mt-1 flex gap-1.5 text-alert-strong"><span class="mt-0.5">${icon('alert', 'h-4 w-4')}</span><span><span class="font-semibold">${p.unmatchedBays.length} set(s) of bays have no matching timed list and will not be imported:</span>
+                <ul class="mt-1 grid gap-0.5 text-xs font-normal text-neutral-700">${p.unmatchedBays.map((u) => html`<li>${u}</li>`)}</ul></span></li>`
+            : nothing}
+        </ul>
+        <label class="mt-3 flex min-h-11 items-center gap-3 text-sm">
+          <input type="checkbox" class="h-5 w-5 accent-primary" .checked=${updateExisting} @change=${(e: Event) => { updateExisting = (e.target as HTMLInputElement).checked; app.update(); }} />
+          <span>Update lists already on this device that match (same segment and side, or same list name)</span>
+        </label>
+        <p class="mt-1 text-xs text-neutral-600">A matching list keeps its name, linked allow lists and scan history; restrictions already entered are kept when the import has none.</p>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <button type="button" class="btn-secondary" ?disabled=${busy} @click=${() => { results = []; app.update(); }}>Clear</button>
+          <button type="button" class="btn-primary" data-testid="import-save" ?disabled=${busy || !(p.created.length + p.updated.length)} @click=${() => void save()}>
+            ${busy ? spinner() : icon('check')} Import
+          </button>
+        </div>
+      </section>
+      ${issues.length
+        ? html`<section class="card mt-4">
+            <h2 class="section-title flex items-center gap-1.5 text-alert-strong">${icon('alert', 'h-4 w-4')} Not imported (${issues.length})</h2>
+            <ul class="grid gap-1 text-sm" data-testid="import-issues">
+              ${shown.map((i) => html`<li><span class="font-plate text-xs text-neutral-600">${i.file}${i.row ? ` row ${i.row}` : ''}:</span> ${i.message}</li>`)}
+            </ul>
+            ${issues.length > shown.length ? html`<button type="button" class="btn-ghost mt-2" @click=${() => { showAllIssues = true; app.update(); }}>Show all ${issues.length}</button>` : nothing}
+          </section>`
+        : nothing}
+      ${skipped.length
+        ? html`<details class="card mt-4">
+            <summary class="cursor-pointer text-sm font-semibold">Left out: nothing to time (${skipped.length})</summary>
+            <ul class="mt-2 grid gap-1 text-xs text-neutral-600">${skipped.map((s) => html`<li>${s}</li>`)}</ul>
+          </details>`
+        : nothing}`;
+  };
+
+  return {
+    render() {
+      // Inside EnforcementMAPS lists are imported in CommandMAPS, never on the officer's device.
+      if (!canImportOnDevice(policyContext()))
+        return html`${header({ title: 'Import lists', back: () => app.back() })}
+          ${page(banner('pending', 'Lists are imported in CommandMAPS', 'Team leaders and parking services management with import authorisation load lists from the CommandMAPS dashboard. They appear on this device as read-only system lists.', 'import-not-available'))}`;
+      return html`${header({ title: 'Import lists', subtitle: 'CSV templates or CivicMAPS data files', back: () => app.back() })}
+        ${page(html`
+          <div class="mb-4">${banner('pending', 'Imported lists are system lists', 'In this development build they can still be edited here. Inside EnforcementMAPS, importing is done in CommandMAPS and these lists are read-only on the device.', 'import-dev-note')}</div>
+          <section class="card">
+            <h2 class="section-title">Choose files</h2>
+            <p class="text-sm text-neutral-700">Select one or more files: civicmaps.kerbside_release JSON (the CivicMAPS release format), area datasets (street_segments), CSV files made from the templates below, or CivicMAPS-preview data files. Nothing is saved until you press Import.</p>
+            <input ${ref(fileRef)} type="file" accept=".csv,.json,text/csv,application/json" multiple class="hidden" data-testid="import-file"
+              @change=${(e: Event) => void read((e.target as HTMLInputElement).files)} />
+            <button type="button" class="btn-primary mt-3 w-full" ?disabled=${busy} @click=${() => fileRef.value?.click()}>
+              ${busy ? spinner() : icon('upload')} ${results.length ? 'Add more files' : 'Choose files'}
+            </button>
+          </section>
+          ${failure ? html`<div class="mt-4">${banner('alert', failure.title, failure.body, 'import-failure')}</div>` : nothing}
+          ${results.length ? summary() : nothing}
+          <section class="card mt-4">
+            <h2 class="section-title">Templates</h2>
+            <p class="text-sm text-neutral-700">Fill in with Excel or any spreadsheet and save as CSV. One row per sign; rows for the same street, cross streets and side become one timed list.</p>
+            <div class="mt-3 grid gap-2">
+              <button type="button" class="btn-secondary" @click=${() => download('timed')}>${icon('download')} Timed segments template</button>
+              <button type="button" class="btn-secondary" @click=${() => download('allow')}>${icon('download')} Allow list template</button>
+              <button type="button" class="btn-secondary" @click=${() => download('bays')}>${icon('download')} Numbered bays template (positions)</button>
+              <button type="button" class="btn-secondary" @click=${() => download('hot')}>${icon('download')} Hot list template</button>
+            </div>
+          </section>
+          <section class="card mt-4">
+            <h2 class="section-title">Export</h2>
+            <p class="text-sm text-neutral-700">All timed lists as a candidate civicmaps.kerbside_release: one JSON file for devices, or one CSV per table (zip) for the council to inspect.</p>
+            <label class="mt-3 block"><span class="field-label">Council</span>
+              <input class="field" placeholder="e.g. City of Port Phillip" .value=${municipality} @input=${(e: Event) => { municipality = (e.target as HTMLInputElement).value; app.update(); }} /></label>
+            <p class="mt-1 text-xs text-neutral-600">Council code: <span class="font-plate">${councilCode(municipality.trim() || 'Unspecified council')}</span></p>
+            <label class="mt-3 block"><span class="field-label">Linking ID (once the council is onboarded)</span>
+              <input class="field" inputmode="numeric" placeholder="Blank: keys use the council code" .value=${linkingId} @input=${(e: Event) => (linkingId = (e.target as HTMLInputElement).value)} /></label>
+            <div class="mt-3 grid grid-cols-2 gap-3">
+              <button type="button" class="btn-secondary" data-testid="export-release" @click=${() => void exportRelease('json')}>${icon('share')} Release (JSON)</button>
+              <button type="button" class="btn-secondary" data-testid="export-csv" @click=${() => void exportRelease('csv')}>${icon('share')} Tables (CSV)</button>
+            </div>
+          </section>
+        `)}`;
+    },
+  };
+}

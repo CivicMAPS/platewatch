@@ -1,0 +1,439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civicmaps.example/schemas/platewatch-infringement-handoff.v1.json",
+  "title": "PlateWatch infringement hand-off",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "handoffId",
+    "source",
+    "officerNumber",
+    "location",
+    "vehicle",
+    "offence",
+    "times",
+    "evidence",
+    "sighting"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "handoffId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "platewatch"
+    },
+    "officerNumber": {
+      "type": "string"
+    },
+    "device": {
+      "type": "string"
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "listId",
+        "street",
+        "fromStreet",
+        "toStreet",
+        "side"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "listId": {
+          "type": "string"
+        },
+        "displayId": {
+          "type": "string",
+          "examples": [
+            "com-20055"
+          ]
+        },
+        "externalId": {
+          "type": "string",
+          "examples": [
+            "com-20055:south:bay-58-bay-72"
+          ]
+        },
+        "street": {
+          "type": "string"
+        },
+        "fromStreet": {
+          "type": "string"
+        },
+        "toStreet": {
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "both",
+            "north",
+            "south",
+            "east",
+            "west",
+            "centre",
+            "odd",
+            "even"
+          ]
+        },
+        "suburb": {
+          "type": "string"
+        },
+        "parkingArea": {
+          "type": "string"
+        },
+        "easyPark": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "payStay": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patrolZone": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        },
+        "accuracyM": {
+          "type": "number"
+        }
+      }
+    },
+    "vehicle": {
+      "type": "object",
+      "required": [
+        "registration",
+        "registrationType",
+        "make",
+        "type",
+        "colour",
+        "plateReentry"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "registration": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{1,10}$"
+        },
+        "registrationState": {
+          "enum": ["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"],
+          "default": "VIC"
+        },
+        "ocrText": {
+          "type": "string"
+        },
+        "corrected": {
+          "type": "boolean"
+        },
+        "plateCheckedOnVehicle": {
+          "type": "boolean"
+        },
+        "lookalike": {
+          "type": "object",
+          "required": [
+            "readAs",
+            "candidatePlate",
+            "source",
+            "choice",
+            "decidedAt"
+          ],
+          "properties": {
+            "readAs": {
+              "type": "string"
+            },
+            "candidatePlate": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "timed",
+                "hot",
+                "allow"
+              ]
+            },
+            "choice": {
+              "enum": [
+                "same",
+                "different",
+                "hot_confirmed",
+                "not_hot",
+                "permit_plate",
+                "not_permit"
+              ]
+            },
+            "decidedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "registrationType": {
+          "type": "string",
+          "description": "Vehicle details structure (owner direction 23/11/2026): Licence plate (registration), Registration type, Make, Type, Colour"
+        },
+        "make": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "Body type"
+        },
+        "colour": {
+          "type": "string"
+        },
+        "plateReentry": {
+          "type": "object",
+          "required": [
+            "second",
+            "matched",
+            "at"
+          ],
+          "additionalProperties": false,
+          "description": "Second entry of the licence plate, made after the other vehicle details and checked against the first (owner direction 23/11/2026). Issue is blocked unless matched.",
+          "properties": {
+            "second": {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{1,10}$"
+            },
+            "matched": {
+              "const": true
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    },
+    "offence": {
+      "type": "object",
+      "required": [
+        "suggestedCode",
+        "basis"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "suggestedCode": {
+          "enum": [
+            "701",
+            "702"
+          ]
+        },
+        "paidToGraceMinutes": {
+          "const": 5
+        },
+        "basis": {
+          "enum": [
+            "allowance_exceeded",
+            "paid_to_passed",
+            "no_payment_found"
+          ]
+        },
+        "secondary": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "enum": [
+                "701",
+                "702"
+              ]
+            },
+            "timeFrom": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "restrictionCode": {
+          "type": "string",
+          "examples": [
+            "2P"
+          ]
+        },
+        "spaceType": {
+          "enum": [
+            "timed",
+            "meter",
+            "ticket",
+            "meter_all_day",
+            "ticket_all_day"
+          ]
+        },
+        "limitMinutes": {
+          "type": "integer"
+        },
+        "graceMinutes": {
+          "type": "integer"
+        },
+        "concession": {
+          "enum": [
+            "disability"
+          ]
+        }
+      }
+    },
+    "times": {
+      "type": "object",
+      "required": [
+        "timeFrom",
+        "timeTo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "timeFrom": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Locked"
+        },
+        "timeTo": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Default; officer may edit"
+        },
+        "firstSightingAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scanAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "required": [
+        "status",
+        "source",
+        "checkedAt",
+        "checkedBy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "paid",
+            "not_found"
+          ]
+        },
+        "source": {
+          "enum": [
+            "easypark",
+            "paystay",
+            "meter",
+            "ticket",
+            "other"
+          ]
+        },
+        "sourceRef": {
+          "type": "string"
+        },
+        "paidFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "paidTo": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ticketNo": {
+          "type": "string"
+        },
+        "checkedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "checkedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "scanId",
+          "role",
+          "capturedAt",
+          "sha256",
+          "mime"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "scanId": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "first_sighting",
+              "current_scan",
+              "resighting"
+            ]
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "mime": {
+            "const": "image/jpeg"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          },
+          "accuracyM": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "notesTemplate": {
+      "type": "string"
+    },
+    "sighting": {
+      "type": "object",
+      "required": [
+        "observationId",
+        "scanId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "observationId": {
+          "type": "string"
+        },
+        "scanId": {
+          "type": "string"
+        },
+        "scanCount": {
+          "type": "integer"
+        },
+        "alertDismissal": {
+          "type": "object",
+          "description": "Present if an overstay alert was dismissed and later re-raised (S32)"
+        }
+      }
+    }
+  }
+}

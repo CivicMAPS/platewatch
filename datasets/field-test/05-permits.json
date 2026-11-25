@@ -1,0 +1,23 @@
+{
+  "permits": [
+    {
+      "authority": { "councilCode": "copp" },
+      "permitNumber": "RPA/COMB/FS-2026-0950",
+      "validFrom": "2026-01-01",
+      "validTo": "2027-12-31",
+      "parkingAreaCode": "7",
+      "address": { "streetNumber": "30", "street": "Gladstone Street" },
+      "vehicle": { "registrationNumber": "PWJ950", "registrationState": "VIC", "registrationType": "private", "vehicleType": "hatchback", "make": "Volkswagen", "colour": "Red" }
+    },
+    {
+      "authority": { "councilCode": "copp" },
+      "permitNumber": "RSP-2026-0951",
+      "issueYear": 2026,
+      "sequentialId": "0951",
+      "validFrom": "2026-01-01",
+      "validTo": "2026-06-30",
+      "address": { "streetNumber": "9", "street": "Buckhurst Street" },
+      "vehicle": { "registrationNumber": "PWJ951", "registrationType": "private", "vehicleType": "sedan", "make": "Toyota", "colour": "Grey" }
+    }
+  ]
+}

@@ -208,6 +208,26 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     commit(closing);
   });
 
+  it("a device can neither re-send nor close another device's accepted allocation", async () => {
+    const keyB = await generateSigningKey();
+    const asB = { device: false, headers: { 'X-Device-Key': keyB.keyId } };
+    await call('POST', '/api/devices/register', { ...asB, body: { publicJwk: keyB.publicJwk, label: 'second handset', officerNumber: '5123' } });
+    await call('POST', `/api/console/devices/${keyB.keyId}/decision`, { staff: sup, body: { approve: true } });
+    const { number, allocation } = await nextAllocation(t(8, 50)); // device A's open number
+    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation } })).status).toBe(200);
+    commit(allocation);
+    // Device B signs a cancel for A's number with its own key, onto its own (empty) chain.
+    const st: IssueStatement = { v: 1, type: 'cancel', number, keyId: keyB.keyId, allocationHash: allocation.hash, timestamp: toLocalIso(t(8, 51)), prevHash: GENESIS_HASH };
+    const forged = await signStatement(keyB.privateKey, st);
+    const res = await call('POST', '/api/infringements/statements', { ...asB, body: { keyId: keyB.keyId, scanId: 's1', allocation, closing: forged } });
+    expect(res).toMatchObject({ status: 403, json: { error: 'key_mismatch' } });
+    expect((await call('GET', `/api/console/infringements/${number}`, { staff: sup })).json.infringement.status).toBe('allocated');
+    // Device A still closes its own number.
+    const own = await close(number, allocation.hash, null, t(8, 51));
+    expect((await call('POST', '/api/infringements/statements', { body: { keyId: key.keyId, scanId: 's1', allocation, closing: own } })).json).toEqual({ number, status: 'cancelled' });
+    commit(own);
+  });
+
   it('void without reissue: requested on the device, rejected then approved by a supervisor; device sees each change', async () => {
     const number = await issue702();
     const before = (await call('GET', '/api/updates?since=0')).json.cursor as number;
@@ -510,6 +530,26 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     const photo = await fetch(`${base}/api/console/evidence/sEv`, { headers: staff });
     expect(photo.status).toBe(200);
     expect(Buffer.from(await photo.arrayBuffer()).toString()).toBe('hot-list photo bytes');
+  });
+
+  it('a signed issue the scan never recorded (app closed after signing) is applied to the scan and timing', async () => {
+    const { closeDb, getObservation, getScan, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    backend.installBackend(() => ({ backendUrl: base, backendToken: DEVICE, officerNumber: '5123' }) as never);
+    const o = newObservation({ id: 'oR', list, plate: 'DTS512', scanId: 'sR', at: t(8, 20, 5), instance: { restriction: list.restrictions[0]!, start: t(7), end: t(22) } });
+    await saveScan(scan('sR', t(8, 20, 5), { observationId: 'oR' }), o);
+    const n = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sR' });
+    const record = buildIssuedRecord({ number: n.number, handoff: handoff(), values: { offenceCode: '702', timeTo: t(8, 25), notes: 'n', vehicle: { make: 'Holden', type: 'Hatchback', colour: 'White', registrationType: 'Standard' }, evidenceOverride: 'x' }, issuedAt: toLocalIso(t(8, 26)), toIso: toLocalIso });
+    await signer.closeNumber(n.number, record);
+    // The app closed here: the issue is signed and queued, the scan and timing were never updated.
+    expect((await getScan('sR'))?.infringement).toBeUndefined();
+    expect(await backend.reconcileIssued()).toBe(1);
+    expect((await getScan('sR'))?.infringement).toMatchObject({ number: n.number, status: 'issued', offenceCode: '702' });
+    expect((await getObservation('oR'))?.status).toBe('issued');
+    expect(await backend.reconcileIssued()).toBe(0);
   });
 
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {

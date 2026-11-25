@@ -88,7 +88,7 @@ export async function acceptBundle(c: Tx, b: BundleIn, opts: { council: string; 
   if ((await sha256Hex(canonical(a.statement))) !== a.hash) throw new HttpError(422, 'hash_mismatch', 'Allocation hash does not match the statement.');
   const number = await numberFor(a);
 
-  const known = (await c.query<{ number: string }>('select number from statements where hash = $1', [a.hash])).rows[0];
+  const known = (await c.query<{ number: string; key_id: string }>('select number, key_id from statements where hash = $1', [a.hash])).rows[0];
   if (!known) {
     const s = a.statement;
     if (s.keyId !== b.keyId) throw new HttpError(422, 'key_mismatch', 'Statement was not made with this device key.');
@@ -117,6 +117,10 @@ export async function acceptBundle(c: Tx, b: BundleIn, opts: { council: string; 
     }
   } else if (known.number !== number) {
     throw new HttpError(409, 'conflict', 'Allocation hash already used for another number.');
+  } else if (known.key_id !== b.keyId) {
+    // An accepted allocation belongs to the device that signed it: no other device may re-send it,
+    // still less close (cancel or issue) that device's number with its own key.
+    throw new HttpError(403, 'key_mismatch', 'This allocation was made by another device.');
   }
 
   const z = b.closing;

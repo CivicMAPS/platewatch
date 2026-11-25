@@ -10,10 +10,10 @@
  *   `window.EnforcementMAPS` so hot-list alerts reach the console and Issue infringement works
  *   end to end (the wizard runs on the device; the I-N is allocated and signed here, offline-safe).
  */
-import { countOutbox, type OutboxItem, getHotEvent, getOutbox, getScan, markOutboxFailed, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation } from './db';
+import { countOutbox, getKvsByPrefix, type OutboxItem, getHotEvent, getOutbox, getScan, markOutboxFailed, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation } from './db';
 import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
-import type { InfringementHandoff, InfringementResult } from './infringement';
+import { applyInfringementResult, type InfringementHandoff, type InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
 import { allocateNumber, closeNumber, deviceKey, getBundle, holdWizard, ifAbandoned, raisePoolFloors, setSigningScope, type StoredBundle } from './signer';
 import { toLocalIso } from './time';
@@ -267,6 +267,35 @@ async function pushInfringements(items: OutboxItem[]): Promise<void> {
   }
 }
 
+/**
+ * Signed issues the sighting does not show yet: the app closed (or a write failed) after the issue
+ * statement was signed and queued but before the scan and timing were updated. The number will be
+ * issued at the server whatever happens, so the handset records it too, closing the timing, before
+ * anything else can be issued for that sighting. A later infringement on the scan is left alone.
+ */
+export async function reconcileIssued(): Promise<number> {
+  let fixed = 0;
+  for (const b of await getKvsByPrefix<StoredBundle>('inBundle:')) {
+    const r = b.record;
+    if (!r || (b.closing?.statement as { type?: string } | undefined)?.type !== 'issue') continue;
+    const scan = await getScan(b.scanId);
+    if (!scan) continue;
+    const cur = scan.infringement;
+    if (cur?.number === b.number || scan.infringementHistory?.some((x) => x.number === b.number)) continue;
+    if (cur && cur.number !== r.reissueOf) continue;
+    const handoff = r.handoff as InfringementHandoff;
+    const obs = scan.observationId ? await getObservation(scan.observationId) : undefined;
+    const result: InfringementResult = { status: 'issued', number: b.number, offenceCode: r.offenceCode, timeFrom: Date.parse(r.timeFrom), timeTo: Date.parse(r.timeTo), issuedAt: Date.parse(r.issuedAt), sync: 'pending' };
+    const out = applyInfringementResult({ scan, observation: obs ?? ({} as never), handoff, result });
+    const next: ScanRecord = cur && r.reissueOf
+      ? { ...out.scan, infringement: { ...out.scan.infringement!, reissueOf: r.reissueOf }, infringementHistory: [...(scan.infringementHistory ?? []), { ...cur, status: 'voided' }] }
+      : out.scan;
+    await saveScan(next, obs ? out.observation : undefined);
+    fixed++;
+  }
+  return fixed;
+}
+
 /** Send one statement: the allocation alone, or the allocation with its closing (and record). */
 async function pushStatement(b: StoredBundle, withClosing: boolean): Promise<void> {
   const out = await request<{ status: string; rejection?: { code: string; message: string } }>('POST', '/api/infringements/statements', {
@@ -357,6 +386,7 @@ export function syncNow(): Promise<void> {
   running = (async () => {
     setState({ syncing: true });
     try {
+      await reconcileIssued();
       const dev = (await getKv<BackendState['device']>(DEVICE_KEY())) ?? undefined;
       if (!dev || dev.status !== 'approved') await registerDevice();
       // Continue the officer's daily I-N sequence from what the backend already accepted (another handset).
@@ -463,7 +493,7 @@ export async function reissue(scan: ScanRecord, reason: VoidReason): Promise<Sca
   };
   const next: ScanRecord =
     result.status === 'issued'
-      ? { ...latest, infringement: fresh, infringementHistory: [...(latest.infringementHistory ?? []), { ...cur, status: 'voided' }] }
+      ? { ...latest, infringement: fresh, infringementHistory: [...(latest.infringementHistory ?? []).filter((x) => x.number !== cur.number), { ...cur, status: 'voided' }] }
       : { ...latest, infringementHistory: [...(latest.infringementHistory ?? []), fresh] };
   await saveScan(next);
   requestSync(100);
@@ -490,6 +520,7 @@ export async function paymentLookup(plate: string, at: number, ref?: string): Pr
 export function installBackend(getSettings: () => Settings): void {
   settingsRef = getSettings;
   setSigningScope(serverScope);
+  void reconcileIssued().catch(() => undefined);
   if (typeof window === 'undefined') return;
   const configured = isConfigured();
   setState({ configured });

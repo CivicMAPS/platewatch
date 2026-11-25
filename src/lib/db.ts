@@ -469,6 +469,11 @@ export async function getKv<T>(key: string): Promise<T | undefined> {
   return (await (await db()).get('kv', key)) as T | undefined;
 }
 
+/** Every kv value whose key starts with `prefix`. */
+export async function getKvsByPrefix<T>(prefix: string): Promise<T[]> {
+  return (await (await db()).getAll('kv', IDBKeyRange.bound(prefix, `${prefix}\uffff`))) as T[];
+}
+
 export async function putKv(key: string, value: unknown): Promise<void> {
   await (await db()).put('kv', value, key);
 }

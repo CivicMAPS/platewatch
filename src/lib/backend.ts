@@ -15,7 +15,7 @@ import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
-import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors, setSigningScope, type StoredBundle } from './signer';
+import { allocateNumber, closeNumber, deviceKey, getBundle, holdWizard, ifAbandoned, raisePoolFloors, setSigningScope, type StoredBundle } from './signer';
 import { toLocalIso } from './time';
 import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
@@ -262,7 +262,8 @@ async function pushInfringements(items: OutboxItem[]): Promise<void> {
     if (st.closing) await removeOutbox(st.item.key, st.item.queuedAt);
     // A number left open when the app closed mid-wizard is consumed with a signed cancel: signed now,
     // so it chains after everything allocated since, and sent in that order on the next sync.
-    else if (!st.b.closing && !isWizardOpen(st.b.number) && Date.now() - st.b.createdAt > 60_000) await closeNumber(st.b.number, null);
+    // Not while its wizard is open in this page or in another tab (ifAbandoned checks the lock).
+    else if (!st.b.closing && Date.now() - st.b.createdAt > 60_000) await ifAbandoned(st.b.number, () => closeNumber(st.b.number, null));
   }
 }
 
@@ -413,7 +414,7 @@ async function runWizard(args: { handoff: InfringementHandoff; scanId: string; i
   if (!wizard) throw new Error('The issue wizard is not available.');
   const officer = args.handoff.officerNumber;
   const b = await allocateNumber({ officer, council: await council(), scanId: args.scanId });
-  markWizardOpen(b.number);
+  const release = await holdWizard(b.number);
   try {
     const outcome = await wizard({ handoff: args.handoff, number: b.number, initial: args.initial, reissueOf: args.reissueOf });
     if (outcome.action === 'cancel') {
@@ -431,7 +432,7 @@ async function runWizard(args: { handoff: InfringementHandoff; scanId: string; i
       result: { status: 'issued', number: b.number, offenceCode: record.offenceCode, timeFrom: Date.parse(record.timeFrom), timeTo: Date.parse(record.timeTo), issuedAt, sync: 'pending' },
     };
   } finally {
-    markWizardOpen(null);
+    release();
   }
 }
 

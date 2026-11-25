@@ -44,8 +44,10 @@ const CHAIN = () => scoped('inChain');
 const bundleKey = (n: string) => `inBundle:${n}`;
 
 interface LockManagerLike {
-  request<T>(name: string, options: { mode: 'exclusive' }, fn: () => Promise<T>): Promise<T>;
+  request<T>(name: string, options: { mode: 'exclusive'; ifAvailable?: boolean }, fn: (lock: unknown) => Promise<T>): Promise<T>;
 }
+
+const lockManager = (): LockManagerLike | undefined => (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator?.locks;
 
 /**
  * Run `fn` holding a lock shared by every tab and the installed PWA of this origin (Web Locks).
@@ -53,8 +55,8 @@ interface LockManagerLike {
  * sign two statements onto it. Where Web Locks are unavailable, the in-page lock is all there is.
  */
 function crossContext<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  const locks = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator?.locks;
-  return locks ? locks.request(name, { mode: 'exclusive' }, fn) : fn();
+  const locks = lockManager();
+  return locks ? locks.request(name, { mode: 'exclusive' }, () => fn()) : fn();
 }
 
 let lock: Promise<unknown> = Promise.resolve();
@@ -145,7 +147,12 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
   return exclusive(async () => {
     const b = await getBundle(number);
     if (!b) throw new Error(`No allocation on this device for ${number}.`);
-    if (b.closing) return b;
+    if (b.closing) {
+      // Already closed. Issuing a number that was cancelled meanwhile (recovered as abandoned) must
+      // fail loudly: the wizard would otherwise report an issue that was never signed.
+      if (record && (b.closing.statement as { type?: string }).type !== 'issue') throw new Error(`${number} was already cancelled as left open; start the infringement again for a new number.`);
+      return b;
+    }
     const k = await deviceKey();
     // Allocated under another backend's key: only that key (and that backend) can close it.
     if (b.keyId !== k.keyId) throw new Error(`${number} was allocated for another backend; switch back to it to close the number.`);
@@ -167,13 +174,40 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
   });
 }
 
-/** Numbers allocated but never issued or cancelled (app closed mid-wizard). */
-let openWizardNumber: string | null = null;
-export function markWizardOpen(n: string | null): void {
-  openWizardNumber = n;
+/**
+ * Open wizards. A number allocated but never issued or cancelled (app closed mid-wizard) is
+ * recovered with a signed cancel; a number whose wizard is still open, in this page or in another
+ * tab or the installed PWA, must not be. An open wizard holds a Web Lock on its number, released when
+ * it closes (or when its page goes away), and recovery only proceeds if it can take that lock.
+ */
+const openWizards = new Set<string>();
+const wizardLock = (n: string) => `platewatch-wizard:${n}`;
+
+/** Hold `n` open until the returned release is called. Resolves once the hold is in place. */
+export function holdWizard(n: string): Promise<() => void> {
+  openWizards.add(n);
+  const done = () => openWizards.delete(n);
+  const locks = lockManager();
+  if (!locks) return Promise.resolve(() => void done());
+  return new Promise((granted) => {
+    void locks.request(wizardLock(n), { mode: 'exclusive' }, () => new Promise<void>((release) => granted(() => { done(); release(); })));
+  });
 }
+
 export function isWizardOpen(n: string): boolean {
-  return openWizardNumber === n;
+  return openWizards.has(n);
+}
+
+/** Run `recover` for `n` only if no wizard holds it anywhere. True when it ran. */
+export async function ifAbandoned(n: string, recover: () => Promise<unknown>): Promise<boolean> {
+  if (openWizards.has(n)) return false;
+  const locks = lockManager();
+  if (!locks) return (await recover(), true);
+  return locks.request(wizardLock(n), { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+    if (!lock) return false;
+    await recover();
+    return true;
+  });
 }
 
 export type { AllocationStatement };

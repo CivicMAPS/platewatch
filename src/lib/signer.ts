@@ -29,8 +29,18 @@ export interface StoredBundle extends IssueBundle {
   createdAt: number;
 }
 
-const KEY = 'signingKey';
-const CHAIN = 'inChain';
+/**
+ * Signing key and chain belong to the backend that accepts the chain: a fresh backend never saw
+ * this key's earlier statements, so continuing the chain there would be refused as a chain break.
+ * The scope is set by the backend module (the backend URL); '' (no backend) keeps the plain names.
+ */
+let scope: () => string = () => '';
+export function setSigningScope(fn: () => string): void {
+  scope = fn;
+}
+const scoped = (name: string) => (scope() ? `${name}:${scope()}` : name);
+const KEY = () => scoped('signingKey');
+const CHAIN = () => scoped('inChain');
 const bundleKey = (n: string) => `inBundle:${n}`;
 
 let lock: Promise<unknown> = Promise.resolve();
@@ -41,17 +51,28 @@ function exclusive<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export async function deviceKey(): Promise<StoredKey> {
-  const existing = await getKv<StoredKey>(KEY);
-  if (existing?.privateKey) return existing;
-  const k = await generateSigningKey();
-  const stored: StoredKey = { ...k, createdAt: Date.now() };
-  await putKv(KEY, stored);
-  return stored;
+/** First use of a scope: one key, however many callers ask at once (else two keys race). */
+const creating = new Map<string, Promise<StoredKey>>();
+
+export function deviceKey(): Promise<StoredKey> {
+  const key = KEY();
+  const pending = creating.get(key);
+  if (pending) return pending;
+  const p = (async () => {
+    const existing = await getKv<StoredKey>(key);
+    if (existing?.privateKey) return existing;
+    const k = await generateSigningKey();
+    const stored: StoredKey = { ...k, createdAt: Date.now() };
+    await putKv(key, stored);
+    return stored;
+  })();
+  creating.set(key, p);
+  void p.finally(() => creating.delete(key)).catch(() => undefined);
+  return p;
 }
 
 async function chain(keyId: string): Promise<ChainState> {
-  const c = await getKv<ChainState>(CHAIN);
+  const c = await getKv<ChainState>(CHAIN());
   return c && c.keyId === keyId ? c : { keyId, prevHash: GENESIS_HASH, pools: {} };
 }
 
@@ -61,7 +82,7 @@ export async function getBundle(number: string): Promise<StoredBundle | undefine
 
 /** The new chain head, the signed bundle and its outbox row: one transaction (never a chain gap). */
 async function commit(chainState: ChainState, b: StoredBundle): Promise<void> {
-  await putKvsAndQueue([[CHAIN, chainState], [bundleKey(b.number), b]], { kind: 'infringement', id: b.number });
+  await putKvsAndQueue([[CHAIN(), chainState], [bundleKey(b.number), b]], { kind: 'infringement', id: b.number });
 }
 
 const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|${day}`;
@@ -83,7 +104,7 @@ export function raisePoolFloors(officer: string, pools: readonly { day: string; 
         changed = true;
       }
     }
-    if (changed) await putKv(CHAIN, { ...c, pools: next } satisfies ChainState);
+    if (changed) await putKv(CHAIN(), { ...c, pools: next } satisfies ChainState);
   });
 }
 
@@ -111,6 +132,8 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
     if (!b) throw new Error(`No allocation on this device for ${number}.`);
     if (b.closing) return b;
     const k = await deviceKey();
+    // Allocated under another backend's key: only that key (and that backend) can close it.
+    if (b.keyId !== k.keyId) throw new Error(`${number} was allocated for another backend; switch back to it to close the number.`);
     const c = await chain(k.keyId);
     const statement: IssueStatement = {
       v: 1,

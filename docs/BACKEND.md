@@ -167,6 +167,12 @@ recordHash = SHA-256(canonical(issued record))
   after the original was paid) is **kept in the chain** and the number is marked `rejected` with the
   reason (`infringements.rejection`, shown on the record and in the console). The handset's later
   statements, already chained onto it, are then accepted as normal.
+- **One chain per backend.** The development handset keeps its signing key, chain, registration and
+  update cursor per backend URL. Pointing Settings at another backend makes a new key (approved
+  there) with a fresh chain; numbers signed for the first backend stay queued for it.
+- **Update cursor.** Every transaction that changes infringements takes one advisory lock first, so
+  `change_no` values commit in order and a handset's `/api/updates` cursor never passes a change
+  that is still being written.
 
 ## 3. Offence rules on the device (25/11/2026)
 

@@ -235,6 +235,28 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     expect((await call('POST', `/api/console/infringements/${number}/payment`, { staff: sup })).status).toBe(409);
   });
 
+  it('update cursors never pass a change that commits later than a higher-numbered one', async () => {
+    const held = await issue702();
+    const other = await issue702();
+    const since = (await call('GET', '/api/updates?since=0')).json.cursor as number;
+    // A change in flight: void requested in a transaction that has not committed yet.
+    const c1 = await db.connect();
+    await c1.query('begin');
+    await c1.query('select pg_advisory_xact_lock(7101702)');
+    await c1.query("update infringements set status = 'void_requested', updated_at = now(), change_no = nextval('change_seq') where number = $1", [held]);
+    // A payment for another infringement waits for it rather than committing a higher number first.
+    const paying = call('POST', `/api/console/infringements/${other}/payment`, { staff: 'CL1' });
+    await new Promise((r) => setTimeout(r, 300));
+    const mid = (await call('GET', `/api/updates?since=${since}`)).json;
+    expect(mid.infringements).toEqual([]);
+    expect(mid.cursor).toBe(since);
+    await c1.query('commit');
+    c1.release();
+    expect((await paying).json).toEqual({ status: 'paid' });
+    const after = (await call('GET', `/api/updates?since=${since}`)).json;
+    expect(after.infringements.map((x: { number: string; status: string }) => [x.number, x.status])).toEqual([[held, 'void_requested'], [other, 'paid']]);
+  });
+
   it('a reissue signed offline after the original was paid is rejected, and the device keeps syncing', async () => {
     const original = await issue702();
     await call('POST', `/api/console/infringements/${original}/payment`, { staff: 'CL1' });
@@ -448,27 +470,41 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect((await (await fetch(`${base}/api/console/infringements/${b.number}`, { headers: staff })).json()).infringement.status).toBe('allocated');
   });
 
-  it('pointing the handset at another backend registers afresh and pulls that server\'s updates from the start', async () => {
+  it('pointing the handset at another backend: fresh registration, signing key and chain there; the first backend\'s state is kept', async () => {
     const { getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
     const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' };
     backend.installBackend(() => settings as never);
     backend.backendSettingsChanged();
     await backend.syncNow();
+    const keyA = (await signer.deviceKey()).keyId;
     expect(await getKv<number>(`backendCursor:${base}`)).toBeGreaterThan(0);
-    // The same server under another name stands in for a second backend.
+    // The same server under another name stands in for a second backend that never saw key A's chain.
     const other = base.replace('127.0.0.1', 'localhost');
     settings.backendUrl = other;
     backend.backendSettingsChanged();
     expect(backend.backendState().device).toBeUndefined();
     expect(await getKv(`backendCursor:${other}`)).toBeUndefined();
-    expect(await getKv(`backendDevice:${other}`)).toBeUndefined();
-    await backend.syncNow(); // registers with the "new" server (approval already given to this key there)
+    const keyB = (await signer.deviceKey()).keyId;
+    expect(keyB).not.toBe(keyA);
+    await backend.syncNow(); // registers key B there (pending until approved)
     await backend.syncNow(); // a sync already running when the URL changed coalesces into one more run
+    expect(await getKv(`backendDevice:${other}`)).toMatchObject({ keyId: keyB, status: 'pending' });
+    await fetch(`${other}/api/console/devices/${keyB}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    await backend.syncNow();
+    // Key B's chain starts afresh: its first number is accepted, not refused as a chain break.
+    const n = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sD' });
+    await backend.syncNow();
     expect(backend.backendState().lastError).toBeUndefined();
-    expect(await getKv(`backendDevice:${other}`)).toMatchObject({ status: 'approved' });
-    // Back to the first server: its cursor was kept.
+    expect((await (await fetch(`${other}/api/console/infringements/${n.number}`, { headers: staff })).json()).infringement).toMatchObject({ status: 'allocated' });
+    // Back to the first backend: its key, chain and cursor were kept.
+    settings.backendUrl = base;
+    backend.backendSettingsChanged();
+    expect((await signer.deviceKey()).keyId).toBe(keyA);
     expect(await getKv<number>(`backendCursor:${base}`)).toBeGreaterThan(0);
+    await expect(signer.closeNumber(n.number, null)).rejects.toThrow(/another backend/);
   });
 });
 

@@ -15,7 +15,7 @@ import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
-import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors } from './signer';
+import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors, setSigningScope } from './signer';
 import { toLocalIso } from './time';
 import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
@@ -33,7 +33,8 @@ export interface BackendState {
  * pointing the handset at another server registers afresh and pulls that server's updates from 0
  * (and switching back resumes where it left off).
  */
-const serverKey = (name: string) => () => `${name}:${(settingsRef().backendUrl ?? '').trim().replace(/\/+$/, '').toLowerCase()}`;
+const serverScope = () => (settingsRef().backendUrl ?? '').trim().replace(/\/+$/, '').toLowerCase();
+const serverKey = (name: string) => () => `${name}:${serverScope()}`;
 const DEVICE_KEY = serverKey('backendDevice');
 const CURSOR_KEY = serverKey('backendCursor');
 const LAST_KEY = serverKey('backendLast');
@@ -216,6 +217,8 @@ async function pushOutbox(): Promise<void> {
 async function pushInfringement(number: string): Promise<boolean> {
   const b = await getBundle(number);
   if (!b) return true;
+  // Signed for another backend (Settings were switched): it stays queued for that backend.
+  if (b.keyId !== (await deviceKey()).keyId) return false;
   const out = await request<{ status: string; rejection?: { code: string; message: string } }>('POST', '/api/infringements/statements', { json: { keyId: b.keyId, scanId: b.scanId, allocation: b.allocation, closing: b.closing, record: b.record } });
   // Refused on a business rule (e.g. reissued offline after the original was paid): the server kept
   // the statements in this key's chain, so later numbers still follow; this one is not valid.
@@ -434,6 +437,7 @@ export async function paymentLookup(plate: string, at: number, ref?: string): Pr
 /** Install the development host when a backend is configured and EnforcementMAPS is absent. */
 export function installBackend(getSettings: () => Settings): void {
   settingsRef = getSettings;
+  setSigningScope(serverScope);
   if (typeof window === 'undefined') return;
   const configured = isConfigured();
   setState({ configured });

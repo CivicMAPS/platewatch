@@ -49,6 +49,23 @@ export async function migrate(db: Db): Promise<string[]> {
   }
 }
 
+/** Advisory lock held by every transaction that changes infringements (see `txChanges`). */
+const CHANGE_LOCK = 7_101_702;
+
+/**
+ * A transaction that changes infringements. `change_no` comes from a sequence, which hands out
+ * numbers in call order, not commit order: a change numbered 100 could commit after one numbered
+ * 101, and a handset polling `/api/updates` in between would move its cursor past 100 for good.
+ * Taking this lock first, before any row lock, makes such transactions run one at a time, so
+ * change numbers commit in order. (Volumes are small: issues, voids and payments.)
+ */
+export async function txChanges<T>(db: Db, fn: (c: Tx) => Promise<T>): Promise<T> {
+  return tx(db, async (c) => {
+    await c.query('select pg_advisory_xact_lock($1)', [CHANGE_LOCK]);
+    return fn(c);
+  });
+}
+
 export async function tx<T>(db: Db, fn: (c: Tx) => Promise<T>): Promise<T> {
   const c = await db.connect();
   try {

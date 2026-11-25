@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { keyIdOf } from '../src/lib/inNumber';
 import { normalisePlate, plateKey } from '../src/lib/plate';
-import { tx, type Db } from './db';
+import { tx, txChanges, type Db } from './db';
 import { bearer, CONSOLE_ROLES, HttpError, MANAGER_ROLES, need, num, readBody, Router, secretMatches, send, STAFF_ROLES, str, type Ctx, type StaffRole } from './http';
 import { councilDay, recordResponse, registerSafety, upsertHit, type SafetyConfig } from './safety';
 import { acceptBundle, recordInfringementEvent, VOID_REASONS, type BundleIn } from './verify';
@@ -202,7 +202,7 @@ export function createApp(db: Db, cfg: Config) {
     const b = await c.body<BundleIn>();
     if (b.keyId !== keyId) throw new HttpError(422, 'key_mismatch', 'Bundle key does not match X-Device-Key.');
     if (!str(b.scanId, 64)) throw new HttpError(422, 'invalid', 'scanId is required.');
-    const out = await tx(db, (q) => acceptBundle(q, b, { council: cfg.council, now: now() }));
+    const out = await txChanges(db, (q) => acceptBundle(q, b, { council: cfg.council, now: now() }));
     await touchDevice(keyId);
     return out;
   });
@@ -213,7 +213,7 @@ export function createApp(db: Db, cfg: Config) {
     const b = await c.body<{ reason?: string; note?: string; requestedAt?: number; officerNumber?: string }>();
     const reason = str(b.reason, 40);
     if (!(VOID_REASONS as readonly string[]).includes(reason)) throw new HttpError(422, 'invalid', `reason must be one of ${VOID_REASONS.join(', ')}.`);
-    return tx(db, async (q) => {
+    return txChanges(db, async (q) => {
       const row = (await q.query<{ status: string; key_id: string }>('select status, key_id from infringements where number = $1 for update', [c.params.number])).rows[0];
       if (!row) throw new HttpError(404, 'not_found', 'No such infringement (sync the issue first).');
       if (row.key_id !== keyId) throw new HttpError(403, 'forbidden', 'Only the issuing device can request a void.');
@@ -320,7 +320,7 @@ export function createApp(db: Db, cfg: Config) {
     const s = await staffAuth(c, MANAGER_ROLES);
     const b = await c.body<{ approve?: boolean; note?: string }>();
     if (typeof b.approve !== 'boolean') throw new HttpError(422, 'invalid', 'approve must be true or false.');
-    const out = await tx(db, async (q) => {
+    const out = await txChanges(db, async (q) => {
       const x = (await q.query<{ status: string; void_request: Record<string, unknown> }>('select status, void_request from infringements where number = $1 for update', [c.params.number])).rows[0];
       if (!x) throw new HttpError(404, 'not_found', 'No such infringement.');
       if (x.status !== 'void_requested') throw new HttpError(409, 'state', `Infringement is ${x.status}, not awaiting a void decision.`);
@@ -337,7 +337,7 @@ export function createApp(db: Db, cfg: Config) {
   /** Development: simulate the customer paying (the council infringement system's event). */
   r.on('POST', '/api/console/infringements/:number/payment', async (c) => {
     const s = await staffAuth(c);
-    const out = await tx(db, async (q) => {
+    const out = await txChanges(db, async (q) => {
       const x = (await q.query<{ status: string }>('select status from infringements where number = $1 for update', [c.params.number])).rows[0];
       if (!x) throw new HttpError(404, 'not_found', 'No such infringement.');
       if (x.status !== 'issued') throw new HttpError(409, 'state', `A ${x.status} infringement cannot be paid.`);

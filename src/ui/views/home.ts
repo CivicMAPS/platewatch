@@ -9,7 +9,7 @@ import type { App, View } from '../app';
 import { canImportOnDevice, creatableListTypes, isActiveList, policyContext } from '../../lib/listPolicy';
 import { emptyState, header, icon, LIST_TYPE_META, page, statusPill, typeChip } from '../components';
 
-export function segmentLabel(l: TimedList): string {
+export function segmentLabel(l: Pick<TimedList, 'segment'>): string {
   return `${l.segment.street} — between ${l.segment.fromStreet} & ${l.segment.toStreet}`;
 }
 
@@ -135,9 +135,9 @@ export function homeView(_p: Record<string, string>, app: App): View {
     </section>`;
   };
 
-  const otherSection = (type: 'hot' | 'allow'): TemplateResult | typeof nothing => {
+  const otherSection = (type: 'hot' | 'allow' | 'permit_zone'): TemplateResult | typeof nothing => {
     const q = query.trim().toLowerCase();
-    const items = lists.filter((l) => l.type === type && (!q || l.name.toLowerCase().includes(q)));
+    const items = lists.filter((l) => l.type === type && (!q || (l.type === 'permit_zone' ? [l.name, segmentLabel(l), l.segment.suburb, l.councilCode, `RPA ${l.rpa}`].join(' ') : l.name).toLowerCase().includes(q)));
     if (!items.length) return nothing;
     return html`<section class="mb-6">
       <h2 class="section-title">${LIST_TYPE_META[type].label}s</h2>
@@ -146,7 +146,7 @@ export function homeView(_p: Record<string, string>, app: App): View {
           (l) => html`<li class="flex items-center gap-2 py-2">
             <button type="button" class="min-w-0 flex-1 text-left" @click=${() => app.navigate(`/list/${l.id}`)}>
               <p class="truncate text-sm font-semibold">${l.name}</p>
-              <p class="text-xs text-neutral-600">${l.type !== 'timed' ? `${l.entries.length} plate${l.entries.length === 1 ? '' : 's'}` : ''}</p>
+              <p class="text-xs text-neutral-600">${l.type === 'permit_zone' ? `${segmentLabel(l)} · ${l.councilCode} RPA ${l.rpa}` : l.type !== 'timed' ? `${l.entries.length} plate${l.entries.length === 1 ? '' : 's'}` : ''}</p>
             </button>
             ${scanButton(l)}
           </li>`,
@@ -180,7 +180,7 @@ export function homeView(_p: Record<string, string>, app: App): View {
             : lists.length === 0
               ? emptyState(
                   'No lists yet',
-                  canImport ? 'Import lists from a file, or create a timed, hot or allow list to start scanning number plates.' : 'Lists applied from CommandMAPS appear here. You can also create a timed list for today.',
+                  canImport ? 'Import lists from a file, or create a timed list, permit zone, hot list or allow list to start scanning number plates.' : 'Lists applied from CommandMAPS appear here. You can also create a timed list for today.',
                   html`<div class="grid w-full gap-2">
                     ${canImport ? html`<button type="button" class="btn-primary" data-testid="empty-import" @click=${() => app.navigate('/import')}>${icon('upload')} Import lists from a file</button>` : nothing}
                     ${canCreate ? html`<button type="button" class=${canImport ? 'btn-secondary' : 'btn-primary'} @click=${() => app.navigate('/new')}>${icon('plus')} Create list</button>` : nothing}</div>`,
@@ -195,7 +195,7 @@ export function homeView(_p: Record<string, string>, app: App): View {
                     </label>
                     <p id="search-help" class="sr-only">Searches patrol zone, RPA, road segment, EasyPark area, PayStay zone and meter ID. Start with rpa, meter, zone, easypark or paystay to search only that field.</p>
                   </div>
-                  ${timedSection(now)}${otherSection('hot')}${otherSection('allow')}`}
+                  ${timedSection(now)}${otherSection('permit_zone')}${otherSection('hot')}${otherSection('allow')}`}
           ${loaded && dismissedCount
             ? html`<button type="button" class="card flex w-full items-center justify-between text-left" data-testid="dismissed-link" @click=${() => app.navigate('/dismissed')}>
                 <span><span class="font-semibold">Dismissed captures</span><span class="block text-sm text-neutral-600">Patrol captures dismissed at review, kept apart from every list</span></span>

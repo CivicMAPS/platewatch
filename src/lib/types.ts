@@ -1,6 +1,6 @@
 /** Domain model for PlateWatch. All timestamps are epoch milliseconds (UTC). */
 
-export type ListType = 'allow' | 'timed' | 'hot';
+export type ListType = 'allow' | 'timed' | 'hot' | 'permit_zone';
 
 /**
  * Where a list came from (WF-S26 OQ26-5, owner decision 23/11/2026).
@@ -286,7 +286,14 @@ export interface HotList extends BaseList {
   entries: HotEntry[];
 }
 
-export type PlateList = AllowList | TimedList | HotList;
+export interface PermitZoneList extends BaseList {
+  type: 'permit_zone';
+  segment: StreetSegment;
+  councilCode: string;
+  rpa: string;
+}
+
+export type PlateList = AllowList | TimedList | HotList | PermitZoneList;
 
 /* ─────────────────────────── Capture metadata ─────────────────────────── */
 
@@ -325,6 +332,7 @@ export type ScanOutcome =
   | 'within_allowance' // re-sighting, still inside allowance
   | 'overstay' // re-sighting, allowance (+grace) exceeded
   | 'hot_sighting' // hot list match evidence
+  | 'permit_unconfirmed' // no applicable permit confirmed during this permit-zone check
   | 'permit_valid' // officer confirmed a permit exempts the vehicle here — sighting recorded, no allowance clock
   | 'flag_confirmed'; // known disability / emergency vehicle confirmed on check — recorded, no allowance clock
 

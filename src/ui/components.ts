@@ -302,6 +302,13 @@ export function plateBadge(plate: string, size: 'sm' | 'md' | 'lg' | 'xl' = 'md'
 }
 
 export const LIST_TYPE_META: Record<ListType, { label: string; short: string; description: string; icon: IconName; chip: string }> = {
+  permit_zone: {
+    label: 'Non-timed permit zone',
+    short: 'Permit zone',
+    description: 'Check residential permits for this parking area or street. No time allowance applies.',
+    icon: 'check',
+    chip: 'border-active-border bg-active-bg text-active-strong',
+  },
   timed: {
     label: 'Timed list',
     short: 'Timed',

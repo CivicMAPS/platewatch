@@ -9,7 +9,7 @@
  * Nothing here decides: a look-alike is never resolved without the officer (OQ28-3).
  */
 import { comparePlates } from './plate';
-import type { AllowEntry, AllowList, HotEntry, HotList, LookalikeLink, Observation, TimedList } from './types';
+import type { AllowEntry, AllowList, HotEntry, HotList, LookalikeLink, Observation, PermitZoneList, TimedList } from './types';
 
 export interface HotLookalike {
   source: 'hot';
@@ -36,9 +36,9 @@ export function hotLookalikes(plate: string, hotLists: readonly HotList[]): HotL
  * Permit entries the read is a look-alike of: allow lists linked to the timed list (the lists a
  * permit would apply through). A plate exactly on a list is a permit, not a look-alike.
  */
-export function permitLookalikes(plate: string, list: TimedList, allowLists: readonly AllowList[]): PermitLookalike[] {
+export function permitLookalikes(plate: string, list: TimedList | PermitZoneList, allowLists: readonly AllowList[]): PermitLookalike[] {
   return allowLists
-    .filter((a) => list.allowListIds.includes(a.id))
+    .filter((a) => list.type === 'permit_zone' || list.allowListIds.includes(a.id))
     .flatMap((a) => a.entries.filter((e) => comparePlates(plate, e.plate) === 'possible').map((entry) => ({ source: 'allow' as const, list: a, entry })));
 }
 
@@ -56,7 +56,7 @@ export function timedLookalikes(plate: string, listId: string, observations: rea
  */
 export function firstLookalike(
   plate: string,
-  sources: { hotLists: readonly HotList[]; allowLists: readonly AllowList[]; observations: readonly Observation[]; list: TimedList | null },
+  sources: { hotLists: readonly HotList[]; allowLists: readonly AllowList[]; observations: readonly Observation[]; list: TimedList | PermitZoneList | null },
 ): Lookalike | null {
   if (!plate) return null;
   return (

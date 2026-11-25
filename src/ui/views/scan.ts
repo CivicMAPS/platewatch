@@ -278,7 +278,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     try {
       const [hot,allow,observed] = await Promise.all([getHotLists(),getAllowLists(),getActiveObservations(list.id)]);
       const selected = list;
-      const keys = new Set([...hot.flatMap(l => l.entries),...allow.filter(l => selected.type === 'allow' ? l.id === selected.id : selected.type === 'timed' && selected.allowListIds.includes(l.id)).flatMap(l => l.entries),...observed].map(e => plateKey(e.plate)));
+      const keys = new Set([...hot.flatMap(l => l.entries),...allow.filter(l => selected.type === 'allow' ? l.id === selected.id : selected.type === 'permit_zone' || selected.type === 'timed' && selected.allowListIds.includes(l.id)).flatMap(l => l.entries),...observed].map(e => plateKey(e.plate)));
       listeners.push(await patrol.addListener('sighting', s => {
         // Best fix produced at or before the frame; a later fix must not displace older valid ones.
         const location = geo.bestRecent(s.at, s.at);
@@ -624,7 +624,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       }
       if (l.type === 'hot' && res.decision.kind === 'hot_match' && !res.hotHits.some((h) => h.list.id === l.id)) res.decision = { kind: 'hot_none' };
       // 2. Permit: a similar permit plate never exempts; the officer checks the displayed permit.
-      const openPermit = l.type === 'timed' && !permitDecided ? permitLookalikes(plate, l, allowLists) : [];
+      const openPermit = (l.type === 'timed' || l.type === 'permit_zone') && !permitDecided ? permitLookalikes(plate, l, allowLists) : [];
       if (openPermit.length) {
         lookalikePrompt = { kind: 'permit', items: openPermit };
         phase = 'confirm';
@@ -664,6 +664,9 @@ export function scanView(params: Record<string, string>, app: App): View {
         const applied = await applyTimed(plate, l, at, d);
         if (applied.saved) saved = applied.saved;
         ({ comparison, possibleFirsts } = applied);
+      } else if (d.kind === 'permit_unconfirmed') {
+        saved = await makeRecord(plate, l.id, 'permit_unconfirmed', null);
+        await saveScan(saved);
       }
       dismissOpen = false;
 
@@ -672,7 +675,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       const s = settings();
       if (res.hotHits.length) feedback('alarm', s);
       else if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
-      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'timed_flag_check') feedback('warn', s);
+      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'zone_permits' || d.kind === 'permit_unconfirmed' || d.kind === 'timed_flag_check') feedback('warn', s);
       else feedback('ok', s);
     } catch (e) {
       console.error(e);
@@ -730,18 +733,17 @@ export function scanView(params: Record<string, string>, app: App): View {
   };
 
   /** Run an officer decision on the result screen, keeping the result if saving fails. */
-  const decide = async (fn: (r: ResultState, l: TimedList, at: number) => Promise<ResultState>) => {
-    if (!result || !list || list.type !== 'timed' || !pending || phase === 'saving') return;
+  const saveDecision = async (fn: (r: ResultState, at: number) => Promise<ResultState>) => {
+    if (!result || !pending || phase === 'saving') return;
     const r = result;
-    const l = list;
     phase = 'saving';
     app.update();
     try {
-      result = await fn(r, l, pending.meta.capturedAt);
+      result = await fn(r, pending.meta.capturedAt);
       const d = result.decision;
       const s = settings();
       if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
-      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'timed_flag_check') feedback('warn', s);
+      else if (d.kind === 'timed_possible' || d.kind === 'timed_permit' || d.kind === 'zone_permits' || d.kind === 'permit_unconfirmed' || d.kind === 'timed_flag_check') feedback('warn', s);
       else feedback('ok', s);
     } catch (e) {
       app.toast(`Save failed: ${(e as Error).message}`, 'error');
@@ -749,6 +751,27 @@ export function scanView(params: Record<string, string>, app: App): View {
     phase = 'result';
     app.update();
   };
+
+  const decide = (fn: (r: ResultState, l: TimedList, at: number) => Promise<ResultState>) => {
+    const l = list;
+    if (l?.type === 'timed') return saveDecision((r, at) => fn(r, l, at));
+  };
+
+  const permitExemption = (hit: PermitHit): NonNullable<ScanRecord['exemption']> => ({
+    by: 'permit',
+    permitNo: hit.entry.permitNo,
+    listName: hit.list.name,
+    status: `${hit.validity} · ${hit.scope}${hit.basis ? ` · ${hit.basis}` : ''}`,
+  });
+
+  const finishZoneCheck = (hit?: PermitHit) => saveDecision(async (r) => {
+    if (list?.type !== 'permit_zone' || r.decision.kind !== 'zone_permits') return r;
+    if (hit && (!r.decision.hits.includes(hit) || hit.validity !== 'valid' || hit.scope !== 'applies')) return r;
+    const extra = hit ? { exemption: permitExemption(hit) } : {};
+    const saved = await makeRecord(r.plate, list.id, hit ? 'permit_valid' : 'permit_unconfirmed', null, extra);
+    await saveScan(saved);
+    return { ...r, decision: hit ? { kind: 'timed_exempt', hit } : { kind: 'permit_unconfirmed' }, saved };
+  });
 
   /** Continue with the timing behind a pop-up (permit not exempting here / known vehicle not confirmed). */
   const continueTiming = (r: ResultState, l: TimedList, at: number, next: Decision, extra: Partial<ScanRecord> = {}) =>
@@ -758,7 +781,7 @@ export function scanView(params: Record<string, string>, app: App): View {
   const acceptPermit = (hit: PermitHit) =>
     decide((r, l, at) => {
       const next: Decision = { kind: 'timed_exempt', hit };
-      return continueTiming(r, l, at, next, { exemption: { by: 'permit', permitNo: hit.entry.permitNo, listName: hit.list.name, status: `${hit.validity} · ${hit.scope}${hit.basis ? ` · ${hit.basis}` : ''}` } });
+      return continueTiming(r, l, at, next, { exemption: permitExemption(hit) });
     });
 
   /**
@@ -951,7 +974,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     <button type="button" class="btn min-h-11 px-2 text-white hover:bg-white/10" aria-label="Back" @click=${() => app.navigate(`/list/${listId}`)}>${icon('back', 'h-6 w-6')}</button>
     <div class="min-w-0 flex-1">
       <p class="truncate font-bold text-white">${list?.name ?? ''}</p>
-      <p class="truncate text-xs text-white/80">${list?.type === 'timed' ? segmentLabel(list) : list?.type === 'hot' ? 'Hot list scan' : 'Allow list check'}</p>
+      <p class="truncate text-xs text-white/80">${list?.type === 'timed' || list?.type === 'permit_zone' ? segmentLabel(list) : list?.type === 'hot' ? 'Hot list scan' : 'Allow list check'}</p>
     </div>
     ${settings().diagnostics
       ? html`<span class="inline-flex items-center gap-1 rounded-full border border-white/40 bg-black/50 px-2 py-0.5 text-xs font-semibold tracking-[0.04em] text-white" data-testid="diag-indicator" title="Field diagnostics recording">${icon('activity', 'h-3.5 w-3.5')} DIAG</span>`
@@ -1090,7 +1113,7 @@ export function scanView(params: Record<string, string>, app: App): View {
       return nothing;
     }
     const plate = normalisePlate(plateInput);
-    const x = firstLookalike(plate, { ...hintSources, list: list?.type === 'timed' ? list : null });
+    const x = firstLookalike(plate, { ...hintSources, list: list?.type === 'timed' || list?.type === 'permit_zone' ? list : null });
     if (!x) return nothing;
     const text =
       x.source === 'hot'
@@ -1353,6 +1376,9 @@ export function scanView(params: Record<string, string>, app: App): View {
           'result-exempt',
         );
       }
+      case 'permit_unconfirmed':
+        return statusCard('verify', 'Permit unconfirmed', 'Check the vehicle for a displayed area or street permit. This sighting has been recorded.', 'result-zone-unconfirmed', 'Permit zone');
+      case 'zone_permits':
       case 'timed_permit':
         return statusCard('verify', 'Permit on record', 'Check the permit details and decide whether it exempts the vehicle here.', 'result-permit', 'Permit held');
       case 'timed_flag_check':
@@ -1662,7 +1688,7 @@ export function scanView(params: Record<string, string>, app: App): View {
         </button>
       </div>
       ${r.decision.kind === 'timed_flag_check' ? flagSheet(r.decision) : nothing}
-      ${r.decision.kind === 'timed_permit' ? permitSheet(r.decision) : nothing}
+      ${r.decision.kind === 'timed_permit' || r.decision.kind === 'zone_permits' ? permitSheet(r.decision) : nothing}
       ${dismissOpen ? dismissSheet(r) : nothing}
       ${handoffOffer ? handoffSheet(handoffOffer) : nothing}
     </div>`;
@@ -1670,7 +1696,7 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /** A decision the officer must make before moving on (WF-S28 28b.6, 28g.4). */
   const openDecision = (r: ResultState): boolean =>
-    r.decision.kind === 'timed_possible' || r.decision.kind === 'timed_permit' || r.decision.kind === 'timed_flag_check' || mustAcknowledge(r) || paymentRequired(r);
+    r.decision.kind === 'timed_possible' || r.decision.kind === 'timed_permit' || r.decision.kind === 'zone_permits' || r.decision.kind === 'timed_flag_check' || mustAcknowledge(r) || paymentRequired(r);
 
   /** Paid space: the numbers to check at this scan. */
   const isPaidSpace = (): boolean => paymentLines(pending?.meta.payment).length > 0;
@@ -1821,23 +1847,25 @@ export function scanView(params: Record<string, string>, app: App): View {
    * Permit pop-up (owner direction 23/11/2026): valid or expired only, with the same details either
    * way for the officer to check visually — solid green border when valid, blinking red when expired.
    */
-  const permitSheet = (d: Extract<Decision, { kind: 'timed_permit' }>) => {
+  const permitSheet = (d: Extract<Decision, { kind: 'timed_permit' | 'zone_permits' }>) => {
+    const zone = list?.type === 'permit_zone' ? list : null;
     const anyApplies = d.hits.some((h) => h.validity === 'valid' && (h.scope === 'applies' || h.scope === 'payment_only'));
     return decisionSheet({
       testid: 'permit-sheet',
       pill: statusPill('verify', d.hits.length === 1 ? 'Permit on record' : `${d.hits.length} permits on record`),
       title: `${result?.plate ?? ''} holds a permit`,
-      body: html`<p>Check the permit against the vehicle. Exempt only if holding this permit at this location makes the vehicle exempt; otherwise continue and the vehicle is timed as usual.</p>
+      body: html`<p>${zone ? `Check the vehicle and verify a street permit’s registered address lies on this segment of ${zone.segment.street} between ${zone.segment.fromStreet} and ${zone.segment.toStreet} (${zone.councilCode.toUpperCase()}, RPA ${zone.rpa}).` : 'Check the permit against the vehicle. Exempt only if holding this permit at this location makes the vehicle exempt; otherwise continue and the vehicle is timed as usual.'}</p>
         <ul class="mt-3 grid gap-3">
           ${d.hits.map((h) => {
             const e = h.entry;
             const valid = h.validity === 'valid';
-            return html`<li class="rounded-md bg-surface p-3 ${valid ? 'permit-valid' : 'permit-expired'}" data-testid="permit-hit" data-validity=${h.validity} data-scope=${h.scope}>
+            const unverified = h.validity === 'unverified';
+            return html`<li class="rounded-md bg-surface p-3 ${valid ? 'permit-valid' : unverified ? 'border border-neutral-300' : 'permit-expired'}" data-testid="permit-hit" data-validity=${h.validity} data-scope=${h.scope}>
               <div class="flex flex-wrap items-center gap-2">
                 ${plateBadge(e.plate, 'sm')}
-                <span class="text-sm font-bold tracking-[0.06em] uppercase ${valid ? 'permit-status-valid' : 'permit-status-expired'}" data-testid="permit-validity">${valid ? 'Valid' : 'Expired'}</span>
+                <span class="text-sm font-bold tracking-[0.06em] uppercase ${valid ? 'permit-status-valid' : unverified ? '' : 'permit-status-expired'}" data-testid="permit-validity">${valid ? 'Valid' : unverified ? 'Validity unverified' : 'Expired'}</span>
               </div>
-              <p class="mt-1 text-sm font-semibold text-neutral-900" data-testid="permit-scope">${PERMIT_SCOPE_TEXT[h.scope]}${h.basis ? ` (${h.basis})` : ''}</p>
+              <p class="mt-1 text-sm font-semibold text-neutral-900" data-testid="permit-scope">${zone && h.scope !== 'applies' ? 'Area or street entitlement unconfirmed here' : PERMIT_SCOPE_TEXT[h.scope]}${h.basis ? ` (${h.basis})` : ''}</p>
               <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
                 ${e.permitNo ? html`<dt class="text-neutral-600">Permit</dt><dd class="font-plate">${e.permitNo}</dd>` : nothing}
                 ${e.permitTypes?.length ? html`<dt class="text-neutral-600">Type</dt><dd>${e.permitTypes.map((t) => `${t} · ${PERMIT_TYPE_LABEL[t]}`).join(' + ')}</dd>` : nothing}
@@ -1851,13 +1879,13 @@ export function scanView(params: Record<string, string>, app: App): View {
               </dl>
               ${valid && h.scope === 'payment_only'
                 ? html`<button type="button" class="btn-primary mt-3 w-full" data-testid="permit-foreshore" @click=${() => void acceptForeshore(h)}>${icon('check')} No payment (foreshore) — time limits apply</button>`
-                : valid
-                  ? html`<button type="button" class=${`${h.scope === 'applies' ? 'btn-primary' : 'btn-secondary'} mt-3 w-full`} data-testid="permit-exempt" @click=${() => void acceptPermit(h)}>${icon('check')} Exempt here${e.permitNo ? ` — ${e.permitNo}` : ''}</button>`
+                : valid && (!zone || h.scope === 'applies')
+                  ? html`<button type="button" class=${`${h.scope === 'applies' ? 'btn-primary' : 'btn-secondary'} mt-3 w-full`} data-testid="permit-exempt" @click=${() => void (zone ? finishZoneCheck(h) : acceptPermit(h))}>${icon('check')} Exempt here${e.permitNo ? ` — ${e.permitNo}` : ''}</button>`
                   : nothing}
             </li>`;
           })}
         </ul>`,
-      actions: html`<button type="button" class=${anyApplies ? 'btn-secondary' : 'btn-primary'} data-testid="permit-continue" @click=${() => void declinePermit()}>Not exempt here — continue</button>`,
+      actions: html`<button type="button" class=${anyApplies ? 'btn-secondary' : 'btn-primary'} data-testid="permit-continue" @click=${() => void (zone ? finishZoneCheck() : declinePermit())}>${zone ? 'Record permit unconfirmed' : 'Not exempt here — continue'}</button>`,
     });
   };
 

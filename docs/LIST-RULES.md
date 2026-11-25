@@ -23,7 +23,7 @@ is **development**, so a typo can never lock officers out during field testing.
 | | Development (now) | EnforcementMAPS (after integration) |
 |---|---|---|
 | Import lists from a file | Yes, on the device | No: done in **CommandMAPS** by team leaders and parking services management with import authorisation (`canImportInCommandMaps`) |
-| Create lists | Timed, hot, allow | Officers: timed only (daily digital chalking lists) |
+| Create lists | Timed, non-timed permit zone, hot, allow | Officers: timed only (daily digital chalking lists) |
 | Paid parking on a list made on the device | Yes | No: officer lists are for segments with time restrictions that are not linked to paid parking |
 | Edit / delete a system list | Yes (form shows a "System list — editable in this development build" notice) | No: ✎ and Delete are hidden; a read-only notice is shown |
 | Edit / delete an officer list | Yes | Yes, on the day it was created |

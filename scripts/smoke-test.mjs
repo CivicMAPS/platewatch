@@ -187,6 +187,40 @@ async function main() {
   await waitText('Allowed plates (2)');
   log('allow list saved, including a permit typed but not yet added');
 
+  // Create and patrol a non-timed permit zone from the normal list picker.
+  await page.goto(`${ORIGIN}/#/new`);
+  await click('Non-timed permit zone');
+  await type('#name', 'Smith Street residents');
+  await type('#street', 'Smith St');
+  await type('#from', 'Johnston Street');
+  await type('#to', 'Gertrude Street');
+  await type('#councilCode', 'com');
+  await type('#rpa', '12');
+  await click('Save list');
+  await waitText('Permit zone segment');
+  const permitZoneUrl = page.url();
+  await click('Scan number plate');
+  for (const plate of ['RES001', 'XYZ777']) {
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
+    await type('[data-testid=plate-input]', plate);
+    await page.click('[data-testid=check]');
+    if (plate === 'RES001') {
+      await page.waitForSelector('[data-testid=permit-hit][data-scope=applies]');
+      await page.click('[data-testid=permit-exempt]');
+      await page.waitForSelector('[data-testid=result-exempt]');
+      await page.click('[data-testid=next-scan]');
+    } else {
+      await page.waitForSelector('[data-testid=result-zone-unconfirmed]');
+    }
+  }
+  await page.goto(permitZoneUrl);
+  await waitText('Recent scan records');
+  await waitText('Permit unconfirmed');
+  await waitText('Permit valid');
+  log('permit zone created from the list picker and both residential permit check outcomes saved');
+
   // Hot list
   await page.goto(`${ORIGIN}/#/new/hot`);
   await type('#name', 'Officer safety');

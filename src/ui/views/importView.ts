@@ -114,7 +114,7 @@ export function importView(_p: Record<string, string>, app: App): View {
 
   const counts = (p: ImportPlan) => {
     const by = (type: PlateList['type'], ls: PlateList[]) => ls.filter((l) => l.type === type).length;
-    const entries = [...p.created, ...p.updated].reduce((n, l) => n + (l.type === 'timed' ? 0 : l.entries.length), 0);
+    const entries = [...p.created, ...p.updated].reduce((n, l) => n + ('entries' in l ? l.entries.length : 0), 0);
     return { timedNew: by('timed', p.created), timedUpd: by('timed', p.updated), otherNew: p.created.length - by('timed', p.created), otherUpd: p.updated.length - by('timed', p.updated), entries };
   };
 

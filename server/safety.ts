@@ -320,13 +320,25 @@ export function registerSafety(
     const me = await officerOf(db, officer);
     const branch = me?.branch ?? cfg.defaultBranch;
     const since = new Date(h.now() - 12 * 3600_000);
-    // Open alerts stay until their life cycle closes, however old; the 12 h window is for closed ones.
-    const own = await db.query(`select ${ALERT_COLS} from alerts a where a.officer_number = $1 and (${OPEN} or a.raised_at > $2) order by a.raised_at desc limit 20`, [officer, since]);
+    // Every open alert, however old or many, is returned; the 12 h window and the limit of 20 apply
+    // only to closed history, so recent history can never push an open emergency off the feed.
+    const own = await db.query(
+      `(select ${ALERT_COLS} from alerts a where a.officer_number = $1 and ${OPEN})
+       union all
+       (select ${ALERT_COLS} from alerts a where a.officer_number = $1 and not ${OPEN} and a.raised_at > $2 order by a.raised_at desc limit 20)`,
+      [officer, since],
+    );
     const branchC1 = await db.query(
-      `select ${ALERT_COLS}, exists (select 1 from alert_receipts r where r.alert_id = a.id and r.officer_number = $3) as received
-       from alerts a where a.kind = 'code1' and a.branch = $1 and a.officer_number <> $3 and (${OPEN} or a.closed_at > $2) order by a.raised_at desc limit 20`,
+      `(select ${ALERT_COLS}, exists (select 1 from alert_receipts r where r.alert_id = a.id and r.officer_number = $3) as received
+        from alerts a where a.kind = 'code1' and a.branch = $1 and a.officer_number <> $3 and ${OPEN})
+       union all
+       (select ${ALERT_COLS}, exists (select 1 from alert_receipts r where r.alert_id = a.id and r.officer_number = $3) as received
+        from alerts a where a.kind = 'code1' and a.branch = $1 and a.officer_number <> $3 and not ${OPEN} and a.closed_at > $2 order by a.closed_at desc limit 20)`,
       [branch, since, officer],
     );
+    const newest = (x: Record<string, any>, y: Record<string, any>) => y.raised_at.getTime() - x.raised_at.getTime();
+    own.rows.sort(newest);
+    branchC1.rows.sort(newest);
     return { officerNumber: officer, branch, own: own.rows.map(alertJson), branch_code1: branchC1.rows.map((a) => ({ ...alertJson(a), received: a.received })) };
   });
 

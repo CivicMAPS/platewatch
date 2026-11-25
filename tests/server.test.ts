@@ -385,6 +385,19 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     expect((await call('GET', '/api/alerts/live', asOfficer('5123'))).json.branch_code1.find((a: { id: string }) => a.id === 'c1-old')).toMatchObject({ status: 'cancelled' });
   });
 
+  it('recent closed history never pushes an open Code 1 off the live feed', async () => {
+    await call('POST', '/api/code1', { body: { id: 'c1-open-old', cause: 'officer_duress', at: t(9) - 3600_000, location: null }, ...asOfficer('4471') });
+    for (let i = 0; i < 21; i++) {
+      await call('POST', '/api/code1', { body: { id: `c1-closed-${i}`, cause: 'officer_duress', at: t(9) - 1800_000 + i * 1000, location: null }, ...asOfficer('4471') });
+      await call('POST', `/api/console/alerts/c1-closed-${i}/cancel`, { staff: 'D1', body: { reason: 'test' } });
+    }
+    const live = (await call('GET', '/api/alerts/live', asOfficer('5123'))).json.branch_code1 as { id: string; status: string }[];
+    expect(live.find((a) => a.id === 'c1-open-old')).toMatchObject({ status: 'active' });
+    expect(live.filter((a) => a.status === 'cancelled').length).toBeLessThanOrEqual(20);
+    expect((await call('GET', '/api/alerts/live', asOfficer('4471'))).json.own.map((a: { id: string }) => a.id)).toContain('c1-open-old');
+    await call('POST', '/api/console/alerts/c1-open-old/cancel', { staff: 'D1', body: { reason: 'test' } });
+  });
+
   it('a hit reported before the officer number was known takes the number of the officer who answers it', async () => {
     const h8 = hit('h8', t(9, 3), '', { plate: 'RSP808', hotListEntryId: 'e8' });
     await call('POST', '/api/hot-hits', { body: { hit: h8 } });

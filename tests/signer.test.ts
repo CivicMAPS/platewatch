@@ -91,4 +91,14 @@ describe('I-N signer across tabs sharing one device key', () => {
     const keys = (await getOutbox()).map((x) => x.key);
     expect(keys).toEqual(expect.arrayContaining([`infringement:${n.number}`, 'evidence:first', 'evidence:s1']));
   });
+
+  it('a signing operation stays on the backend scope it started with, even if Settings change meanwhile', async () => {
+    const [a] = await twoTabs();
+    const { getKv } = await import('../src/lib/db');
+    let calls = 0;
+    a.setSigningScope(() => (calls++ === 0 ? 'https://a.example' : 'https://b.example')); // switches after the first read
+    const n = await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's1' });
+    expect(await getKv<{ prevHash: string }>('inChain:https://a.example')).toMatchObject({ prevHash: n.allocation.hash });
+    expect(await getKv('inChain:https://b.example')).toBeUndefined();
+  });
 });

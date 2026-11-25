@@ -38,9 +38,10 @@ let scope: () => string = () => '';
 export function setSigningScope(fn: () => string): void {
   scope = fn;
 }
-const scoped = (name: string) => (scope() ? `${name}:${scope()}` : name);
-const KEY = () => scoped('signingKey');
-const CHAIN = () => scoped('inChain');
+const scoped = (name: string, sc: string) => (sc ? `${name}:${sc}` : name);
+/** Keys for one backend scope. Each signing operation captures the scope once and uses it throughout. */
+const KEY = (sc: string) => scoped('signingKey', sc);
+const CHAIN = (sc: string) => scoped('inChain', sc);
 const bundleKey = (n: string) => `inBundle:${n}`;
 
 interface LockManagerLike {
@@ -71,8 +72,8 @@ function exclusive<T>(fn: () => Promise<T>): Promise<T> {
 /** First use of a scope: one key, however many callers ask at once (else two keys race). */
 const creating = new Map<string, Promise<StoredKey>>();
 
-export function deviceKey(): Promise<StoredKey> {
-  const key = KEY();
+export function deviceKey(sc: string = scope()): Promise<StoredKey> {
+  const key = KEY(sc);
   const pending = creating.get(key);
   if (pending) return pending;
   const p = crossContext(`platewatch-key:${key}`, async () => {
@@ -88,8 +89,8 @@ export function deviceKey(): Promise<StoredKey> {
   return p;
 }
 
-async function chain(keyId: string): Promise<ChainState> {
-  const c = await getKv<ChainState>(CHAIN());
+async function chain(keyId: string, sc: string): Promise<ChainState> {
+  const c = await getKv<ChainState>(CHAIN(sc));
   return c && c.keyId === keyId ? c : { keyId, prevHash: GENESIS_HASH, pools: {} };
 }
 
@@ -98,8 +99,8 @@ export async function getBundle(number: string): Promise<StoredBundle | undefine
 }
 
 /** The new chain head, the signed bundle and its outbox row: one transaction (never a chain gap). */
-async function commit(chainState: ChainState, b: StoredBundle, evidence: readonly string[] = []): Promise<void> {
-  await putKvsAndQueue([[CHAIN(), chainState], [bundleKey(b.number), b]], [{ kind: 'infringement', id: b.number }, ...evidence.map((id) => ({ kind: 'evidence' as const, id }))]);
+async function commit(sc: string, chainState: ChainState, b: StoredBundle, evidence: readonly string[] = []): Promise<void> {
+  await putKvsAndQueue([[CHAIN(sc), chainState], [bundleKey(b.number), b]], [{ kind: 'infringement', id: b.number }, ...evidence.map((id) => ({ kind: 'evidence' as const, id }))]);
 }
 
 const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|${day}`;
@@ -111,9 +112,10 @@ const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|$
 export function raisePoolFloors(officer: string, pools: readonly { day: string; lastSequence: number }[], forScope?: string): Promise<void> {
   return exclusive(async () => {
     // Pools from one backend never raise another backend's chain (Settings changed meanwhile).
-    if (forScope !== undefined && scope() !== forScope) return;
-    const k = await deviceKey();
-    const c = await chain(k.keyId);
+    const sc = scope();
+    if (forScope !== undefined && sc !== forScope) return;
+    const k = await deviceKey(sc);
+    const c = await chain(k.keyId, sc);
     let changed = false;
     const next = { ...c.pools };
     for (const p of pools) {
@@ -123,15 +125,17 @@ export function raisePoolFloors(officer: string, pools: readonly { day: string; 
         changed = true;
       }
     }
-    if (changed) await putKv(CHAIN(), { ...c, pools: next } satisfies ChainState);
+    if (changed) await putKv(CHAIN(sc), { ...c, pools: next } satisfies ChainState);
   });
 }
 
 /** Allocate the next number for `officer` today. Queued for the backend at once (no chain gaps). */
 export function allocateNumber(args: { officer: string; council: string; scanId: string; now?: number }): Promise<StoredBundle> {
   return exclusive(async () => {
-    const k = await deviceKey();
-    const c = await chain(k.keyId);
+    // One backend scope for the whole read-sign-commit, even if Settings change while signing.
+    const sc = scope();
+    const k = await deviceKey(sc);
+    const c = await chain(k.keyId, sc);
     const now = args.now ?? Date.now();
     const d = new Date(now);
     const day = `${String(d.getFullYear() % 100).padStart(2, '0')}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -139,7 +143,7 @@ export function allocateNumber(args: { officer: string; council: string; scanId:
     const sequence = (c.pools[pool] ?? 0) + 1;
     const { number, allocation } = await allocate({ privateKey: k.privateKey, keyId: k.keyId, council: args.council, officer: args.officer, sequence, prevHash: c.prevHash, now, timestamp: toLocalIso(now) });
     const b: StoredBundle = { number, scanId: args.scanId, keyId: k.keyId, allocation: allocation as unknown as IssueBundle['allocation'], createdAt: now };
-    await commit({ ...c, prevHash: allocation.hash, pools: { ...c.pools, [pool]: sequence } }, b);
+    await commit(sc, { ...c, prevHash: allocation.hash, pools: { ...c.pools, [pool]: sequence } }, b);
     return b;
   });
 }
@@ -155,10 +159,11 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
       if (record && (b.closing.statement as { type?: string }).type !== 'issue') throw new Error(`${number} was already cancelled as left open; start the infringement again for a new number.`);
       return b;
     }
-    const k = await deviceKey();
+    const sc = scope(); // one backend scope for the whole read-sign-commit
+    const k = await deviceKey(sc);
     // Allocated under another backend's key: only that key (and that backend) can close it.
     if (b.keyId !== k.keyId) throw new Error(`${number} was allocated for another backend; switch back to it to close the number.`);
-    const c = await chain(k.keyId);
+    const c = await chain(k.keyId, sc);
     const statement: IssueStatement = {
       v: 1,
       type: record ? 'issue' : 'cancel',
@@ -174,7 +179,7 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
     // The evidence uploads are queued in the same transaction as the signed issue: an interruption
     // can never leave an issued number whose photos are not on their way.
     const evidence = record ? ((record.handoff as { evidence?: { scanId?: string }[] }).evidence ?? []).map((e) => e.scanId).filter((id): id is string => !!id) : [];
-    await commit({ ...c, prevHash: closing.hash }, next, evidence);
+    await commit(sc, { ...c, prevHash: closing.hash }, next, evidence);
     return next;
   });
 }

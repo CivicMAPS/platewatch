@@ -116,6 +116,8 @@ const emptyHotDraft = (): HotDraft => ({
   bodyType: '',
   colour: '',
   notes: '',
+  alertMessage: '',
+  ownerDescription: '',
 });
 
 export function listFormView(params: Record<string, string>, app: App): View {
@@ -736,6 +738,8 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
       colour: hotDraft.colour,
       ...(hotDraft.model ? { model: hotDraft.model } : {}),
       notes: hotDraft.notes.trim(),
+      ...(hotDraft.alertMessage?.trim() ? { alertMessage: hotDraft.alertMessage.trim() } : {}),
+      ...(hotDraft.ownerDescription?.trim() ? { ownerDescription: hotDraft.ownerDescription.trim() } : {}),
       addedAt: l.entries.find((x) => x.id === hotDraft.id)?.addedAt ?? Date.now(),
     };
     set(() => {
@@ -782,6 +786,17 @@ ${allowsPaidParking(l, policy) ? paymentFields(l) : nothing}
     </fieldset>
     <p class="field-label -mb-1">Vehicle details</p>
     ${vehicleFields({ id: 'hot', value: vehicleOf(hotDraft), onChange: (patch) => set(() => Object.assign(hotDraft, patch)) })}
+    <div>
+      <label class="field-label" for="hot-alert">Alert message</label>
+      <input id="hot-alert" class="field" maxlength="160" .value=${hotDraft.alertMessage ?? ''} placeholder="Do not approach — prior aggressive male driver interaction"
+        @input=${(e: Event) => (hotDraft.alertMessage = (e.target as HTMLInputElement).value)} />
+      <p class="mt-1 text-xs text-neutral-600">Shown first on the officer’s hot-list pop-up: a brief instruction and its cause.</p>
+    </div>
+    <div>
+      <label class="field-label" for="hot-owner">Registered owner description</label>
+      <input id="hot-owner" class="field" maxlength="300" .value=${hotDraft.ownerDescription ?? ''} placeholder="Where known, e.g. male, 40s, heavy build"
+        @input=${(e: Event) => (hotDraft.ownerDescription = (e.target as HTMLInputElement).value)} />
+    </div>
     <div>
       <label class="field-label" for="hot-notes">Notes</label>
       <textarea id="hot-notes" class="field min-h-20" maxlength="1000" .value=${hotDraft.notes} placeholder="Incident references, behaviour, officer guidance…"

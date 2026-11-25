@@ -1,11 +1,15 @@
 import pg from 'pg';
 import migration001 from './migrations/001_init.sql?raw';
+import migration002 from './migrations/002_safety.sql?raw';
 
 export type Db = pg.Pool;
 export type Tx = pg.PoolClient;
 
 /** Migrations bundled into the server (in order). */
-const MIGRATIONS: { id: string; sql: string }[] = [{ id: '001_init', sql: migration001 }];
+const MIGRATIONS: { id: string; sql: string }[] = [
+  { id: '001_init', sql: migration001 },
+  { id: '002_safety', sql: migration002 },
+];
 
 // timestamptz → epoch-ms numbers are produced in SQL where needed; keep Date objects otherwise.
 export function createPool(url: string): Db {

@@ -10,17 +10,18 @@
  *   `window.EnforcementMAPS` so hot-list alerts reach the console and Issue infringement works
  *   end to end (the wizard runs on the device; the I-N is allocated and signed here, offline-safe).
  */
-import { countOutbox, getHotEvent, getOutbox, getScan, markOutboxFailed, putHotEvent, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation, getHotLists } from './db';
-import type { EnforcementMapsHost } from './host';
+import { countOutbox, getHotEvent, getOutbox, getScan, markOutboxFailed, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation } from './db';
+import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
+import { setAckSeconds } from './safety';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
 import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen } from './signer';
 import { toLocalIso } from './time';
-import type { HotListEvent, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
+import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
 export interface BackendState {
   configured: boolean;
-  device?: { keyId: string; status: 'pending' | 'approved' | 'revoked' | 'unregistered'; council?: string };
+  device?: { keyId: string; status: 'pending' | 'approved' | 'revoked' | 'unregistered'; council?: string; hotAckSeconds?: number };
   lastSyncAt?: number;
   lastError?: string;
   pending: number;
@@ -69,7 +70,12 @@ async function request<T>(method: string, path: string, opts: { json?: unknown; 
   const s = settingsRef();
   const base = s.backendUrl.trim().replace(/\/+$/, '');
   const keyId = (await getKv<{ keyId: string }>(DEVICE))?.keyId;
-  const headers: Record<string, string> = { Authorization: `Bearer ${s.backendToken.trim()}`, ...(keyId ? { 'X-Device-Key': keyId } : {}), ...(opts.headers ?? {}) };
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${s.backendToken.trim()}`,
+    ...(keyId ? { 'X-Device-Key': keyId } : {}),
+    ...(s.officerNumber?.trim() ? { 'X-Officer-Number': s.officerNumber.trim() } : {}),
+    ...(opts.headers ?? {}),
+  };
   if (opts.json !== undefined) headers['Content-Type'] = 'application/json';
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000);
@@ -98,11 +104,12 @@ async function request<T>(method: string, path: string, opts: { json?: unknown; 
 /** Register this device's signing key (idempotent). */
 export async function registerDevice(): Promise<NonNullable<BackendState['device']>> {
   const k = await deviceKey();
-  const out = await request<{ keyId: string; status: 'pending' | 'approved' | 'revoked'; council: string }>('POST', '/api/devices/register', {
+  const out = await request<{ keyId: string; status: 'pending' | 'approved' | 'revoked'; council: string; hotAckSeconds?: number }>('POST', '/api/devices/register', {
     json: { publicJwk: k.publicJwk, label: typeof navigator === 'undefined' ? 'device' : navigator.userAgent.slice(0, 120), officerNumber: settingsRef().officerNumber },
     headers: { 'X-Device-Key': k.keyId },
   });
-  const device = { keyId: out.keyId, status: out.status, council: out.council };
+  const device = { keyId: out.keyId, status: out.status, council: out.council, hotAckSeconds: out.hotAckSeconds };
+  if (out.hotAckSeconds) setAckSeconds(out.hotAckSeconds);
   await putKv(DEVICE, device);
   setState({ device });
   return device;
@@ -240,7 +247,6 @@ async function pullUpdates(): Promise<void> {
   const u = await request<{
     cursor: number;
     infringements: { number: string; scanId: string; status: InfringementRecord['status'] | 'paid' | 'allocated'; voidRequest: InfringementRecord['voidRequest'] & { decision?: 'approved' | 'rejected'; decidedBy?: string; decidedAt?: number }; paidAt: number | null }[];
-    alerts: { id: string; status: string; acknowledgedBy: { recipient: 'dispatch' | 'compliance_coordinator'; by: string; at: number }[] }[];
   }>('GET', `/api/updates?since=${since}`);
   for (const x of u.infringements) {
     if (x.status === 'allocated') continue;
@@ -254,19 +260,7 @@ async function pullUpdates(): Promise<void> {
         : {}),
     }));
   }
-  for (const a of u.alerts) {
-    const e = await getHotEvent(a.id);
-    if (!e?.notification) continue;
-    await putHotEventQuiet({ ...e, notification: { ...e.notification, status: 'sent', acknowledgedBy: a.acknowledgedBy } });
-  }
   await putKv(CURSOR, u.cursor);
-}
-
-/** Save without re-queueing (a server update is not a device change). */
-async function putHotEventQuiet(e: HotListEvent): Promise<void> {
-  await putHotEvent(e);
-  const row = (await getOutbox()).find((x) => x.key === `hotEvent:${e.id}`);
-  if (row) await removeOutbox(row.key, row.queuedAt);
 }
 
 let running: Promise<void> | null = null;
@@ -412,7 +406,11 @@ export function installBackend(getSettings: () => Settings): void {
   const configured = isConfigured();
   setState({ configured });
   void getKv<number>(LAST).then((lastSyncAt) => lastSyncAt && setState({ lastSyncAt }));
-  void getKv<BackendState['device']>(DEVICE).then((device) => device && setState({ device }));
+  void getKv<BackendState['device']>(DEVICE).then((device) => {
+    if (!device) return;
+    setState({ device });
+    if (device.hotAckSeconds) setAckSeconds(device.hotAckSeconds);
+  });
   void countOutbox().then((pending) => setState({ pending }));
   if (installed || window.EnforcementMAPS) return;
   installed = true;
@@ -420,16 +418,33 @@ export function installBackend(getSettings: () => Settings): void {
     get officerNumber() {
       return isConfigured() ? settingsRef().officerNumber : undefined;
     },
-    async sendHotListAlert(event: HotListEvent) {
+    async reportHotHit(hit: HotHitPayload) {
       if (!isConfigured()) throw new Error('No backend configured.');
-      const entry = (await getHotLists()).flatMap((l) => l.entries).find((x) => x.id === event.hotListEntryId);
-      const out = await request<{ sentAt: number }>('POST', '/api/hot-alerts', {
-        json: { event, entry: entry ? { riskLevel: entry.riskLevel, risks: entry.risks, make: entry.make, type: entry.bodyType, colour: entry.colour } : undefined },
-        timeoutMs: 10_000,
-      });
-      if (event.scanId) await enqueue('evidence', event.scanId);
-      requestSync();
-      return out;
+      await request('POST', '/api/hot-hits', { json: { hit }, timeoutMs: 8000 });
+      if (hit.scanId) await enqueue('evidence', hit.scanId);
+    },
+    async raiseSoftCode1(args) {
+      if (!isConfigured()) throw new Error('No backend configured.');
+      return request<{ id: string | null }>('POST', '/api/alerts/soft-code1', { json: args, timeoutMs: 10_000 });
+    },
+    async raiseCode1(args) {
+      if (!isConfigured()) throw new Error('No backend configured.');
+      return request<{ id: string }>('POST', '/api/code1', { json: args, timeoutMs: 10_000 });
+    },
+    async code1Location(id, location) {
+      await request('POST', `/api/code1/${encodeURIComponent(id)}/location`, { json: location, timeoutMs: 8000 });
+    },
+    async cancelCode1(id, reason) {
+      await request('POST', `/api/code1/${encodeURIComponent(id)}/cancel`, { json: { reason }, timeoutMs: 8000 });
+    },
+    async liveAlerts() {
+      return request<{ own: LiveAlert[]; branch_code1: LiveAlert[] }>('GET', '/api/alerts/live', { timeoutMs: 6000 });
+    },
+    async receiveCode1(id) {
+      await request('POST', `/api/alerts/${encodeURIComponent(id)}/receipt`, { json: {}, timeoutMs: 6000 });
+    },
+    async hotProfile(plate, entryId) {
+      return request<HotProfile>('GET', `/api/hot-profile?${new URLSearchParams({ plate, entryId })}`, { timeoutMs: 8000 });
     },
     async startInfringement(handoff: InfringementHandoff) {
       if (!isConfigured()) throw new Error('No backend configured.');

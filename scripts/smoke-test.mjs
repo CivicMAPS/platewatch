@@ -234,6 +234,8 @@ async function main() {
   await type('#hot-make', 'Toyota');
   await page.select('#hot-bodyType', 'wagon');
   await page.select('#hot-colour', 'Blue');
+  await type('#hot-alert', 'Do not approach — prior aggressive male driver interaction');
+  await type('#hot-owner', 'Male, 40s, heavy build');
   await click('Add vehicle');
   await click('Save list');
   await waitText('High-risk vehicles (1)');
@@ -502,30 +504,51 @@ async function main() {
   await type('[data-testid=plate-input]', 'BAD999');
   await page.click('[data-testid=check]');
   await page.waitForSelector('[data-testid=hot-alert]', { timeout: 20000 });
-  const hotText = await page.$eval('[data-testid=hot-alert]', (el) => el.innerText);
-  if (!/Extreme risk/i.test(hotText) || !/Blue Toyota Wagon · Private/i.test(hotText) || !/Spitting/i.test(hotText)) throw new Error('hot alert details missing');
-  // WF-S29: Next scan stays disabled until the officer acknowledges; needs an officer number.
-  await page.waitForSelector('[data-testid=hot-ack-officer-required]', { visible: true });
-  if (!(await page.$eval('[data-testid=next-scan]', (b) => b.disabled))) throw new Error('Next scan enabled before acknowledging');
-  // Set the officer number (development build), scan the plate again and acknowledge.
-  await page.goto(`${ORIGIN}/#/settings`);
-  await type('[data-testid=officer-number]', '4471');
-  await page.$eval('[data-testid=officer-number]', (el) => el.dispatchEvent(new Event('change')));
-  await sleep(300);
+  // Owner 25/11/2026: a blocking officer-safety pop-up — plate, vehicle, alert message, More
+  // information, CODE 1 or SAFE & CLEAR; officer number asked for in the pop-up when not set.
+  await page.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
+  const popText = await page.$eval('[data-testid=hot-popup]', (el) => el.innerText);
+  if (!/Extreme risk/i.test(popText) || !/Toyota · Wagon · Blue/.test(popText) || !/Spitting/i.test(popText) || !/Do not approach/.test(popText)) throw new Error(`hot pop-up details missing: ${popText.slice(0, 300)}`);
+  if (!(await page.$('[data-testid=hot-countdown]'))) throw new Error('no countdown to the soft Code 1');
+  await page.click('[data-testid=hot-more]');
+  await page.waitForSelector('[data-testid=hot-profile]', { visible: true });
+  await waitText('Male, 40s');
+  await shot('hot-popup');
+  // Everything else is covered: the pop-up is above the result screen.
+  const covered = await page.evaluate(() => { const b = document.querySelector('[data-testid=next-scan]').getBoundingClientRect(); const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2); return !!top?.closest('[data-testid=hot-popup]'); });
+  if (!covered) throw new Error('Next scan reachable while the hot-list pop-up is open');
+  if (!(await page.$eval('[data-testid=hot-safe-clear]', (b) => b.disabled))) throw new Error('SAFE & CLEAR enabled without an officer number');
+  if (await page.$eval('[data-testid=hot-code1]', (b) => b.disabled)) throw new Error('CODE 1 must never be blocked');
+  await type('[data-testid=hot-officer]', '4471');
+  await type('[data-testid=hot-note]', 'Driver in the car, did not approach');
+  // A reload keeps the pop-up: the officer cannot get past it without answering.
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
+  await type('[data-testid=hot-officer]', '4471');
+  await type('[data-testid=hot-note]', 'Driver in the car, did not approach');
+  await page.click('[data-testid=hot-safe-clear]');
+  await page.waitForFunction(() => !document.querySelector('[data-testid=hot-popup]'), { timeout: 10000 });
+  log('hot-list match: blocking pop-up (vehicle, alert message, profile, countdown) survives a reload; SAFE & CLEAR with officer 4471 and a note');
+  // Scan again: the answer is shown on the result and logged with the note.
   await page.goto(timedUrl.replace('#/list/', '#/scan/'));
   await page.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 20000 });
   await page.click('[data-testid=shutter]');
   await page.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
   await type('[data-testid=plate-input]', 'BAD999');
   await page.click('[data-testid=check]');
-  await page.waitForSelector('[data-testid=hot-acknowledge]', { visible: true, timeout: 20000 });
-  await page.click('[data-testid=hot-acknowledge]');
-  await page.waitForSelector('[data-testid=hot-ack-queued]', { visible: true });
+  await page.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
+  await page.click('[data-testid=hot-safe-clear]');
+  await page.waitForSelector('[data-testid=hot-acked][data-response=safe_clear]', { visible: true });
   await waitText('4471');
-  await shot('hot-acknowledged');
-  if (await page.$eval('[data-testid=next-scan]', (b) => b.disabled)) throw new Error('Next scan still disabled after acknowledging');
-  log('hot-list match raises officer-safety alert; Next scan blocked until acknowledged (time, GPS, officer 4471; soft Code 1 queued)');
+  if (await page.$eval('[data-testid=next-scan]', (b) => b.disabled)) throw new Error('Next scan still disabled after answering');
   await shot('hot-alert');
+  const logged = await page.evaluate(() => new Promise((res, rej) => {
+    const r = indexedDB.open('platewatch');
+    r.onerror = () => rej(r.error);
+    r.onsuccess = () => { const q = r.result.transaction('hotEvents').objectStore('hotEvents').getAll(); q.onsuccess = () => res(q.result.filter((e) => e.kind === 'acknowledged').map((e) => [e.response, e.officerNumber, e.note ?? ''])); };
+  }));
+  if (!logged.some(([r, o, n]) => r === 'safe_clear' && o === '4471' && n === 'Driver in the car, did not approach')) throw new Error(`answer not logged: ${JSON.stringify(logged)}`);
+  log('answered SAFE & CLEAR: shown on the result, logged on the plate history with the note; Next scan enabled');
 
   // Permit holder on a linked allow list: recorded, green "Permit valid", and still valid when
   // scanned again (no allowance clock, so never an overstay). RES002 was saved without "Add".

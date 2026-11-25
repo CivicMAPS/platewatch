@@ -77,3 +77,18 @@ label.f input, label.f select, label.f textarea { border: 1px solid var(--civic-
 .toast { position: fixed; bottom: 16px; right: 16px; background: var(--civic-neutral-900); color: #fff; padding: 10px 14px; border-radius: 8px; max-width: 420px; z-index: 10; }
 .bar { height: 10px; border-radius: 4px; background: var(--civic-primary); }
 .bar.exp { background: var(--status-issued); }
+
+/* Code 1 only: red (owner 25/11/2026). Soft Code 1 keeps the amber banner above. */
+.hot-banner.code1 { border-color: var(--status-emergency-deep); background: var(--status-emergency); color: #fff; animation: code1-flash 1s steps(1, end) infinite; }
+.hot-banner.code1 .beacon { background: #fff; box-shadow: 0 0 0 4px var(--status-emergency-border); }
+.hot-banner.code1 .label, .hot-banner.code1 .timer, .hot-banner.code1 .meta, .hot-banner.code1 .meta a { color: #fff; }
+/* White text stays legible in both phases: red and deep red. */
+@keyframes code1-flash { 0% { background: var(--status-emergency); } 50% { background: var(--status-emergency-deep); } }
+@media (prefers-reduced-motion: reduce) { .hot-banner.code1 { animation: none; border-width: 4px; } }
+.hot-banner .btn.ack { background: var(--civic-primary-dark); color: #fff; border-color: var(--civic-primary-dark); letter-spacing: .04em; }
+.hot-banner .btn.ok { background: var(--status-active-strong); color: #fff; border-color: var(--status-active-strong); }
+.hot-banner .btn.danger { background: var(--status-emergency); color: #fff; border-color: var(--status-emergency); }
+.pill.code1 { color: #fff; background: var(--status-emergency); border-color: var(--status-emergency); }
+.pill.code1::before { content: "!"; }
+.stack { display: grid; gap: 12px; }
+.formgrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

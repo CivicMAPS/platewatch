@@ -6,6 +6,11 @@
  *   PLATEWATCH_COUNCIL           council code the I-N statements must name (default "com")
  *   PLATEWATCH_CORS_ORIGINS      comma-separated origins, or * (default *; tokens are bearer, no cookies)
  *   PLATEWATCH_APP_DIR           built PlateWatch app to serve at / (default ./dist when present)
+ *   PLATEWATCH_TIMEZONE          council time zone for shift days (default Australia/Melbourne)
+ *   PLATEWATCH_DEFAULT_BRANCH    branch for officers not in the roster (default parking)
+ *   PLATEWATCH_HOT_ACK_SECONDS   seconds to acknowledge a hot-list pop-up before the soft Code 1 (default 60)
+ *   PLATEWATCH_WATCHDOG_GRACE_SECONDS  extra wait before the server raises it itself (default 20)
+ *   PLATEWATCH_RADIO_ESCALATE_SECONDS  auto-escalate to Code 1 with no radio response (default 0 = manual)
  *   PORT                         default 8787
  */
 import { existsSync } from 'node:fs';
@@ -15,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import pkg from '../package.json' with { type: 'json' };
 import { createApp } from './app';
 import { createPool, migrate } from './db';
+import { runWatchdog, type SafetyConfig } from './safety';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -43,7 +49,17 @@ const db = createPool(databaseUrl);
 const applied = await migrate(db);
 if (applied.length) console.log(`[platewatch-server] migrations applied: ${applied.join(', ')}`);
 
+const intEnv = (name: string, fallback: number) => (Number.isFinite(Number(env[name])) && env[name] !== '' && env[name] !== undefined ? Number(env[name]) : fallback);
+const safety: SafetyConfig = {
+  timeZone: env.PLATEWATCH_TIMEZONE ?? 'Australia/Melbourne',
+  defaultBranch: env.PLATEWATCH_DEFAULT_BRANCH ?? 'parking',
+  hotAckSeconds: intEnv('PLATEWATCH_HOT_ACK_SECONDS', 60),
+  watchdogGraceSeconds: intEnv('PLATEWATCH_WATCHDOG_GRACE_SECONDS', 20),
+  radioEscalateSeconds: intEnv('PLATEWATCH_RADIO_ESCALATE_SECONDS', 0),
+};
+
 const handler = createApp(db, {
+  safety,
   council: (env.PLATEWATCH_COUNCIL ?? 'com').trim(),
   deviceToken,
   consoleToken,
@@ -53,6 +69,9 @@ const handler = createApp(db, {
   tokensDir,
   version: pkg.version,
 });
+
+// Raise the soft Code 1 for hits the handset could not report (and auto-escalate if configured).
+setInterval(() => void runWatchdog(db, safety, Date.now()).then((r) => (r.softCode1.length || r.escalated.length) && console.log('[watchdog]', r)).catch((e) => console.error('[watchdog]', e)), 5000);
 
 const port = Number(env.PORT ?? 8787);
 const server = createServer((req, res) => void handler(req, res));

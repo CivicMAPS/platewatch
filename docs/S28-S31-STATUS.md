@@ -61,3 +61,13 @@ accepted values is confirmed.
 | All-day paid parking (30f) | Still not built: needs a paid-only restriction model (OQ30-10) |
 | Soft Code 1 recipients | Code and S29 say dispatch + compliance coordinator; the 23/11 handoff text says "team supervisor" — **OWNER VALIDATION REQUIRED** (BE-7) |
 | Wireframe deliverables (S28–S31 `.dc.html`, annotations, parity) | Not part of this code change; the S26–S27 pack was used as reference only |
+
+## Hot-list officer safety (owner direction 25/11/2026) — supersedes the S29 acknowledge flow
+
+Blocking pop-up on any hot-list hit (scanned or typed): plate, make, type, colour, the entry's
+**alert message**, More information (registered owner description, match history, interactions,
+known locations); **CODE 1** or **SAFE & CLEAR** with an optional note. No answer by the deadline →
+soft Code 1 (amber) to dispatch and the officer's team supervisor on shift (otherwise every team
+supervisor on shift and the compliance lead) → radio response → resolved, or Code 1 for the whole
+branch (red alarm with sound and the location pin). Code in `hotlist.ts`, `safety.ts`,
+`safetyOverlay.ts`, `server/safety.ts`; see [BACKEND.md](BACKEND.md) §1a and BE-4 / BE-9–BE-12.

@@ -9,7 +9,8 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { keyIdOf } from '../src/lib/inNumber';
 import { normalisePlate, plateKey } from '../src/lib/plate';
 import { tx, type Db } from './db';
-import { bearer, HttpError, need, num, readBody, Router, secretMatches, send, STAFF_ROLES, str, type Ctx, type StaffRole } from './http';
+import { bearer, CONSOLE_ROLES, HttpError, MANAGER_ROLES, need, num, readBody, Router, secretMatches, send, STAFF_ROLES, str, type Ctx, type StaffRole } from './http';
+import { councilDay, recordResponse, registerSafety, upsertHit, type SafetyConfig } from './safety';
 import { acceptBundle, recordInfringementEvent, VOID_REASONS, type BundleIn } from './verify';
 
 export interface Config {
@@ -26,14 +27,13 @@ export interface Config {
   tokensDir?: string;
   version: string;
   now?: () => number;
+  safety: SafetyConfig;
 }
 
 const MB = 1024 * 1024;
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const ms = (d: Date | null | undefined) => (d ? d.getTime() : null);
 
-const ALERT_RECIPIENTS = ['dispatch', 'compliance_coordinator'] as const;
-type Recipient = (typeof ALERT_RECIPIENTS)[number];
 
 export function createApp(db: Db, cfg: Config) {
   const now = () => (cfg.now ? cfg.now() : Date.now());
@@ -49,18 +49,31 @@ export function createApp(db: Db, cfg: Config) {
     if (!c.device?.keyId) throw new HttpError(400, 'device_key', 'X-Device-Key header required.');
     return c.device.keyId;
   };
-  const staffAuth = (c: Ctx, roles: readonly StaffRole[] = STAFF_ROLES) => {
+  /** Console staff identity from the roster (X-Staff-Id); the console token proves the client. */
+  const staffAuth = async (c: Ctx, roles: readonly StaffRole[] = CONSOLE_ROLES): Promise<NonNullable<Ctx['staff']>> => {
     if (!secretMatches(bearer(c.req), cfg.consoleToken)) throw new HttpError(401, 'unauthorised', 'Console token missing or wrong.');
-    const role = str(c.req.headers['x-staff-role'], 40) as StaffRole;
-    const user = str(c.req.headers['x-staff-user'], 80).trim();
-    if (!STAFF_ROLES.includes(role)) throw new HttpError(400, 'role', 'X-Staff-Role must be dispatch, compliance_coordinator or supervisor.');
-    if (!user) throw new HttpError(400, 'user', 'X-Staff-User required.');
-    if (!roles.includes(role)) throw new HttpError(403, 'forbidden', `Only ${roles.join(' or ')} can do this.`);
-    c.staff = { role, user };
-    return c.staff;
+    const id = str(c.req.headers['x-staff-id'], 64).trim();
+    if (!id) throw new HttpError(400, 'staff', 'X-Staff-Id required: choose who you are from the roster.');
+    const row = (await db.query<{ id: string; name: string; role: StaffRole; team: string | null; branch: string }>('select id, name, role, team, branch from staff where id = $1 and active', [id])).rows[0];
+    if (!row) throw new HttpError(401, 'staff', 'Not an active staff member in the roster.');
+    if (row.role === 'officer') throw new HttpError(403, 'forbidden', 'Officers use the handset, not the console.');
+    if (!roles.includes(row.role)) throw new HttpError(403, 'forbidden', `Only ${roles.join(' or ')} can do this.`);
+    c.staff = row;
+    return row;
   };
-  const audit = (c: { staff?: Ctx['staff'] }, action: string, entity: string, id: string, data?: unknown) =>
-    db.query('insert into audit_log (actor, role, action, entity, entity_id, data) values ($1,$2,$3,$4,$5,$6)', [c.staff?.user ?? 'system', c.staff?.role ?? 'system', action, entity, id, data === undefined ? null : JSON.stringify(data)]);
+  const consoleToken = (c: Ctx) => {
+    if (!secretMatches(bearer(c.req), cfg.consoleToken)) throw new HttpError(401, 'unauthorised', 'Console token missing or wrong.');
+  };
+  /** The officer using a handset: X-Officer-Number (Settings), else the number the key registered with. */
+  const deviceOfficer = async (c: Ctx): Promise<string> => {
+    const header = str(c.req.headers['x-officer-number'], 12).trim();
+    if (header) return header;
+    const row = (await db.query<{ officer_number: string }>('select officer_number from devices where key_id = $1', [c.device?.keyId])).rows[0];
+    // Never refuse a Code 1 for want of an officer number: it is raised as "unknown" (device key kept).
+    return row?.officer_number?.trim() || 'unknown';
+  };
+  const audit = (c: Ctx, action: string, entity: string, id: string, data?: unknown) =>
+    db.query('insert into audit_log (actor, role, action, entity, entity_id, data) values ($1,$2,$3,$4,$5,$6)', [c.staff ? `${c.staff.name} (${c.staff.id})` : 'system', c.staff?.role ?? 'system', action, entity, id, data === undefined ? null : JSON.stringify(data)]);
   const touchDevice = (keyId: string) => db.query('update devices set last_seen_at = now() where key_id = $1', [keyId]);
 
   /* ─────────────────────────── Public ─────────────────────────── */
@@ -87,7 +100,7 @@ export function createApp(db: Db, cfg: Config) {
         [keyId, JSON.stringify(pub), str(b.label, 120), str(b.officerNumber, 12)],
       )
     ).rows[0]!;
-    return { keyId, status: row.status, council: cfg.council };
+    return { keyId, status: row.status, council: cfg.council, hotAckSeconds: cfg.safety.hotAckSeconds };
   });
 
   r.on('GET', '/api/devices/me', async (c) => {
@@ -95,7 +108,7 @@ export function createApp(db: Db, cfg: Config) {
     const row = (await db.query<{ status: string }>('select status from devices where key_id = $1', [keyId])).rows[0];
     if (!row) throw new HttpError(404, 'unknown_device', 'Register this device first.');
     await touchDevice(keyId);
-    return { keyId, status: row.status, council: cfg.council };
+    return { keyId, status: row.status, council: cfg.council, hotAckSeconds: cfg.safety.hotAckSeconds };
   });
 
   r.on('POST', '/api/sync', async (c) => {
@@ -158,6 +171,10 @@ export function createApp(db: Db, cfg: Config) {
     const id = str(e.id, 64);
     const at = num(e.at);
     if (!id || at === null || !str(e.plate) || !str(e.hotListEntryId)) return 'id, at, plate and hotListEntryId are required';
+    // Officer-safety flow (25/11/2026): a hit opens the pop-up; an acknowledgement answers it.
+    if (e.kind === 'hit' && e.hit) await upsertHit(q as never, keyId, e.hit as Record<string, unknown>, cfg.safety);
+    if (e.kind === 'acknowledged' && e.hitId && e.response && (await q.query('select 1 from hot_hits where id = $1', [str(e.hitId, 64)])).rowCount)
+      await recordResponse(q as never, str(e.hitId, 64), { response: str(e.response, 20), note: str(e.note, 1000), at });
     const loc = e.location as { lat?: number; lng?: number; accuracyM?: number } | null;
     await q.query(
       `insert into hot_events (id, device_key_id, kind, plate, plate_key, hot_list_entry_id, scan_id, at, officer_number, lat, lng, accuracy_m, data)
@@ -166,39 +183,6 @@ export function createApp(db: Db, cfg: Config) {
     );
     return null;
   }
-
-  /** Soft Code 1: the officer acknowledged a hot-list sighting (WF-S29). */
-  r.on('POST', '/api/hot-alerts', async (c) => {
-    const keyId = needDevice(c);
-    const b = await c.body<{ event?: Record<string, unknown>; entry?: Record<string, unknown> }>();
-    const e = b.event ?? {};
-    if (e.kind !== 'acknowledged') throw new HttpError(422, 'invalid', 'Only an acknowledgement raises a soft Code 1.');
-    const id = need(str(e.id, 64), 'event.id');
-    const officer = need(str(e.officerNumber, 12), 'event.officerNumber');
-    const at = need(num(e.at), 'event.at');
-    const loc = e.location as { lat?: number; lng?: number; accuracyM?: number } | null;
-    const entry = b.entry ?? {};
-    const recipients = ((e.notification as { recipients?: string[] } | undefined)?.recipients ?? [...ALERT_RECIPIENTS]).filter((x): x is Recipient => (ALERT_RECIPIENTS as readonly string[]).includes(x));
-    const sentAt = await tx(db, async (q) => {
-      const err = await upsertHotEvent(q, keyId, e);
-      if (err) throw new HttpError(422, 'invalid', err);
-      const row = (
-        await q.query<{ received_at: Date }>(
-          `insert into alerts (id, plate, hot_list_entry_id, scan_id, risk_level, officer_number, device_key_id, lat, lng, accuracy_m, raised_at, recipients, data)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-           on conflict (id) do update set data = alerts.data returning received_at`,
-          [
-            id, normalisePlate(str(e.plate, 16)), str(e.hotListEntryId, 64), str(e.scanId, 64) || null, str(entry.riskLevel, 20) || null, officer, keyId,
-            num(loc?.lat), num(loc?.lng), num(loc?.accuracyM), new Date(at), JSON.stringify(recipients.length ? recipients : ALERT_RECIPIENTS),
-            JSON.stringify({ entry: { riskLevel: entry.riskLevel ?? null, risks: Array.isArray(entry.risks) ? entry.risks.slice(0, 20) : [], make: str(entry.make, 60), type: str(entry.type, 60), colour: str(entry.colour, 40) }, atLocal: str(e.atLocal, 40) }),
-          ],
-        )
-      ).rows[0]!;
-      return row.received_at.getTime();
-    });
-    await touchDevice(keyId);
-    return { sentAt };
-  });
 
   r.on('POST', '/api/infringements/statements', async (c) => {
     const keyId = needDevice(c);
@@ -249,17 +233,11 @@ export function createApp(db: Db, cfg: Config) {
       'select number, scan_id, status, void_request, paid_at, change_no from infringements where key_id = $1 and change_no > $2 order by change_no limit 500',
       [keyId, since],
     );
-    const al = await db.query<{ id: string; status: string; change_no: string; acks: unknown }>(
-      `select a.id, a.status, a.change_no, coalesce(json_agg(json_build_object('recipient', k.recipient, 'by', k.acknowledged_by, 'at', (extract(epoch from k.acknowledged_at) * 1000)::bigint)) filter (where k.alert_id is not null), '[]') as acks
-       from alerts a left join alert_acks k on k.alert_id = a.id where a.device_key_id = $1 and a.change_no > $2 group by a.id order by a.change_no limit 500`,
-      [keyId, since],
-    );
-    const cursor = Math.max(since, ...inf.rows.map((x) => Number(x.change_no)), ...al.rows.map((x) => Number(x.change_no)));
+    const cursor = Math.max(since, ...inf.rows.map((x) => Number(x.change_no)));
     await touchDevice(keyId);
     return {
       cursor,
       infringements: inf.rows.map((x) => ({ number: x.number, scanId: x.scan_id, status: x.status, voidRequest: x.void_request, paidAt: ms(x.paid_at) })),
-      alerts: al.rows.map((x) => ({ id: x.id, status: x.status, acknowledgedBy: (x.acks as { recipient: string; by: string; at: string | number }[]).map((k) => ({ ...k, at: Number(k.at) })) })),
     };
   });
 
@@ -281,72 +259,17 @@ export function createApp(db: Db, cfg: Config) {
 
   /* ─────────────────────────── Console API (CommandMAPS stand-in) ─────────────────────────── */
 
-  r.on('GET', '/api/console/me', async (c) => ({ ...staffAuth(c), council: cfg.council, version: cfg.version }));
+  r.on('GET', '/api/console/me', async (c) => ({ ...(await staffAuth(c)), council: cfg.council, version: cfg.version, hotAckSeconds: cfg.safety.hotAckSeconds, radioEscalateSeconds: cfg.safety.radioEscalateSeconds }));
 
   r.on('GET', '/api/console/summary', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const q = await db.query<{ k: string; n: string }>(`
-      select 'alerts_active' k, count(*)::text n from alerts where status = 'active'
+      select 'alerts_active' k, count(*)::text n from alerts where status in ('active', 'radio_requested', 'acknowledged')
       union all select 'void_requests', count(*)::text from infringements where status = 'void_requested'
       union all select 'devices_pending', count(*)::text from devices where status = 'pending'
       union all select 'issued_today', count(*)::text from infringements where issued_at >= date_trunc('day', now())
       union all select 'scans_today', count(*)::text from scans where captured_at >= date_trunc('day', now())`);
     return Object.fromEntries(q.rows.map((x) => [x.k, Number(x.n)]));
-  });
-
-  const alertJson = (a: Record<string, unknown> & { acks: unknown }) => ({
-    id: a.id, plate: a.plate, hotListEntryId: a.hot_list_entry_id, scanId: a.scan_id, riskLevel: a.risk_level, officerNumber: a.officer_number,
-    location: a.lat === null ? null : { lat: a.lat, lng: a.lng, accuracyM: a.accuracy_m }, raisedAt: ms(a.raised_at as Date), receivedAt: ms(a.received_at as Date),
-    recipients: a.recipients, status: a.status, closedAt: ms(a.closed_at as Date | null), entry: (a.data as { entry?: unknown }).entry ?? null,
-    acks: (a.acks as { recipient: string; by: string; at: number }[]).map((k) => ({ ...k, at: Number(k.at) })),
-  });
-  const ALERT_SELECT = `select a.*, coalesce(json_agg(json_build_object('recipient', k.recipient, 'by', k.acknowledged_by, 'at', (extract(epoch from k.acknowledged_at) * 1000)::bigint)) filter (where k.alert_id is not null), '[]') as acks
-    from alerts a left join alert_acks k on k.alert_id = a.id`;
-
-  r.on('GET', '/api/console/alerts', async (c) => {
-    staffAuth(c);
-    const all = c.url.searchParams.get('status') === 'all';
-    const rows = await db.query(`${ALERT_SELECT} ${all ? '' : "where a.status = 'active'"} group by a.id order by a.raised_at desc limit 200`);
-    return { alerts: rows.rows.map((x) => alertJson(x as never)) };
-  });
-
-  r.on('GET', '/api/console/alerts/:id', async (c) => {
-    staffAuth(c);
-    const a = (await db.query(`${ALERT_SELECT} where a.id = $1 group by a.id`, [c.params.id])).rows[0];
-    if (!a) throw new HttpError(404, 'not_found', 'No such alert.');
-    const log = await db.query<{ id: string; kind: string; at: Date; officer_number: string; lat: number | null; lng: number | null; accuracy_m: number | null; scan_id: string | null; data: { readAs?: string } }>(
-      'select id, kind, at, officer_number, lat, lng, accuracy_m, scan_id, data from hot_events where hot_list_entry_id = $1 order by at desc limit 200',
-      [a.hot_list_entry_id],
-    );
-    const sightings = await db.query<{ id: string; captured_at: Date; officer_number: string | null; lat: number | null; lng: number | null; has_evidence: boolean }>(
-      `select s.id, s.captured_at, s.officer_number, s.lat, s.lng, (e.scan_id is not null) as has_evidence from scans s left join evidence e on e.scan_id = s.id
-       where s.plate_key = $1 and s.outcome = 'hot_sighting' order by s.captured_at desc limit 200`,
-      [plateKey(String(a.plate))],
-    );
-    return {
-      alert: alertJson(a as never),
-      log: [
-        ...log.rows.map((x) => ({ kind: x.kind, at: ms(x.at), officerNumber: x.officer_number, location: x.lat === null ? null : { lat: x.lat, lng: x.lng, accuracyM: x.accuracy_m }, scanId: x.scan_id, readAs: x.data.readAs ?? null })),
-        ...sightings.rows.map((x) => ({ kind: 'sighting', at: ms(x.captured_at), officerNumber: x.officer_number, location: x.lat === null ? null : { lat: x.lat, lng: x.lng }, scanId: x.id, hasEvidence: x.has_evidence })),
-      ].sort((p, q) => (q.at ?? 0) - (p.at ?? 0)),
-    };
-  });
-
-  /** Each recipient acknowledges separately; the banner closes for that recipient (OQ29, proposed). */
-  r.on('POST', '/api/console/alerts/:id/ack', async (c) => {
-    const s = staffAuth(c, ['dispatch', 'compliance_coordinator']);
-    const out = await tx(db, async (q) => {
-      const a = (await q.query<{ recipients: Recipient[]; status: string }>('select recipients, status from alerts where id = $1 for update', [c.params.id])).rows[0];
-      if (!a) throw new HttpError(404, 'not_found', 'No such alert.');
-      if (!a.recipients.includes(s.role as Recipient)) throw new HttpError(403, 'forbidden', `${s.role} is not a recipient of this alert.`);
-      await q.query('insert into alert_acks (alert_id, recipient, acknowledged_by) values ($1,$2,$3) on conflict do nothing', [c.params.id, s.role, s.user]);
-      const acked = (await q.query<{ recipient: string }>('select recipient from alert_acks where alert_id = $1', [c.params.id])).rows.map((x) => x.recipient);
-      const closed = a.recipients.every((x) => acked.includes(x));
-      await q.query(`update alerts set status = $2, closed_at = case when $2 = 'closed' then coalesce(closed_at, now()) else null end, updated_at = now(), change_no = nextval('change_seq') where id = $1`, [c.params.id, closed ? 'closed' : 'active']);
-      return { status: closed ? 'closed' : 'active', acknowledged: acked };
-    });
-    await audit(c, 'alert_acknowledged', 'alert', c.params.id!);
-    return out;
   });
 
   const infJson = (x: Record<string, unknown>) => ({
@@ -357,14 +280,14 @@ export function createApp(db: Db, cfg: Config) {
   });
 
   r.on('GET', '/api/console/infringements', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const status = c.url.searchParams.get('status');
     const rows = await db.query(`select * from infringements ${status ? 'where status = $1' : ''} order by coalesce(issued_at, allocated_at) desc limit 300`, status ? [status] : []);
     return { infringements: rows.rows.map(infJson) };
   });
 
   r.on('GET', '/api/console/infringements/:number', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const x = (await db.query('select * from infringements where number = $1', [c.params.number])).rows[0];
     if (!x) throw new HttpError(404, 'not_found', 'No such infringement.');
     const events = await db.query('select at, actor, actor_role, action, from_status, to_status, reason, data from infringement_events where number = $1 order by id', [c.params.number]);
@@ -381,7 +304,7 @@ export function createApp(db: Db, cfg: Config) {
   });
 
   r.on('POST', '/api/console/infringements/:number/void-decision', async (c) => {
-    const s = staffAuth(c, ['supervisor']);
+    const s = await staffAuth(c, MANAGER_ROLES);
     const b = await c.body<{ approve?: boolean; note?: string }>();
     if (typeof b.approve !== 'boolean') throw new HttpError(422, 'invalid', 'approve must be true or false.');
     const out = await tx(db, async (q) => {
@@ -389,9 +312,9 @@ export function createApp(db: Db, cfg: Config) {
       if (!x) throw new HttpError(404, 'not_found', 'No such infringement.');
       if (x.status !== 'void_requested') throw new HttpError(409, 'state', `Infringement is ${x.status}, not awaiting a void decision.`);
       const to = b.approve ? 'voided' : 'issued';
-      const request = { ...x.void_request, decision: b.approve ? 'approved' : 'rejected', decidedBy: s.user, decidedAt: now(), decisionNote: str(b.note, 500) };
+      const request = { ...x.void_request, decision: b.approve ? 'approved' : 'rejected', decidedBy: s.name, decidedAt: now(), decisionNote: str(b.note, 500) };
       await q.query("update infringements set status = $2, void_request = $3, updated_at = now(), change_no = nextval('change_seq') where number = $1", [c.params.number, to, JSON.stringify(request)]);
-      await recordInfringementEvent(q, c.params.number!, { actor: s.user, role: s.role, action: b.approve ? 'void_approved' : 'void_rejected', from: 'void_requested', to, reason: str(b.note, 500) || null });
+      await recordInfringementEvent(q, c.params.number!, { actor: s.name, role: s.role, action: b.approve ? 'void_approved' : 'void_rejected', from: 'void_requested', to, reason: str(b.note, 500) || null });
       return { status: to };
     });
     await audit(c, out.status === 'voided' ? 'void_approved' : 'void_rejected', 'infringement', c.params.number!);
@@ -400,13 +323,13 @@ export function createApp(db: Db, cfg: Config) {
 
   /** Development: simulate the customer paying (the council infringement system's event). */
   r.on('POST', '/api/console/infringements/:number/payment', async (c) => {
-    const s = staffAuth(c);
+    const s = await staffAuth(c);
     const out = await tx(db, async (q) => {
       const x = (await q.query<{ status: string }>('select status from infringements where number = $1 for update', [c.params.number])).rows[0];
       if (!x) throw new HttpError(404, 'not_found', 'No such infringement.');
       if (x.status !== 'issued') throw new HttpError(409, 'state', `A ${x.status} infringement cannot be paid.`);
       await q.query("update infringements set status = 'paid', paid_at = now(), updated_at = now(), change_no = nextval('change_seq') where number = $1", [c.params.number]);
-      await recordInfringementEvent(q, c.params.number!, { actor: s.user, role: s.role, action: 'payment_recorded', from: 'issued', to: 'paid', reason: 'Simulated payment (development backend)' });
+      await recordInfringementEvent(q, c.params.number!, { actor: s.name, role: s.role, action: 'payment_recorded', from: 'issued', to: 'paid', reason: 'Simulated payment (development backend)' });
       return { status: 'paid' };
     });
     await audit(c, 'payment_recorded', 'infringement', c.params.number!);
@@ -414,23 +337,23 @@ export function createApp(db: Db, cfg: Config) {
   });
 
   r.on('GET', '/api/console/devices', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const rows = await db.query('select key_id, label, officer_number, status, registered_at, decided_by, decided_at, last_seen_at from devices order by registered_at desc');
     return { devices: rows.rows.map((d) => ({ keyId: d.key_id, label: d.label, officerNumber: d.officer_number, status: d.status, registeredAt: iso(d.registered_at), decidedBy: d.decided_by, decidedAt: iso(d.decided_at), lastSeenAt: iso(d.last_seen_at) })) };
   });
 
   r.on('POST', '/api/console/devices/:keyId/decision', async (c) => {
-    const s = staffAuth(c, ['supervisor']);
+    const s = await staffAuth(c, MANAGER_ROLES);
     const b = await c.body<{ approve?: boolean }>();
     if (typeof b.approve !== 'boolean') throw new HttpError(422, 'invalid', 'approve must be true or false.');
-    const row = (await db.query<{ status: string }>('update devices set status = $2, decided_by = $3, decided_at = now() where key_id = $1 returning status', [c.params.keyId, b.approve ? 'approved' : 'revoked', s.user])).rows[0];
+    const row = (await db.query<{ status: string }>('update devices set status = $2, decided_by = $3, decided_at = now() where key_id = $1 returning status', [c.params.keyId, b.approve ? 'approved' : 'revoked', s.name])).rows[0];
     if (!row) throw new HttpError(404, 'not_found', 'No such device.');
     await audit(c, b.approve ? 'device_approved' : 'device_revoked', 'device', c.params.keyId!);
     return { status: row.status };
   });
 
   r.on('GET', '/api/console/scans', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const limit = Math.min(500, Number(c.url.searchParams.get('limit')) || 100);
     const rows = await db.query(
       `select s.id, s.plate, s.outcome, s.captured_at, s.officer_number, s.list_id, s.lat, s.lng, s.accuracy_m, (s.thumb_jpeg is not null) as has_thumb, (e.scan_id is not null) as has_evidence, s.data->'payment' as payment
@@ -441,27 +364,27 @@ export function createApp(db: Db, cfg: Config) {
   });
 
   r.on('GET', '/api/console/scans/:id/thumb', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const row = (await db.query<{ thumb_jpeg: Buffer | null }>('select thumb_jpeg from scans where id = $1', [c.params.id])).rows[0];
     if (!row?.thumb_jpeg) throw new HttpError(404, 'not_found', 'No thumbnail.');
     send(c.res, 200, row.thumb_jpeg, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=3600' });
   });
 
   r.on('GET', '/api/console/evidence/:scanId', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const row = (await db.query<{ bytes: Buffer; mime: string; sha256: string }>('select bytes, mime, sha256 from evidence where scan_id = $1', [c.params.scanId])).rows[0];
     if (!row) throw new HttpError(404, 'not_found', 'Evidence not uploaded yet.');
     send(c.res, 200, row.bytes, { 'Content-Type': row.mime, 'X-Content-SHA256': row.sha256, 'Cache-Control': 'private, max-age=3600' });
   });
 
   r.on('GET', '/api/console/paid-sessions', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const rows = await db.query('select * from paid_sessions order by created_at desc limit 200');
     return { sessions: rows.rows.map((p) => ({ id: Number(p.id), plate: p.plate_key, source: p.source, sourceRef: p.source_ref, paidFrom: ms(p.paid_from), paidTo: ms(p.paid_to), createdBy: p.created_by, createdAt: ms(p.created_at) })) };
   });
 
   r.on('POST', '/api/console/paid-sessions', async (c) => {
-    const s = staffAuth(c);
+    const s = await staffAuth(c);
     const b = await c.body<{ plate?: string; source?: string; sourceRef?: string; paidFrom?: number; paidTo?: number }>();
     const plate = plateKey(need(str(b.plate, 16), 'plate'));
     const source = need(str(b.source, 20), 'source');
@@ -469,14 +392,14 @@ export function createApp(db: Db, cfg: Config) {
     const from = need(num(b.paidFrom), 'paidFrom');
     const to = need(num(b.paidTo), 'paidTo');
     if (to <= from) throw new HttpError(422, 'invalid', 'Paid to must be after paid from.');
-    const row = (await db.query<{ id: string }>('insert into paid_sessions (plate_key, source, source_ref, paid_from, paid_to, created_by) values ($1,$2,$3,$4,$5,$6) returning id', [plate, source, str(b.sourceRef, 40), new Date(from), new Date(to), s.user])).rows[0]!;
+    const row = (await db.query<{ id: string }>('insert into paid_sessions (plate_key, source, source_ref, paid_from, paid_to, created_by) values ($1,$2,$3,$4,$5,$6) returning id', [plate, source, str(b.sourceRef, 40), new Date(from), new Date(to), s.name])).rows[0]!;
     await audit(c, 'paid_session_created', 'paid_session', row.id, { plate, source, from, to });
     return { id: Number(row.id) };
   });
 
   /** 701 / 702 with the derived 702 split (702 / 702e) — internal analytics only. */
   r.on('GET', '/api/console/analytics/offences', async (c) => {
-    staffAuth(c);
+    await staffAuth(c);
     const where = "status in ('issued', 'void_requested', 'paid')";
     const [byCode, byZone, byHour, bySource, shortfall] = await Promise.all([
       db.query(`select offence_code, coalesce(internal_variant, '') as variant, count(*)::int n from infringements where ${where} group by 1, 2 order by 1, 2`),
@@ -489,10 +412,65 @@ export function createApp(db: Db, cfg: Config) {
   });
 
   r.on('GET', '/api/console/audit', async (c) => {
-    staffAuth(c, ['supervisor']);
+    await staffAuth(c, MANAGER_ROLES);
     const rows = await db.query('select at, actor, role, action, entity, entity_id, data from audit_log order by id desc limit 300');
     return { audit: rows.rows.map((a) => ({ ...a, at: iso(a.at as Date) })) };
   });
+
+  /* ─────────────────────────── Roster (staff and shifts) ─────────────────────────── */
+
+  const today = () => councilDay(now(), cfg.safety.timeZone);
+  const consoleStaffCount = async () => Number((await db.query<{ n: string }>("select count(*) n from staff where active and role <> 'officer'")).rows[0]!.n);
+
+  /** Who can sign in to the console (token only). Empty roster: bootstrap the first manager. */
+  r.on('GET', '/api/console/directory', async (c) => {
+    consoleToken(c);
+    const rows = await db.query("select id, name, role, team, branch from staff where active and role <> 'officer' order by name");
+    return { staff: rows.rows, bootstrap: rows.rows.length === 0, council: cfg.council };
+  });
+
+  r.on('GET', '/api/console/staff', async (c) => {
+    await staffAuth(c);
+    const day = c.url.searchParams.get('day') ?? today();
+    const rows = await db.query(
+      `select s.*, exists (select 1 from shifts h where h.staff_id = s.id and h.day = $1) as on_shift from staff s order by s.branch, s.team nulls first, s.role, s.name`,
+      [day],
+    );
+    return { day, staff: rows.rows.map((x) => ({ id: x.id, name: x.name, role: x.role, officerNumber: x.officer_number, team: x.team, branch: x.branch, active: x.active, onShift: x.on_shift })) };
+  });
+
+  r.on('POST', '/api/console/staff', async (c) => {
+    const bootstrap = (await consoleStaffCount()) === 0;
+    if (bootstrap) consoleToken(c);
+    else await staffAuth(c, MANAGER_ROLES);
+    const b = await c.body<{ id?: string; name?: string; role?: string; officerNumber?: string; team?: string; branch?: string; active?: boolean }>();
+    const role = str(b.role, 30) as StaffRole;
+    if (!STAFF_ROLES.includes(role)) throw new HttpError(422, 'invalid', `role must be one of ${STAFF_ROLES.join(', ')}.`);
+    if (bootstrap && !MANAGER_ROLES.includes(role)) throw new HttpError(422, 'invalid', 'The first roster entry must be a team supervisor or the compliance lead.');
+    const officerNumber = str(b.officerNumber, 12).trim() || null;
+    if (role === 'officer' && !officerNumber) throw new HttpError(422, 'invalid', 'An officer needs an officer number.');
+    const id = need(str(b.id, 64).trim(), 'id');
+    await db.query(
+      `insert into staff (id, name, role, officer_number, team, branch, active) values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (id) do update set name = excluded.name, role = excluded.role, officer_number = excluded.officer_number, team = excluded.team, branch = excluded.branch, active = excluded.active, updated_at = now()`,
+      [id, need(str(b.name, 120).trim(), 'name'), role, officerNumber, str(b.team, 60).trim() || null, str(b.branch, 60).trim() || cfg.safety.defaultBranch, b.active !== false],
+    );
+    await audit(c, bootstrap ? 'roster_bootstrap' : 'staff_saved', 'staff', id, { role, team: b.team, branch: b.branch });
+    return { id };
+  });
+
+  r.on('POST', '/api/console/staff/:id/shift', async (c) => {
+    await staffAuth(c, MANAGER_ROLES);
+    const b = await c.body<{ day?: string; on?: boolean }>();
+    const day = str(b.day, 10) || today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new HttpError(422, 'invalid', 'day must be YYYY-MM-DD.');
+    if (b.on === false) await db.query('delete from shifts where staff_id = $1 and day = $2', [c.params.id, day]);
+    else await db.query('insert into shifts (staff_id, day) values ($1,$2) on conflict do nothing', [c.params.id, day]);
+    await audit(c, b.on === false ? 'shift_removed' : 'shift_added', 'staff', c.params.id!, { day });
+    return { day, on: b.on !== false };
+  });
+
+  registerSafety(r, db, cfg.safety, { now, needDevice, deviceOfficer, staffAuth, audit });
 
   /* ─────────────────────────── Static ─────────────────────────── */
 
@@ -525,7 +503,7 @@ export function createApp(db: Db, cfg: Config) {
     if (!allowed) return;
     res.setHeader('Access-Control-Allow-Origin', cfg.corsOrigins.includes('*') ? '*' : origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Device-Key, X-Content-SHA256, X-Staff-Role, X-Staff-User');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Device-Key, X-Officer-Number, X-Content-SHA256, X-Staff-Id');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '600');
   }

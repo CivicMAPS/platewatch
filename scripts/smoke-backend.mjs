@@ -63,8 +63,9 @@ async function fakeCamera(dir) {
   return file;
 }
 
-async function consoleApi(method, path, role, body) {
-  const res = await fetch(ORIGIN + path, { method, headers: { Authorization: `Bearer ${CONSOLE_TOKEN}`, 'X-Staff-Role': role, 'X-Staff-User': `${role}-smoke`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+/** Console API as a roster member (S1 team supervisor A, S2 team supervisor B, D1 dispatch, CL1 compliance lead). */
+async function consoleApi(method, path, staffId, body) {
+  const res = await fetch(ORIGIN + path, { method, headers: { Authorization: `Bearer ${CONSOLE_TOKEN}`, ...(staffId ? { 'X-Staff-Id': staffId } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const json = await res.json();
   if (!res.ok) throw new Error(`${method} ${path}: ${json.message}`);
   return json;
@@ -89,7 +90,7 @@ async function main() {
   const dir = await mkdtempP(join(tmpdir(), 'platewatch-backend-smoke-'));
   const server = spawn(process.execPath, [join(root, 'dist-server', 'server.mjs')], {
     cwd: root,
-    env: { ...process.env, DATABASE_URL: DB, PLATEWATCH_DEVICE_TOKEN: DEVICE_TOKEN, PLATEWATCH_CONSOLE_TOKEN: CONSOLE_TOKEN, PORT: String(PORT), PLATEWATCH_COUNCIL: 'com' },
+    env: { ...process.env, DATABASE_URL: DB, PLATEWATCH_DEVICE_TOKEN: DEVICE_TOKEN, PLATEWATCH_CONSOLE_TOKEN: CONSOLE_TOKEN, PORT: String(PORT), PLATEWATCH_COUNCIL: 'com', PLATEWATCH_HOT_ACK_SECONDS: '10' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let serverLog = '';
@@ -100,6 +101,19 @@ async function main() {
     console.error(serverLog);
     throw e;
   });
+
+  // Roster: the first manager bootstraps with the console token; then the rest; shifts for today.
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Melbourne', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const roster = [
+    { id: 'S1', name: 'Sgt Lee', role: 'team_supervisor', team: 'A' },
+    { id: 'S2', name: 'Sgt Ng', role: 'team_supervisor', team: 'B' },
+    { id: 'D1', name: 'Dispatcher Kim', role: 'dispatch' },
+    { id: 'CL1', name: 'Compliance Lead Rao', role: 'compliance_lead' },
+    { id: 'O4471', name: 'Officer Patel', role: 'officer', officerNumber: '4471', team: 'A' },
+    { id: 'O5123', name: 'Officer Chen', role: 'officer', officerNumber: '5123', team: 'B' },
+  ];
+  for (const [i, st] of roster.entries()) await consoleApi('POST', '/api/console/staff', i ? 'S1' : null, st);
+  for (const id of ['S1', 'S2', 'D1']) await consoleApi('POST', `/api/console/staff/${id}/shift`, 'S1', { day, on: true });
 
   const executablePath = await findChrome();
   const browser = await puppeteer.launch({
@@ -167,11 +181,13 @@ async function main() {
     }, t, tags), 20000);
     await sleep(300);
   };
-  const consoleLogin = async (p, role, user) => {
+  const consoleLogin = async (p, staffId) => {
+    p.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? (/Outcome/.test(d.message()) ? 'Units attended, officer safe' : 'Officer answered') : undefined));
     await p.goto(`${ORIGIN}/console/`);
     await type(p, 'input[type=password]', CONSOLE_TOKEN);
-    await p.select('select', role);
-    await type(p, 'input[placeholder^="e.g."]', user);
+    await p.click('button[type=submit]');
+    await p.waitForSelector('select', { visible: true });
+    await p.select('select', staffId);
     await p.click('button[type=submit]');
     await p.waitForSelector('nav.tabs', { visible: true });
   };
@@ -198,7 +214,7 @@ async function main() {
   log('device signing key registered with the backend: awaiting approval');
 
   // 2. Console: supervisor approves the key.
-  await consoleLogin(cons, 'supervisor', 'Sgt Lee');
+  await consoleLogin(cons, 'S1');
   await clickText(cons, 'Devices');
   await clickText(cons, 'Approve');
   await text(cons, 'Approved');
@@ -221,6 +237,10 @@ async function main() {
     await type(app, '[data-testid=list-search]', listPrefix.split(' ').slice(1, 3).join(' '));
     await tap(app, `[aria-label^="Scan ${listPrefix}"]`);
     await app.waitForSelector('[data-testid=shutter]:not([disabled])', { timeout: 30000 });
+    // Emulated GPS reports once and then goes quiet; a phone keeps reporting. Re-emit, so the
+    // capture has a fix no older than 15 s (the app never uses a stale fix as evidence).
+    await app.setGeolocation(GPS);
+    await app.waitForSelector('[data-gps=good]', { timeout: 30000 });
     await app.click('[data-testid=shutter]');
     await app.waitForSelector('[data-testid=plate-input]', { visible: true, timeout: 60000 });
     await type(app, '[data-testid=plate-input]', plate);
@@ -275,7 +295,7 @@ async function main() {
 
   // 5. The server verified and accepted it; console shows 702 / internal no_payment with evidence.
   const i1 = await until('server to accept the infringement', async () => {
-    const d = await consoleApi('GET', `/api/console/infringements/${n1}`, 'supervisor');
+    const d = await consoleApi('GET', `/api/console/infringements/${n1}`, 'S1');
     return d.infringement.status === 'issued' && d.evidence.every((e) => e.uploaded) ? d : null;
   });
   if (i1.infringement.offenceCode !== '702' || i1.infringement.internalVariant !== 'no_payment' || i1.infringement.variantSource !== 'derived') throw new Error(`server record ${JSON.stringify(i1.infringement)}`);
@@ -295,13 +315,13 @@ async function main() {
   await type(app, '[data-testid=record-lifecycle-note]', 'RPA permit found on the dashboard');
   await tap(app, '[data-testid=record-lifecycle-go]');
   await text(app, 'Void requested');
-  await until('void request at the server', async () => (await consoleApi('GET', `/api/console/infringements/${n1}`, 'supervisor')).infringement.status === 'void_requested');
+  await until('void request at the server', async () => (await consoleApi('GET', `/api/console/infringements/${n1}`, 'S1')).infringement.status === 'void_requested');
   await cons.reload();
   await cons.waitForSelector('nav.tabs', { visible: true });
   await clickText(cons, 'Infringements');
   await clickText(cons, `${n1.slice(0, 5)} ${n1.slice(5, 11)} ${n1.slice(11, 14)} ${n1.slice(14, 18)} ${n1.slice(18)}`, 'td');
   await clickText(cons, 'Approve void');
-  await until('void approved', async () => (await consoleApi('GET', `/api/console/infringements/${n1}`, 'supervisor')).infringement.status === 'voided');
+  await until('void approved', async () => (await consoleApi('GET', `/api/console/infringements/${n1}`, 'S1')).infringement.status === 'voided');
   await deviceSync();
   await app.goto(`${ORIGIN}/#/record/${i1.infringement.scanId}`);
   await app.waitForSelector('[data-testid=record-infringement][data-status=voided]', { visible: true });
@@ -318,7 +338,7 @@ async function main() {
   await handoffAndWizard('PWT703');
   const n2 = await wizardIssue('wizard2');
   const i2 = await until('second infringement accepted', async () => {
-    const d = await consoleApi('GET', `/api/console/infringements/${n2}`, 'supervisor');
+    const d = await consoleApi('GET', `/api/console/infringements/${n2}`, 'S1');
     return d.infringement.status === 'issued' ? d : null;
   });
   await app.goto(`${ORIGIN}/#/record/${i2.infringement.scanId}`);
@@ -334,8 +354,8 @@ async function main() {
   const n3 = (await app.$eval('[data-testid=wiz-number]', (e) => e.textContent)).replace(/\s/g, '');
   await tap(app, '[data-testid=wiz-issue]');
   await until('reissue accepted and original voided', async () => {
-    const o = await consoleApi('GET', `/api/console/infringements/${n2}`, 'supervisor');
-    const r = await consoleApi('GET', `/api/console/infringements/${n3}`, 'supervisor');
+    const o = await consoleApi('GET', `/api/console/infringements/${n2}`, 'S1');
+    const r = await consoleApi('GET', `/api/console/infringements/${n3}`, 'S1');
     return o.infringement.status === 'voided' && o.infringement.reissuedBy === n3 && r.infringement.status === 'issued' && r.infringement.vehicle.colour === 'Silver';
   });
   await app.goto(`${ORIGIN}/#/record/${i2.infringement.scanId}`);
@@ -343,36 +363,108 @@ async function main() {
   await shot(app, 'record-reissued');
   log(`void + reissue without approval: ${n3} replaces ${n2}, which the backend voided`);
 
-  // 8. Hot-list sighting → soft Code 1 → banner in the console → both recipients acknowledge.
+  // 8a. Hot-list hit → blocking pop-up → SAFE & CLEAR with a note → logged for every officer.
   await scanOn('FT Munro St P10', 'PWH801');
-  await tap(app, '[data-testid=hot-acknowledge]');
-  await app.waitForSelector('[data-testid=hot-acked]', { visible: true, timeout: 20000 });
-  await shot(app, 'hot-acknowledged-sent');
+  await app.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
+  await text(app, 'Do not approach');
+  await tap(app, '[data-testid=hot-more]');
+  await text(app, 'FIELD TEST: male, 30s, shaved head');
+  await shot(app, 'hot-popup');
+  await type(app, '[data-testid=hot-note]', 'Driver sat in the car, I left the segment');
+  await tap(app, '[data-testid=hot-safe-clear]');
+  await app.waitForSelector('[data-testid=hot-acked][data-response=safe_clear]', { visible: true, timeout: 20000 });
+  await until('hit and answer at the server', async () => {
+    const h = (await consoleApi('GET', '/api/console/hits', 'D1')).hits.find((x) => x.plate === 'PWH801' && x.response === 'safe_clear');
+    return h?.note === 'Driver sat in the car, I left the segment' && h.officerNumber === '4471';
+  });
+  log('hot-list hit: blocking pop-up with alert message and owner description → SAFE & CLEAR with a note → logged at the server with officer and location');
+
+  // 8b. A second officer (team B) on another handset, to receive a branch Code 1.
+  const ctx2 = await browser.createBrowserContext();
+  await ctx2.overridePermissions(ORIGIN, ['geolocation', 'camera']);
+  const field2 = await ctx2.newPage();
+  await field2.setViewport({ width: 412, height: 915, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await field2.setGeolocation({ latitude: -37.8330, longitude: 144.9540, accuracy: 6 });
+  watch(field2, 'officer-5123');
+  await field2.goto(`${ORIGIN}/#/settings`, { waitUntil: 'networkidle0' });
+  await type(field2, '[data-testid=officer-number]', '5123');
+  await field2.$eval('[data-testid=officer-number]', (el) => el.dispatchEvent(new Event('change')));
+  await change(field2, '[data-testid=backend-url]', ORIGIN);
+  await change(field2, '[data-testid=backend-token]', DEVICE_TOKEN);
+
+  // 8c. No answer: the handset raises the soft Code 1 at the deadline (10 s in this test).
+  await scanOn('FT Munro St P10', 'PWH801');
+  await app.waitForSelector('[data-testid=hot-popup]', { visible: true, timeout: 20000 });
+  await focus(app);
+  await app.waitForSelector('[data-testid=hot-soft-status][data-status=sent]', { timeout: 30000 }).catch(async (e) => {
+    console.error('soft Code 1 state:', await app.$eval('[data-testid=hot-soft-status]', (el) => `${el.dataset.status}: ${el.textContent}`).catch(() => 'no pop-up'), problems.join('\n'));
+    throw e;
+  });
+  await shot(app, 'hot-popup-soft-code1-sent');
   const disp = await browser.newPage();
   await disp.setViewport({ width: 1366, height: 900 });
   watch(disp, 'dispatch');
-  await consoleLogin(disp, 'dispatch', 'Dispatcher Kim');
-  await disp.waitForSelector('.hot-banner', { visible: true, timeout: 20000 });
-  await text(disp, 'PWH801');
-  await shot(disp, 'console-hot-banner');
+  await consoleLogin(disp, 'D1');
+  await disp.waitForSelector('.hot-banner[data-kind=soft_code1]', { visible: true, timeout: 20000 });
+  const soft = (await consoleApi('GET', '/api/console/alerts', 'D1')).alerts.find((x) => x.kind === 'soft_code1' && x.status === 'active');
+  if (soft.recipients.staffIds.join() !== 'S1' || soft.recipients.fallback) throw new Error(`soft Code 1 should go to dispatch + team A supervisor S1: ${JSON.stringify(soft.recipients)}`);
+  if ((await consoleApi('GET', '/api/console/alerts', 'S2')).alerts.find((x) => x.id === soft.id).forMe) throw new Error('team B supervisor should not get the banner');
+  await shot(disp, 'console-soft-code1');
+  log('no answer in time: handset raised the soft Code 1 → amber banner for dispatch and the team A supervisor on shift only');
+
+  // 8d. Dispatch requests a radio response; none → Code 1 for the whole branch.
+  await clickText(disp, 'ACKNOWLEDGE — REQUEST RADIO');
+  await disp.waitForSelector('.hot-banner[data-status=radio_requested]', { visible: true, timeout: 10000 });
+  await clickText(disp, 'NO RESPONSE — CODE 1');
+  await disp.waitForSelector('.hot-banner[data-kind=code1]', { visible: true, timeout: 10000 });
+  await shot(disp, 'console-code1');
+  await focus(field2);
+  await field2.waitForSelector('[data-testid=code1-alarm]', { visible: true, timeout: 20000 });
+  await text(field2, 'Officer Patel');
+  await shot(field2, 'branch-code1-alarm');
+  // The location pin: the officer's handset shares its location every 10 s while the Code 1 is open.
+  await focus(app); // geolocation runs only in the foreground page (as on a phone: see docs/BACKEND.md)
+  const pinned = await until('Code 1 location pin', async () => {
+    await app.setGeolocation(GPS);
+    const a = (await consoleApi('GET', '/api/console/alerts', 'D1')).alerts.find((x) => x.kind === 'code1');
+    return a?.location ? a : null;
+  }, 40000);
+  if (Math.abs(pinned.location.lat - GPS.latitude) > 0.001) throw new Error(`unexpected pin ${JSON.stringify(pinned.location)}`);
+  await focus(field2);
+  await field2.waitForSelector('[data-testid=code1-alarm] a', { visible: true, timeout: 15000 });
+  await shot(field2, 'branch-code1-alarm-pin');
+  await tap(field2, '[data-testid=code1-received]');
+  await field2.waitForSelector('[data-testid=code1-branch-banner]', { visible: true, timeout: 10000 });
+  await focus(app);
+  await app.waitForSelector('[data-testid=hot-soft-status][data-status=code1]', { timeout: 20000 });
+  log('dispatch requested a radio response; none → Code 1: alarm with location on officer 5123 (team B) → received; officer 4471 told help is coming');
+
+  // 8e. The officer answers late; Code 1 acknowledged by dispatch and cleared with an outcome.
+  await tap(app, '[data-testid=hot-safe-clear]');
+  await app.waitForSelector('[data-testid=code1-own-escalated]', { visible: true, timeout: 10000 });
+  await shot(app, 'own-code1-banner');
   await clickText(disp, 'ACKNOWLEDGE');
-  await focus(disp);
-  await disp.waitForFunction(() => !document.querySelector('.hot-banner .btn.amber'), { timeout: 10000 });
-  const alert = (await consoleApi('GET', '/api/console/alerts', 'compliance_coordinator')).alerts.find((a) => a.plate === 'PWH801');
-  if (!alert || alert.acks.length !== 1) throw new Error('dispatch acknowledgement not recorded');
-  await consoleApi('POST', `/api/console/alerts/${alert.id}/ack`, 'compliance_coordinator');
-  await deviceSync();
-  const acked = await app.evaluate(() => new Promise((res, rej) => {
-    const r = indexedDB.open('platewatch');
-    r.onerror = () => rej(r.error);
-    r.onsuccess = () => { const q = r.result.transaction('hotEvents').objectStore('hotEvents').getAll(); q.onsuccess = () => res(q.result.map((e) => e.notification?.acknowledgedBy?.length ?? 0)); };
-  }));
-  if (!acked.includes(2)) throw new Error(`device did not receive both acknowledgements: ${acked}`);
-  log('hot-list sighting: acknowledged on the device → amber banner for dispatch → dispatch and coordinator acknowledge → device sees both');
+  await until('Code 1 acknowledged', async () => (await consoleApi('GET', '/api/console/alerts', 'D1')).alerts.some((x) => x.kind === 'code1' && x.status === 'acknowledged'));
+  await clickText(cons, 'Live');
+  await clickText(cons, 'CLEAR');
+  const c1 = await until('Code 1 cleared', async () => (await consoleApi('GET', '/api/console/alerts?scope=all', 'D1')).alerts.find((x) => x.kind === 'code1' && x.status === 'cleared'));
+  if (c1.outcome !== 'Units attended, officer safe') throw new Error(`outcome ${c1.outcome}`);
+  await focus(field2);
+  await field2.waitForFunction(() => !document.querySelector('[data-testid=code1-branch-banner]'), { timeout: 20000 });
+  await focus(app);
+  await app.waitForFunction(() => !document.querySelector('[data-testid=code1-own-escalated]'), { timeout: 20000 });
+  const detail = await consoleApi('GET', `/api/console/alerts/${c1.id}`, 'CL1');
+  const actions = detail.events.map((e) => e.action);
+  for (const want of ['code1_raised', 'alarm_received', 'code1_acknowledged', 'code1_cleared']) if (!actions.includes(want)) throw new Error(`Code 1 life cycle missing ${want}: ${actions}`);
+  if (!detail.receipts.some((r) => r.officerNumber === '5123')) throw new Error('receipt by officer 5123 not recorded');
+  await clickText(cons, 'Roster');
+  await text(cons, 'Officer Chen');
+  await shot(cons, 'console-roster');
+  log('officer answered late; Code 1 acknowledged by dispatch, cleared by the supervisor with an outcome; both handsets updated');
 
   // 9. Paid session from the test provider: looked up on the device, saved, no offence.
   const now = Date.now();
-  await consoleApi('POST', '/api/console/paid-sessions', 'dispatch', { plate: 'PWT704', source: 'easypark', sourceRef: '7001', paidFrom: now - 600_000, paidTo: now + 3_600_000 });
+  await consoleApi('POST', '/api/console/paid-sessions', 'D1', { plate: 'PWT704', source: 'easypark', sourceRef: '7001', paidFrom: now - 600_000, paidTo: now + 3_600_000 });
   await scanOn('FT Buckhurst St N 1P', 'PWT704');
   await app.waitForSelector('[data-testid=payment-check-form]', { visible: true, timeout: 20000 });
   await tap(app, '[data-testid=pay-lookup]');
@@ -384,7 +476,7 @@ async function main() {
   log('test payment provider: paid session found by lookup, saved by the officer, no offence');
 
   // 10. Analytics: 702 split by the derived internal classification.
-  const a = await consoleApi('GET', '/api/console/analytics/offences', 'supervisor');
+  const a = await consoleApi('GET', '/api/console/analytics/offences', 'S1');
   if (!a.byCode.some((x) => x.offence_code === '702' && x.variant === 'no_payment')) throw new Error('analytics missing the 702 split');
   await clickText(cons, '701 / 702');
   await text(cons, 'Offences issued');

@@ -3,7 +3,10 @@
 
 const $app = document.getElementById('app');
 const S = { auth: null, tab: 'live', selected: null, data: {}, timer: null, tick: null };
-const ROLE_LABEL = { dispatch: 'Dispatch', compliance_coordinator: 'Compliance coordinator', supervisor: 'Supervisor' };
+const ROLE_LABEL = { officer: 'Officer', dispatch: 'Dispatch', team_supervisor: 'Team supervisor', compliance_lead: 'Compliance lead' };
+const isManager = () => S.auth && (S.auth.role === 'team_supervisor' || S.auth.role === 'compliance_lead');
+const ALERT_STATUS = { active: ['alert', 'Active'], radio_requested: ['alert', 'Radio response requested'], resolved: ['active', 'Resolved — officer OK'], escalated: ['inactive', 'Escalated to Code 1'], acknowledged: ['alert', 'Acknowledged'], cleared: ['active', 'Cleared'], cancelled: ['inactive', 'Cancelled'] };
+const OPEN = new Set(['active', 'radio_requested', 'acknowledged']);
 const INF_PILL = { allocated: ['pending', 'Allocated'], issued: ['issued', 'PIN issued'], cancelled: ['inactive', 'Cancelled'], void_requested: ['alert', 'Void requested'], voided: ['inactive', 'Voided'], paid: ['active', 'Paid'] };
 const VOID_LABEL = { officer_error: 'Officer error', permit_displayed: 'Permit displayed', incorrect_offence: 'Incorrect offence', incorrect_vehicle_details: 'Incorrect vehicle details', non_conforming_signage: 'Non-conforming signage', other: 'Other' };
 const VARIANT_LABEL = { no_payment: 'No valid payment', expired_session: 'Paid session expired (702e)', unknown: 'Unknown (no payment check)', '': '—' };
@@ -31,6 +34,7 @@ const where = (l) => (l ? h('span', { class: 'mono' }, `${l.lat.toFixed(5)}, ${l
 const mapLink = (l) => (l ? h('a', { href: `https://www.openstreetmap.org/?mlat=${l.lat}&mlon=${l.lng}#map=19/${l.lat}/${l.lng}`, target: '_blank', rel: 'noopener noreferrer' }, 'Map') : null);
 
 function toast(msg) {
+  document.querySelectorAll('.toast').forEach((x) => x.remove());
   const t = h('div', { class: 'toast', role: 'status' }, msg);
   document.body.append(t);
   setTimeout(() => t.remove(), 4000);
@@ -40,7 +44,7 @@ function toast(msg) {
 async function api(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { Authorization: `Bearer ${S.auth.token}`, 'X-Staff-Role': S.auth.role, 'X-Staff-User': S.auth.user, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { Authorization: `Bearer ${S.auth.token}`, ...(S.auth.staffId ? { 'X-Staff-Id': S.auth.staffId } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -49,7 +53,7 @@ async function api(method, path, body) {
   return data;
 }
 async function imageUrl(path) {
-  const res = await fetch(path, { headers: { Authorization: `Bearer ${S.auth.token}`, 'X-Staff-Role': S.auth.role, 'X-Staff-User': S.auth.user } });
+  const res = await fetch(path, { headers: { Authorization: `Bearer ${S.auth.token}`, 'X-Staff-Id': S.auth.staffId } });
   if (!res.ok) return null;
   return URL.createObjectURL(await res.blob());
 }
@@ -60,35 +64,64 @@ function img(path, caption) {
 }
 
 /* ───────────── Login ───────────── */
+/** Step 1: console token. Step 2: who you are, from the roster (or bootstrap the first manager). */
 function loginView(error) {
   const token = h('input', { type: 'password', autocomplete: 'off', required: true });
-  const role = h('select', {}, Object.entries(ROLE_LABEL).map(([v, l]) => h('option', { value: v }, l)));
-  const user = h('input', { autocomplete: 'off', required: true, placeholder: 'e.g. Sgt J. Lee' });
-  const form = h('form', { class: 'card login', onsubmit: async (e) => {
+  return h('form', { class: 'card login', onsubmit: async (e) => {
     e.preventDefault();
-    S.auth = { token: token.value.trim(), role: role.value, user: user.value.trim() };
+    S.auth = { token: token.value.trim() };
     try {
-      const me = await api('GET', '/api/console/me');
-      S.auth.council = me.council;
-      sessionStorage.setItem('pw-console', JSON.stringify(S.auth));
-      start();
+      const dir = await api('GET', '/api/console/directory');
+      render(dir.bootstrap ? bootstrapView(dir) : pickView(dir));
     } catch (err) { S.auth = null; render(loginView(err.message)); }
   } },
     h('h2', {}, 'PlateWatch console'),
-    h('p', { class: 'muted small' }, 'CommandMAPS stand-in for development and field testing. Staff identity is self-declared here; production uses CivicMAPS sign-in.'),
+    h('p', { class: 'muted small' }, 'CommandMAPS stand-in for development and field testing. Production sign-in is CivicMAPS identity.'),
     error ? h('div', { class: 'notice alert' }, error) : null,
-    h('div', { style: 'display:grid;gap:10px;margin-top:10px' },
-      h('label', { class: 'f' }, 'Console token', token),
-      h('label', { class: 'f' }, 'Role', role),
-      h('label', { class: 'f' }, 'Name or staff number', user),
-      h('button', { class: 'btn primary', type: 'submit' }, 'Sign in')));
-  return form;
+    h('div', { class: 'stack' }, h('label', { class: 'f' }, 'Console token', token), h('button', { class: 'btn primary', type: 'submit' }, 'Continue')));
+}
+
+function pickView(dir, error) {
+  const who = h('select', { required: true }, dir.staff.map((x) => h('option', { value: x.id }, `${x.name} · ${ROLE_LABEL[x.role]}${x.team ? ` · team ${x.team}` : ''} (${x.id})`)));
+  return h('form', { class: 'card login', onsubmit: async (e) => {
+    e.preventDefault();
+    S.auth.staffId = who.value;
+    try {
+      const me = await api('GET', '/api/console/me');
+      Object.assign(S.auth, { role: me.role, name: me.name, team: me.team, branch: me.branch, council: me.council, radioEscalateSeconds: me.radioEscalateSeconds });
+      sessionStorage.setItem('pw-console', JSON.stringify(S.auth));
+      start();
+    } catch (err) { render(pickView(dir, err.message)); }
+  } },
+    h('h2', {}, 'Who are you?'),
+    error ? h('div', { class: 'notice alert' }, error) : null,
+    h('div', { class: 'stack' }, h('label', { class: 'f' }, 'Staff member', who), h('button', { class: 'btn primary', type: 'submit' }, 'Sign in')));
+}
+
+function bootstrapView(dir, error) {
+  const id = h('input', { required: true, placeholder: 'Staff number' });
+  const name = h('input', { required: true, placeholder: 'Name' });
+  const role = h('select', {}, h('option', { value: 'team_supervisor' }, 'Team supervisor'), h('option', { value: 'compliance_lead' }, 'Compliance lead'));
+  const team = h('input', { placeholder: 'Team (supervisors)' });
+  const branch = h('input', { value: 'parking' });
+  return h('form', { class: 'card login', onsubmit: async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/console/staff', { id: id.value, name: name.value, role: role.value, team: team.value, branch: branch.value });
+      render(pickView(await api('GET', '/api/console/directory')));
+    } catch (err) { render(bootstrapView(dir, err.message)); }
+  } },
+    h('h2', {}, 'Set up the roster'),
+    h('p', { class: 'muted small' }, 'The roster is empty. Add the first manager (team supervisor or compliance lead); they then add everyone else under Roster.'),
+    error ? h('div', { class: 'notice alert' }, error) : null,
+    h('div', { class: 'stack' }, h('label', { class: 'f' }, 'Staff number', id), h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Role', role), h('label', { class: 'f' }, 'Team', team), h('label', { class: 'f' }, 'Branch', branch),
+      h('button', { class: 'btn primary', type: 'submit' }, 'Create')));
 }
 
 function render(node) { $app.replaceChildren(node); }
 
 /* ───────────── Shell ───────────── */
-const TABS = [['live', 'Live'], ['infringements', 'Infringements'], ['sightings', 'Sightings'], ['analytics', '701 / 702'], ['payments', 'Paid sessions (test)'], ['devices', 'Devices'], ['audit', 'Audit']];
+const TABS = [['live', 'Live'], ['infringements', 'Infringements'], ['sightings', 'Sightings'], ['analytics', '701 / 702'], ['payments', 'Paid sessions (test)'], ['roster', 'Roster'], ['devices', 'Devices'], ['audit', 'Audit']];
 
 async function refresh() {
   try {
@@ -100,38 +133,77 @@ async function refresh() {
     if (S.tab === 'devices') S.data.devices = (await api('GET', '/api/console/devices')).devices;
     if (S.tab === 'payments') S.data.paid = (await api('GET', '/api/console/paid-sessions')).sessions;
     if (S.tab === 'analytics') S.data.analytics = await api('GET', '/api/console/analytics/offences');
-    if (S.tab === 'audit' && S.auth.role === 'supervisor') S.data.audit = (await api('GET', '/api/console/audit')).audit;
-    if (S.tab === 'live') S.data.allAlerts = (await api('GET', '/api/console/alerts?status=all')).alerts;
+    if (S.tab === 'audit' && isManager()) S.data.audit = (await api('GET', '/api/console/audit')).audit;
+    if (S.tab === 'roster') S.data.roster = await api('GET', '/api/console/staff');
+    if (S.tab === 'live') {
+      S.data.allAlerts = (await api('GET', '/api/console/alerts?scope=all')).alerts;
+      S.data.hits = (await api('GET', '/api/console/hits')).hits;
+    }
     S.error = null;
   } catch (e) { S.error = e.message; }
+  siren();
   // Do not redraw under someone typing (forms keep their values); banners refresh on the next tick.
   const a = document.activeElement;
   if (a && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) && a.closest('main')) return;
   draw();
 }
 
-/** Banners for alerts this recipient has not acknowledged (Code 1 banners, if any, would stack above). */
+/**
+ * Banners (S3 3b shape): Code 1 red, always above; soft Code 1 amber, only for its recipients
+ * (dispatch and the designated supervisors / compliance lead). Each stays until its life cycle closes.
+ */
 function banners() {
-  const mine = (S.data.alerts || []).filter((a) => a.recipients.includes(S.auth.role) && !a.acks.some((k) => k.recipient === S.auth.role));
-  const others = S.auth.role === 'supervisor' ? S.data.alerts || [] : [];
-  return h('div', { class: 'banners', 'aria-live': 'assertive' }, [...mine, ...others].map((a) => {
-    const canAck = mine.includes(a);
-    return h('div', { class: 'hot-banner', role: 'alert', 'data-alert': a.id },
+  const open = (S.data.alerts || []).filter((a) => OPEN.has(a.status) && a.forMe);
+  open.sort((x, y) => (x.kind === y.kind ? y.raisedAt - x.raisedAt : x.kind === 'code1' ? -1 : 1));
+  return h('div', { class: 'banners', 'aria-live': 'assertive' }, open.map((a) => {
+    const code1 = a.kind === 'code1';
+    const actions = [];
+    if (!code1 && a.status === 'active') actions.push(h('button', { class: 'btn ack', onclick: () => act(a.id, 'acknowledge') }, 'ACKNOWLEDGE — REQUEST RADIO'));
+    if (!code1 && a.status === 'radio_requested') {
+      actions.push(h('button', { class: 'btn ok', onclick: () => act(a.id, 'radio-ok', { note: prompt('Radio response received. Note (optional):') ?? '' }) }, 'RADIO OK — OFFICER SAFE'));
+      actions.push(h('button', { class: 'btn danger', onclick: () => confirm('No radio response: escalate to a Code 1 for the whole branch?') && act(a.id, 'escalate', { note: 'No radio response' }) }, 'NO RESPONSE — CODE 1'));
+    }
+    if (code1 && a.status === 'active') actions.push(h('button', { class: 'btn ack', onclick: () => act(a.id, 'acknowledge') }, 'ACKNOWLEDGE'));
+    if (code1) actions.push(h('button', { class: 'btn ack', onclick: () => { const o = prompt('Clear this Code 1. Outcome (required):'); if (o) act(a.id, 'clear', { outcome: o }); } }, 'CLEAR'));
+    const since = a.status === 'radio_requested' ? a.acknowledgedAt : a.raisedAt;
+    return h('div', { class: `hot-banner ${code1 ? 'code1' : ''}`, role: 'alert', 'data-alert': a.id, 'data-kind': a.kind, 'data-status': a.status },
       h('span', { class: 'beacon', 'aria-hidden': 'true' }),
       h('div', {},
-        h('div', { class: 'row' }, h('span', { class: 'label' }, 'HOT LIST'), plate(a.plate), a.riskLevel ? pill('alert', `Risk ${a.riskLevel}`) : null),
-        h('div', { class: 'meta' }, `Officer ${a.officerNumber} · `, where(a.location), ` · ${stamp(a.raisedAt)}`)),
-      h('span', { class: 'timer', 'data-since': a.raisedAt }, elapsed(a.raisedAt)),
-      h('div', { class: 'row' },
-        h('button', { class: 'btn', onclick: () => { S.tab = 'live'; S.selected = { kind: 'alert', id: a.id }; draw(); loadDetail(); } }, 'Open'),
-        canAck ? h('button', { class: 'btn amber', onclick: () => ack(a.id) }, 'ACKNOWLEDGE') : null));
+        h('div', { class: 'row' }, h('span', { class: 'label' }, code1 ? 'CODE 1' : 'SOFT CODE 1 · HOT LIST'), a.hit ? plate(a.hit.plate) : null, a.hit?.entry?.riskLevel ? pill('alert', `Risk ${a.hit.entry.riskLevel}`) : null,
+          a.status === 'radio_requested' ? pill('alert', `Radio requested by ${a.acknowledgedBy}`) : a.acknowledgedBy ? pill('active', `Ack ${a.acknowledgedBy}`) : null,
+          a.officerResponse ? pill('active', `Officer answered ${a.officerResponse === 'safe_clear' ? 'SAFE & CLEAR' : 'CODE 1'}`) : null),
+        h('div', { class: 'meta' }, `${a.officerName ? `${a.officerName} · ` : 'Officer '}${a.officerNumber}${a.team ? ` · team ${a.team}` : ''} · `, where(a.location), ' ', mapLink(a.location), ` · ${stamp(a.raisedAt)}`)),
+      h('span', { class: 'timer', 'data-since': since }, elapsed(since)),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { S.tab = 'live'; S.selected = { kind: 'alert', id: a.id }; draw(); loadDetail(); } }, 'Open'), actions));
   }));
 }
 function elapsed(since) { const s = Math.max(0, Math.floor((Date.now() - since) / 1000)); return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`; }
 
-async function ack(id) {
-  try { await api('POST', `/api/console/alerts/${encodeURIComponent(id)}/ack`); toast('Acknowledged — the banner is closed for your role.'); } catch (e) { toast(e.message); }
-  refresh();
+async function act(id, action, body) {
+  try { const r = await api('POST', `/api/console/alerts/${encodeURIComponent(id)}/${action}`, body || {}); toast(`Done: ${r.status.replace(/_/g, ' ')}`); } catch (e) { toast(e.message); }
+  await refresh();
+  if (S.selected?.kind === 'alert') loadDetail();
+}
+
+/** Audible alarm while a Code 1 for this console is not yet acknowledged (needs one click on the page first). */
+let audioCtx = null;
+let sirenTimer = null;
+function siren() {
+  const ringing = (S.data.alerts || []).some((a) => a.kind === 'code1' && a.status === 'active' && a.forMe);
+  if (ringing && !sirenTimer) {
+    const beep = () => {
+      try {
+        audioCtx ??= new AudioContext();
+        for (let i = 0; i < 3; i++) {
+          const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+          o.type = 'sawtooth'; o.frequency.value = i % 2 ? 740 : 980; g.gain.value = 0.15;
+          o.connect(g).connect(audioCtx.destination); o.start(audioCtx.currentTime + i * 0.3); o.stop(audioCtx.currentTime + i * 0.3 + 0.25);
+        }
+      } catch { /* no audio */ }
+    };
+    beep();
+    sirenTimer = setInterval(beep, 2000);
+  } else if (!ringing && sirenTimer) { clearInterval(sirenTimer); sirenTimer = null; }
 }
 
 function draw() {
@@ -141,8 +213,8 @@ function draw() {
     h('header', { class: 'topbar' },
       h('h1', {}, 'PlateWatch console'),
       h('span', { class: 'small' }, `Council ${S.auth.council || ''} · CommandMAPS stand-in`),
-      h('div', { class: 'who' }, `${ROLE_LABEL[S.auth.role]} · ${S.auth.user}`, h('button', { onclick: () => { sessionStorage.removeItem('pw-console'); location.reload(); } }, 'Sign out'))),
-    h('nav', { class: 'tabs', 'aria-label': 'Sections' }, TABS.filter(([k]) => k !== 'audit' || S.auth.role === 'supervisor').map(([k, l]) =>
+      h('div', { class: 'who' }, `${ROLE_LABEL[S.auth.role]} · ${S.auth.name}${S.auth.team ? ` · team ${S.auth.team}` : ''}`, h('button', { onclick: () => { sessionStorage.removeItem('pw-console'); location.reload(); } }, 'Sign out'))),
+    h('nav', { class: 'tabs', 'aria-label': 'Sections' }, TABS.filter(([k]) => k !== 'audit' || isManager()).map(([k, l]) =>
       h('button', { 'aria-current': S.tab === k ? 'page' : null, onclick: () => { S.tab = k; S.selected = null; draw(); refresh(); } }, l, counts[k] ? h('span', { class: 'count' }, counts[k]) : null))),
     banners(),
     h('main', {}, S.error ? h('div', { class: 'notice alert' }, S.error) : null, VIEWS[S.tab]())));
@@ -155,16 +227,39 @@ function selectRow(kind, id) { S.selected = { kind, id }; draw(); loadDetail(); 
 const VIEWS = {
   live() {
     const rows = S.data.allAlerts || [];
+    const hits = S.data.hits || [];
     return h('div', { class: 'grid2' },
-      h('section', { class: 'card' }, h('h2', {}, 'Soft Code 1 — hot-list sightings'),
-        h('p', { class: 'muted small' }, 'Sent to dispatch and the compliance coordinator only (not all handsets). Each recipient acknowledges; the alert closes when both have. No Code 1 welfare protocol.'),
-        rows.length ? h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Raised'), h('th', {}, 'Plate'), h('th', {}, 'Officer'), h('th', {}, 'Status'), h('th', {}, 'Acknowledged'))),
-          h('tbody', {}, rows.map((a) => h('tr', { class: `clickable ${S.selected?.id === a.id ? 'selected' : ''}`, onclick: () => selectRow('alert', a.id) },
-            h('td', { class: 'mono' }, stamp(a.raisedAt)), h('td', {}, plate(a.plate)), h('td', { class: 'mono' }, a.officerNumber),
-            h('td', {}, a.status === 'active' ? pill('alert', 'Active') : pill('inactive', 'Closed')),
-            h('td', { class: 'small' }, a.acks.map((k) => `${ROLE_LABEL[k.recipient]} (${k.by}) ${clock(k.at)}`).join(' · ') || '—')))))
-          : h('p', { class: 'muted' }, 'No hot-list sightings yet.')),
-      h('section', { class: 'card' }, S.selected?.kind === 'alert' ? detailBox : h('p', { class: 'muted' }, 'Select a sighting to see the evidence, map and the plate’s entry log.')));
+      h('div', { class: 'stack' },
+        h('section', { class: 'card' }, h('h2', {}, 'Officer-safety alerts'),
+          h('p', { class: 'muted small' }, 'Soft Code 1: the officer did not answer the hot-list pop-up in time. It goes to dispatch and the officer’s team supervisor (not on shift: every team supervisor on shift and the compliance lead). Acknowledge to request a radio response, then mark the officer safe or escalate to Code 1. Code 1: the whole branch, with the officer’s location.'),
+          rows.length ? h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Raised'), h('th', {}, 'Kind'), h('th', {}, 'Officer'), h('th', {}, 'Plate'), h('th', {}, 'Status'))),
+            h('tbody', {}, rows.map((a) => h('tr', { class: `clickable ${S.selected?.id === a.id ? 'selected' : ''}`, onclick: () => selectRow('alert', a.id) },
+              h('td', { class: 'mono small' }, stamp(a.raisedAt)), h('td', {}, a.kind === 'code1' ? h('span', { class: 'pill code1' }, 'Code 1') : pill('alert', 'Soft Code 1')),
+              h('td', { class: 'mono' }, a.officerNumber), h('td', {}, a.hit ? plate(a.hit.plate) : '—'), h('td', {}, pill(...(ALERT_STATUS[a.status] || ['inactive', a.status])))))))
+            : h('p', { class: 'muted' }, 'No alerts.')),
+        h('section', { class: 'card' }, h('h2', {}, 'Hot-list hits'),
+          hits.length ? table(['When', 'Plate', 'Officer', 'Answer', 'Note', 'Where'], hits.map((x) => [stamp(x.at), plate(x.plate), h('span', { class: 'mono' }, x.officerNumber),
+            x.response === 'code1' ? h('span', { class: 'pill code1' }, 'Code 1') : x.response === 'safe_clear' ? pill('active', 'SAFE & CLEAR') : pill('alert', 'No answer yet'), x.note || '—', h('span', { class: 'small' }, x.entry?.listName || '', ' ', mapLink(x.location))]))
+            : h('p', { class: 'muted' }, 'No hits yet.'))),
+      h('section', { class: 'card' }, S.selected?.kind === 'alert' ? detailBox : h('p', { class: 'muted' }, 'Select an alert to see the officer’s location, the vehicle profile and the life cycle.')));
+  },
+  roster() {
+    const r = S.data.roster;
+    if (!r) return h('p', { class: 'muted' }, 'Loading…');
+    const mgr = isManager();
+    const f = { id: h('input', { required: true, placeholder: 'Staff number' }), name: h('input', { required: true, placeholder: 'Name' }), role: h('select', {}, Object.entries(ROLE_LABEL).map(([v, l]) => h('option', { value: v }, l))),
+      officerNumber: h('input', { placeholder: 'Officers: e.g. 4471', inputmode: 'numeric' }), team: h('input', { placeholder: 'e.g. A' }), branch: h('input', { value: S.auth.branch || 'parking' }) };
+    const form = h('form', { class: 'card', onsubmit: async (e) => {
+      e.preventDefault();
+      try { await api('POST', '/api/console/staff', Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value]))); toast('Saved.'); refresh(); } catch (err) { toast(err.message); }
+    } }, h('h2', {}, 'Add or update staff'), h('p', { class: 'muted small' }, 'Same staff number updates the record. Officers need their handset officer number; a team links officers to their team supervisor.'),
+      h('div', { class: 'formgrid' }, Object.entries({ id: 'Staff number', name: 'Name', role: 'Role', officerNumber: 'Officer number', team: 'Team', branch: 'Branch' }).map(([k, l]) => h('label', { class: 'f' }, l, f[k]))),
+      h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn primary', type: 'submit' }, 'Save')));
+    return h('div', { class: 'stack' }, mgr ? form : h('div', { class: 'notice' }, 'Team supervisors and the compliance lead manage the roster.'),
+      h('section', { class: 'card' }, h('h2', {}, `Roster · on shift ${r.day}`),
+        table(['Staff', 'Name', 'Role', 'Officer no.', 'Team', 'Branch', 'On shift today'], r.staff.map((x) => [h('span', { class: 'mono' }, x.id), x.name, ROLE_LABEL[x.role], h('span', { class: 'mono' }, x.officerNumber || '—'), x.team || '—', x.branch,
+          mgr ? h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: x.onShift, 'data-shift': x.id, onchange: async (e) => { try { await api('POST', `/api/console/staff/${encodeURIComponent(x.id)}/shift`, { day: r.day, on: e.target.checked }); } catch (err) { toast(err.message); } refresh(); } }), x.onShift ? 'On shift' : 'Off')
+            : x.onShift ? pill('active', 'On shift') : pill('inactive', 'Off')]))));
   },
   infringements() {
     const rows = S.data.inf || [];
@@ -222,9 +317,9 @@ const VIEWS = {
     return h('div', { class: 'grid2' }, form, h('section', { class: 'card' }, h('h2', {}, 'Paid sessions'), table(['Plate', 'Source', 'Ref', 'From', 'To', 'By'], (S.data.paid || []).map((p) => [plate(p.plate), p.source, p.sourceRef, stamp(p.paidFrom), stamp(p.paidTo), p.createdBy]))));
   },
   devices() {
-    const sup = S.auth.role === 'supervisor';
+    const sup = isManager();
     return h('section', { class: 'card' }, h('h2', {}, 'Handset signing keys'),
-      h('p', { class: 'muted small' }, 'A handset’s infringement numbers are accepted only once its key is approved. Production requires hardware key attestation and two-person approval; this development backend takes one supervisor.'),
+      h('p', { class: 'muted small' }, 'A handset’s infringement numbers are accepted only once its key is approved. Production requires hardware key attestation and two-person approval; this development backend takes one team supervisor or the compliance lead.'),
       table(['Key', 'Device', 'Officer', 'Status', 'Registered', 'Last seen', ''], (S.data.devices || []).map((d) => [
         h('span', { class: 'mono' }, d.keyId), h('span', { class: 'small' }, d.label), h('span', { class: 'mono' }, d.officerNumber || '—'),
         d.status === 'approved' ? pill('active', 'Approved') : d.status === 'revoked' ? pill('inactive', 'Revoked') : pill('alert', 'Pending'),
@@ -255,26 +350,39 @@ async function loadDetail() {
   detailBox.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
   try {
     if (sel.kind === 'alert') {
-      const { alert: a, log } = await api('GET', `/api/console/alerts/${encodeURIComponent(sel.id)}`);
-      const e = a.entry || {};
+      const d = await api('GET', `/api/console/alerts/${encodeURIComponent(sel.id)}`);
+      const a = d.alert;
+      const e = a.hit?.entry || d.profile?.entry || {};
+      const p = d.profile;
       detailBox.replaceChildren(
-        h('h2', {}, 'Hot-list sighting ', plate(a.plate)),
-        h('div', { class: 'row' }, a.status === 'active' ? pill('alert', 'Active') : pill('inactive', 'Closed'), a.riskLevel ? pill('alert', `Risk ${a.riskLevel}`) : null),
+        h('h2', {}, a.kind === 'code1' ? 'Code 1' : 'Soft Code 1', ' ', a.hit ? plate(a.hit.plate) : ''),
+        h('div', { class: 'row' }, pill(...(ALERT_STATUS[a.status] || ['inactive', a.status])), e.riskLevel ? pill('alert', `Risk ${e.riskLevel}`) : null),
+        e.alertMessage ? h('div', { class: 'notice alert', style: 'margin-top:10px;font-weight:700' }, e.alertMessage) : null,
         h('dl', { class: 'kv', style: 'margin-top:10px' },
-          h('dt', {}, 'Officer'), h('dd', { class: 'mono' }, a.officerNumber),
-          h('dt', {}, 'Acknowledged by officer'), h('dd', { class: 'mono' }, stamp(a.raisedAt)),
-          h('dt', {}, 'Location'), h('dd', {}, where(a.location), ' ', mapLink(a.location)),
+          h('dt', {}, 'Officer'), h('dd', {}, `${a.officerName || ''} `, h('span', { class: 'mono' }, a.officerNumber), a.team ? ` · team ${a.team}` : '', ` · branch ${a.branch}`),
+          h('dt', {}, 'Raised'), h('dd', {}, h('span', { class: 'mono' }, stamp(a.raisedAt)), ` · ${a.cause.replace(/_/g, ' ')} · by ${a.raisedBy}`),
+          h('dt', {}, 'Location'), h('dd', {}, where(a.location), ' ', mapLink(a.location), a.location?.at ? ` · ${clock(a.location.at)}` : ''),
+          h('dt', {}, 'Recipients'), h('dd', {}, a.kind === 'code1' ? `Whole branch ${a.branch}` : ['Dispatch', ...d.recipients.map((r) => `${r.name} (${ROLE_LABEL[r.role]})`)].join(' · '), a.recipients?.fallback ? ' — own supervisor not on shift' : ''),
           h('dt', {}, 'Vehicle'), h('dd', {}, [e.make, e.type, e.colour].filter(Boolean).join(' · ') || '—'),
-          h('dt', {}, 'Risks'), h('dd', {}, (e.risks || []).join(', ') || '—'),
-          h('dt', {}, 'Recipients'), h('dd', {}, a.recipients.map((r) => ROLE_LABEL[r]).join(' · ')),
-          h('dt', {}, 'Acknowledged'), h('dd', {}, a.acks.map((k) => `${ROLE_LABEL[k.recipient]} · ${k.by} · ${stamp(k.at)}`).join('; ') || '—')),
-        a.scanId ? h('div', { class: 'thumbs', style: 'margin-top:12px' }, img(`/api/console/evidence/${encodeURIComponent(a.scanId)}`, 'Evidence at the sighting')) : null,
-        h('h2', { style: 'margin-top:14px' }, 'Entry log'),
-        h('ul', { class: 'timeline' }, log.map((x) => h('li', {}, h('strong', {}, x.kind === 'sighting' ? 'Sighting' : x.kind === 'acknowledged' ? 'Acknowledged' : 'Look-alike — not this vehicle'), ` · ${stamp(x.at)} · officer ${x.officerNumber || '—'} · `, where(x.location)))));
+          h('dt', {}, 'Registered owner'), h('dd', {}, e.ownerDescription || '—'),
+          a.acknowledgedBy ? [h('dt', {}, 'Acknowledged'), h('dd', {}, `${a.acknowledgedBy} · ${stamp(a.acknowledgedAt)}`)] : null,
+          a.outcome ? [h('dt', {}, 'Outcome'), h('dd', {}, a.outcome)] : null,
+          a.escalatedTo ? [h('dt', {}, 'Escalated to'), h('dd', { class: 'mono' }, a.escalatedTo)] : null,
+          d.receipts.length ? [h('dt', {}, 'Alarm received'), h('dd', {}, d.receipts.map((r) => `${r.officerNumber} ${clock(r.at)}`).join(' · '))] : null),
+        d.scanId ? h('div', { class: 'thumbs', style: 'margin-top:12px' }, img(`/api/console/evidence/${encodeURIComponent(d.scanId)}`, 'Evidence at the hit')) : null,
+        d.trail.length > 1 ? [h('h2', { style: 'margin-top:14px' }, 'Location trail'), h('ul', { class: 'timeline small' }, d.trail.slice(0, 12).map((t) => h('li', {}, h('span', { class: 'mono' }, clock(t.at)), ' · ', where(t), ' ', mapLink(t))))] : null,
+        h('h2', { style: 'margin-top:14px' }, 'Life cycle'),
+        h('ul', { class: 'timeline' }, d.events.map((x) => h('li', {}, h('strong', {}, x.action.replace(/_/g, ' ')), ` · ${stamp(x.at)} · ${x.actor} (${x.role})${x.note ? ` — ${x.note}` : ''}`))),
+        p ? [
+          h('h2', { style: 'margin-top:14px' }, `Hot-list match history (${p.history.length})`),
+          h('ul', { class: 'timeline small' }, p.history.slice(0, 15).map((x) => h('li', {}, h('span', { class: 'mono' }, stamp(x.at)), ` · officer ${x.officerNumber}${x.where ? ` · ${x.where}` : ''} · ${x.response === 'code1' ? 'CODE 1' : x.response === 'safe_clear' ? 'SAFE & CLEAR' : 'no answer'}${x.note ? ` — ${x.note}` : ''}`))),
+          h('h2', { style: 'margin-top:14px' }, 'Known locations'),
+          h('ul', { class: 'timeline small' }, p.knownLocations.map((x) => h('li', {}, `${x.label} · ${x.count}× · last ${stamp(x.lastAt)}`))),
+        ] : null);
     } else {
       const d = await api('GET', `/api/console/infringements/${encodeURIComponent(sel.id)}`);
       const x = d.infringement;
-      const sup = S.auth.role === 'supervisor';
+      const sup = isManager();
       const note = h('textarea', { rows: 2 });
       detailBox.replaceChildren(
         h('h2', { class: 'mono' }, fmtIN(x.number)),
@@ -330,4 +438,4 @@ function start() {
 }
 
 try { S.auth = JSON.parse(sessionStorage.getItem('pw-console') || 'null'); } catch { S.auth = null; }
-if (S.auth) start(); else render(loginView());
+if (S.auth?.staffId) start(); else render(loginView());

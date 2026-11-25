@@ -8,7 +8,8 @@ owner_decisions_applied:
   - "Offence rules 701 / 702, 702e derived and internal only (25/11/2026)"
   - "I-N generated and signed on the handset; the server verifies and accepts, never creates (17/11/2026)"
   - "Void with reissue: no approval; void without reissue: supervisor approval in CommandMAPS; offline issuing queues and never blocks (23/11/2026)"
-  - "Hot-list acknowledge: date, time, location, officer number; soft Code 1 to dispatch and the compliance coordinator, amber, closed by the recipient's acknowledgement (23/11/2026, OQ29)"
+  - "Hot-list officer safety: blocking pop-up, CODE 1 or SAFE & CLEAR, soft Code 1 on no answer to dispatch + the officer's team supervisor (fallback: every team supervisor on shift + the compliance lead), radio response, Code 1 for the whole branch (25/11/2026, supersedes 23/11)"
+  - "Officer identity: one handset per officer; council account sign-in at the start of shift, then a 6-digit PIN; the officer number from sign-in is used everywhere (25/11/2026; EnforcementMAPS supplies it, the development build uses Settings)"
 stack: [Node.js 22, PostgreSQL 16, pg 8, ajv 8, rolldown (bundle), vanilla JS console]
 source: [server/, src/lib/backend.ts, src/lib/signer.ts, src/lib/inNumber.ts, src/lib/issuance.ts, src/ui/infringementWizard.ts]
 ---
@@ -23,7 +24,9 @@ the whole workflow and life cycle with a real, persistent database:
 | Life cycle | Device (PlateWatch) | Backend (PostgreSQL) | Console (CommandMAPS stand-in) |
 |---|---|---|---|
 | Sightings | Every scan, timing and hot-list event is queued in an outbox in the same transaction as the change, then synced | `scans`, `observations`, `hot_events` | **Sightings** feed with thumbnails and payment checks |
-| Hot-list sighting (S29) | Officer acknowledges → soft Code 1 sent; evidence image uploaded | `alerts`, `alert_acks` | Amber flashing banner for **dispatch** and the **compliance coordinator** only; each acknowledges; closes when both have; device is told who acknowledged |
+| Hot-list hit (owner 25/11) | Blocking pop-up: plate, make, type, colour, alert message, More information (history, interactions, known locations, owner description); **CODE 1** or **SAFE & CLEAR** + optional note; no answer by the deadline → handset raises a **soft Code 1** | `hot_hits`, `alerts`, `alert_events` | Amber soft Code 1 banner for dispatch and the officer's team supervisor (or the fallback); acknowledge = radio requested → **radio OK** or **no response → Code 1** |
+| Code 1 | Officer: red banner, location every 10 s, cancel if raised in error. Every other handset in the branch: **red alarm with sound** and the location pin until RECEIVED, then a banner until cleared | `alerts`, `alert_locations`, `alert_receipts` | Red banner (always above), siren until acknowledged, location trail, **clear with an outcome** |
+| Roster | — | `staff`, `shifts` | **Roster**: staff, roles, teams, branch, officer numbers, who is on shift today (routes the soft Code 1) |
 | Payment check (S30) | "Look up paid session (test provider)" fills the form; the officer still saves | `paid_sessions` | **Paid sessions (test)**: create sessions as EasyPark / PayStay would |
 | Issue infringement (S31) | 4-step wizard (8d-i–8d-iv) on the device; I-N allocated and signed on the device at start; works offline | `statements` (hash chain), `pools`, `infringements`, `infringement_events` | **Infringements** with evidence, notes, signed statements and the life-cycle timeline |
 | Void without reissue | Record → *Request void* (reason) | `void_requested` | Supervisor **Approve void** / **Reject** |
@@ -73,6 +76,11 @@ PostgreSQL. For a LAN `http://` address, build the app with
 | `PLATEWATCH_COUNCIL` | no | `com` | Council code the I-N statements must name |
 | `PLATEWATCH_CORS_ORIGINS` | no | `*` | Comma-separated origins (bearer tokens, no cookies) |
 | `PLATEWATCH_APP_DIR` | no | `./dist` if present | Built PWA served at `/` |
+| `PLATEWATCH_TIMEZONE` | no | `Australia/Melbourne` | Council day for shifts |
+| `PLATEWATCH_DEFAULT_BRANCH` | no | `parking` | Branch for an officer not in the roster |
+| `PLATEWATCH_HOT_ACK_SECONDS` | no | `60` | Time to answer the hot-list pop-up before the soft Code 1 (min 10) |
+| `PLATEWATCH_WATCHDOG_GRACE_SECONDS` | no | `20` | Extra wait before the server raises a soft Code 1 the handset did not |
+| `PLATEWATCH_RADIO_ESCALATE_SECONDS` | no | `0` | Auto-escalate a soft Code 1 with no radio response (0 = manual) |
 | `PORT` | no | `8787` | Listen port |
 
 ### Connect a handset
@@ -80,8 +88,38 @@ PostgreSQL. For a LAN `http://` address, build the app with
 1. **Settings → Officer number** (digits, up to 5: it becomes the I-N officer id).
 2. **Settings → Backend**: server URL and the device token → **Test connection**. The device's
    signing key registers as **Awaiting approval**.
-3. Console → **Devices** (supervisor) → **Approve**. Until then the device still issues offline;
+3. Console → **Roster**: add the officer (staff number, name, officer number, team) and mark the
+   team supervisor and dispatch on shift today. Then **Devices** (team supervisor or compliance
+   lead) → **Approve**. Until then the device still issues offline;
    the server accepts the numbers once the key is approved.
+
+## 1a. Hot-list officer safety (owner direction 25/11/2026)
+
+```text
+hit (scanned or typed plate) ─▶ pop-up blocks the handset (survives a reload)
+   ├─ CODE 1 ────────────▶ Code 1 (red) for the whole branch
+   ├─ SAFE & CLEAR (+note) ▶ logged on the plate's history (time, location, officer)
+   └─ no answer by the deadline (PLATEWATCH_HOT_ACK_SECONDS, default 60)
+        ─▶ soft Code 1 (amber): dispatch + the officer's team supervisor on shift
+           (not on shift → every team supervisor on shift + the compliance lead)
+           ─ acknowledge = radio response requested ─▶ RADIO OK (resolved)
+                                                    └─ NO RESPONSE ─▶ Code 1 (red)
+Code 1: every officer handset and console in the branch: alarm + location pin; dispatch
+acknowledges; cleared with an outcome (or cancelled as raised in error).
+```
+
+- The handset raises the soft Code 1 at the deadline. If it cannot (no signal, damaged), the
+  server's watchdog raises it after `PLATEWATCH_WATCHDOG_GRACE_SECONDS` (default 20).
+- A late SAFE & CLEAR is shown on the open soft Code 1; dispatch still confirms by radio.
+- `PLATEWATCH_RADIO_ESCALATE_SECONDS` (default 0 = manual) escalates automatically when no radio
+  response is recorded in that time.
+- **CODE 1 is never blocked** on the handset or refused by the server.
+- Location: the handset shares its position every 10 s while a Code 1 about its officer is open.
+  **A PWA in the background (screen locked, phone in a pocket) stops receiving GPS**: reliable
+  tracking needs the native app's background location (Android foreground service) — see BE-9.
+- The officer number on every surface comes from the EnforcementMAPS sign-in (council account +
+  password at the start of shift, then a 6-digit PIN; one handset per officer). The development
+  build uses the number in Settings as a stand-in.
 
 ## 2. Infringement numbers (I-N)
 
@@ -144,7 +182,10 @@ scan. The officer is never offered or shown "702e"; the wizard's offence chips r
 | `infringement_events` | `id` | Life-cycle audit: allocated, issued, cancelled, void_requested, void_approved / rejected, voided_by_reissue, payment_recorded |
 | `scans` / `evidence` | `id` / `scan_id` | Scan metadata (+ thumbnail) / evidence JPEG, SHA-256 checked against the capture hash |
 | `observations`, `hot_events` | `id` | Timings and hot-list entry-log events |
-| `alerts` / `alert_acks` | `id` / `(alert_id, recipient)` | Soft Code 1 and each recipient's acknowledgement |
+| `staff` / `shifts` | `id` / `(staff_id, day)` | Roster: role (officer, dispatch, team supervisor, compliance lead), team, branch, officer number; who is on shift each council day |
+| `hot_hits` | `id` | Each hot-list hit: plate, entry details shown on the pop-up, officer, location, deadline, answer, note |
+| `alerts` | `id` | Soft Code 1 and Code 1: recipients, status life cycle, who acknowledged / closed, outcome, escalation links |
+| `alert_locations` / `alert_receipts` / `alert_events` | — | Location trail; handsets that silenced a branch alarm; the alert's audit trail |
 | `paid_sessions` | `id` | Test payment provider |
 | `audit_log` | `id` | Console actions |
 
@@ -154,8 +195,10 @@ or `allocated → cancelled` (number consumed).
 ## 5. API
 
 Device endpoints: `Authorization: Bearer <device token>` and `X-Device-Key: <key id>`.
-Console endpoints: `Authorization: Bearer <console token>`, `X-Staff-Role`
-(`dispatch` | `compliance_coordinator` | `supervisor`), `X-Staff-User`.
+Device endpoints also send `X-Officer-Number`.
+Console endpoints: `Authorization: Bearer <console token>` and `X-Staff-Id` (a roster member:
+dispatch, team supervisor or compliance lead). With an empty roster the first manager is created
+with the token alone.
 Errors: `{ error: <code>, message, details? }`.
 
 | Method | Path | Who | Purpose |
@@ -164,14 +207,21 @@ Errors: `{ error: <code>, message, details? }`.
 | POST | `/api/devices/register` | device | `{ publicJwk, label, officerNumber }` → `{ keyId, status, council }` |
 | GET | `/api/devices/me` | device | Key status |
 | POST | `/api/sync` | device | `{ scans[], observations[], hotEvents[] }` (≤ 200 each) → `{ accepted, rejected }` |
-| POST | `/api/hot-alerts` | device | `{ event: HotListEvent, entry? }` → `{ sentAt }` |
+| POST | `/api/hot-hits` · `/api/hot-hits/:id/response` | device | Report a hit at once; answer it (`safe_clear` / `code1`, note). Hits and answers also arrive through `/api/sync` |
+| POST | `/api/alerts/soft-code1` | device | `{ hit, at, location }` at the deadline (idempotent per hit) |
+| POST | `/api/code1` · `/:id/location` · `/:id/cancel` | device | Raise a Code 1; share the location; cancel one raised in error (own only) |
+| GET | `/api/alerts/live` | device | This officer's open alerts and the branch's Code 1s (`received` per handset) |
+| POST | `/api/alerts/:id/receipt` | device | Alarm received (silenced) |
+| GET | `/api/hot-profile?plate=&entryId=` | device / console | Match history, interactions, known locations |
 | POST | `/api/infringements/statements` | device | `{ keyId, scanId, allocation, closing?, record? }` → `{ number, status }` (idempotent) |
 | POST | `/api/infringements/:number/void-request` | issuing device | `{ reason, note?, requestedAt, officerNumber }` |
 | PUT | `/api/evidence/:scanId` | device | JPEG body, `X-Content-SHA256` |
 | GET | `/api/updates?since=` | device | Infringement status and alert acknowledgements since the cursor |
 | GET | `/api/payments/lookup?plate=&at=&ref=` | device | Test provider: covering paid session or `null` |
-| GET | `/api/console/summary` · `/alerts` · `/alerts/:id` | staff | Live counts, banners, sighting detail + entry log |
-| POST | `/api/console/alerts/:id/ack` | dispatch, coordinator | Acknowledge for your role |
+| GET | `/api/console/directory` | token | Who can sign in (bootstrap flag when the roster is empty) |
+| GET/POST | `/api/console/staff` · `/staff/:id/shift` | staff / managers | Roster and today's shifts |
+| GET | `/api/console/summary` · `/alerts` · `/alerts/:id` · `/hits` | staff | Live counts, banners (`forMe`), alert detail with trail, receipts, profile; hits feed |
+| POST | `/api/console/alerts/:id/acknowledge` · `/radio-ok` · `/escalate` · `/clear` · `/cancel` | dispatch / recipients / staff | Soft Code 1: request radio, resolve, escalate. Code 1: acknowledge, clear with an outcome, cancel as raised in error |
 | GET | `/api/console/infringements` · `/:number` | staff | List; detail with events, statements, evidence |
 | POST | `/api/console/infringements/:number/void-decision` | supervisor | `{ approve, note? }` |
 | POST | `/api/console/infringements/:number/payment` | staff | Simulated customer payment |
@@ -192,16 +242,19 @@ PLATEWATCH_TEST_DATABASE_URL=postgres://… npm run smoke:backend   # browser E2
 
 `smoke:backend` drives the whole life cycle in headless Chrome against the real server: key
 approval, a 702 issued through the wizard, server verification, evidence upload, void request and
-approval, void + reissue, the hot-list banner and both acknowledgements, a paid-session lookup and
-the analytics (11 checks, production CSP, no console errors).
+approval, void + reissue, the hot-list pop-up (SAFE & CLEAR with a note), a missed deadline →
+soft Code 1 to dispatch and the right supervisor → no radio response → Code 1 alarm with the
+location pin on a second officer's handset → cleared with an outcome, a paid-session lookup and
+the analytics (14 checks, two officer handsets, production CSP, no console errors).
 
 ## 7. Security and privacy
 
 - Two separate bearer tokens, compared in constant time; the server refuses to start without
-  them. Staff identity in the console is **self-declared** — this is a development stand-in;
-  production identity comes from CivicMAPS sign-in (owner decisions Q1–Q4).
+  them. Console staff choose who they are from the roster after presenting the console token —
+  a development stand-in; production identity comes from CivicMAPS sign-in (owner decisions Q1–Q4).
 - Scan records carry plates, locations and thumbnails; evidence images are uploaded only for
-  issued infringements and acknowledged hot-list sightings. Hot-list notes are never sent.
+  issued infringements and hot-list hits. A hit carries what the pop-up shows, including the
+  registered owner description (personal information); the entry's free-text notes stay on the device.
 - The console has its own strict CSP (no inline script or style) and renders device data with
   `textContent` only.
 - Use a dedicated database per council and test cycle; there is no retention job yet
@@ -211,11 +264,16 @@ the analytics (11 checks, production CSP, no console errors).
 
 | # | Item | As built |
 |---|---|---|
-| BE-1 | Hosting for field tests | **DECISION REQUIRED**: no host was chosen; Dockerfile + compose provided |
-| BE-2 | Each recipient acknowledges separately vs first closes for both (OQ29) | Separately; closes when both have (proposed) |
-| BE-3 | Officer told when dispatch acknowledges (OQ29) | Yes: shown on the acknowledgement panel after sync (proposed) |
-| BE-4 | Unacknowledged after N minutes (OQ29) | Not escalated (open) |
-| BE-5 | Device key approval | One supervisor (production: attestation + two-person approval) |
+| BE-1 | Hosting for field tests | AWS (owner suggestion): `deploy/aws` CDK, `platewatch.civicmaps.com.au` |
+| BE-2 | Who closes a soft Code 1 | **Resolved 25/11**: either dispatch or the designated supervisor acknowledges (one is enough) |
+| BE-3 | Officer told about the escalation | Yes: the pop-up and a red banner show "Code 1 raised for you" |
+| BE-4 | Deadline before the soft Code 1 | **DECISION REQUIRED**: 60 s default (`PLATEWATCH_HOT_ACK_SECONDS`) |
+| BE-5 | Device key approval | One manager (production: attestation + two-person approval) |
 | BE-6 | Customer payment status | Simulated from the console (no council infringement system) |
-| BE-7 | Recipients of the soft Code 1 | Dispatch + compliance coordinator, as built from S29 (the 23/11 handoff text says "team supervisor"): **OWNER VALIDATION REQUIRED** |
+| BE-7 | Soft Code 1 recipients | **Resolved 25/11**: dispatch + the officer's team supervisor on shift; otherwise every team supervisor on shift + the compliance lead |
 | BE-8 | Grace after paid to | 5 minutes (as built; OQ30 open) |
+| BE-9 | Background location for Code 1 | PWA stops GPS in the background: native background location needed (**DECISION REQUIRED** for the APK) |
+| BE-10 | Name of the safe answer | **OWNER VALIDATION REQUIRED**: "SAFE & CLEAR" (alternatives: "Code 4", "OSC — officer safe & clear") |
+| BE-11 | Radio response wait | Manual by default; optional auto-escalation (`PLATEWATCH_RADIO_ESCALATE_SECONDS`) — **DECISION REQUIRED** |
+| BE-12 | Officer cancels own Code 1 | Allowed from the handset as "raised in error" (logged); **OWNER VALIDATION REQUIRED** |
+| BE-13 | Hot-list hit retention (personal data) | No retention job yet (OQ29-5) |

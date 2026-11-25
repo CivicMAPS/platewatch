@@ -145,8 +145,8 @@ export const CSV_TEMPLATES = {
   },
   hot: {
     fileName: 'platewatch-hot-list-template.csv',
-    header: 'list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes',
-    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,VIC,private,ute,Toyota,White,Approach with a second officer',
+    header: 'list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes,alert_message,owner_description',
+    example: 'Officer safety,ABC123,high,Aggressive;Threats / intimidation,VIC,private,ute,Toyota,White,Approach with a second officer,Do not approach — prior aggressive male driver interaction,"Male, 40s, heavy build"',
   },
 } as const;
 
@@ -819,6 +819,8 @@ function hotFromCsv(file: string, table: string[][], out: ImportResult): void {
       ...vehicleOf(hotVehicle.vehicle),
       // Model is not part of the vehicle-details structure: an older file's model column goes to notes.
       notes: [row.notes ?? '', row.model?.trim() ? `Model: ${row.model.trim()}` : ''].filter(Boolean).join(' · '),
+      ...(row.alert_message?.trim() ? { alertMessage: row.alert_message.trim().slice(0, 160) } : {}),
+      ...(row.owner_description?.trim() ? { ownerDescription: row.owner_description.trim().slice(0, 300) } : {}),
       addedAt: Date.now(),
     };
     const entries = lists.get(row.list_name).list.entries;

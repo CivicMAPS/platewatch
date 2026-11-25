@@ -40,7 +40,8 @@ import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
 import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction, VehicleDetails } from '../../lib/types';
 import { effectivePayment, offenceChipText, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
-import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
+import { SAFE_CLEAR_LABEL } from '../../lib/hotlist';
+import { openHotAlert } from '../../lib/safety';
 import { host, officerNumber } from '../../lib/host';
 import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
 import { vehicleFields } from '../vehicleFields';
@@ -673,6 +674,20 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts, hotScanIds };
       phase = 'result';
+      // Officer safety (owner 25/11/2026): a blocking pop-up until the officer answers CODE 1 or SAFE & CLEAR.
+      const exactHot = res.hotHits.filter((h) => h.strength === 'exact');
+      if (exactHot.length) {
+        const opened = result;
+        void openHotAlert({
+          hits: exactHot.map((h) => ({ list: h.list, entry: h.entry, scanId: hotScanIds[h.entry.id] ?? null })),
+          at,
+          location: fixOf(pending.meta.location),
+          where: { listId: l.id, listName: l.name, ...(l.type === 'timed' && l.displayId ? { displayId: l.displayId } : {}) },
+        }).then((events) => {
+          if (result === opened) result = { ...opened, hotAcks: events };
+          app.update();
+        });
+      }
       const s = settings();
       if (res.hotHits.length) feedback('alarm', s);
       else if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
@@ -1294,35 +1309,20 @@ export function scanView(params: Record<string, string>, app: App): View {
     const logLinks = html`<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">${entryIds.map(
       (id) => html`<a class="link text-sm" data-testid="hot-log-link" href="#/hotlog/${encodeURIComponent(id)}">View entry log${entryIds.length > 1 ? ` · ${r.hotHits.find((h) => h.entry.id === id)?.entry.plate}` : ''}</a>`,
     )}</div>`;
-    if (!acks?.length) {
-      const officer = officerNumber(settings().officerNumber);
-      return html`<section class="card border-2 border-alert" data-testid="hot-ack">
-        <p class="text-sm text-neutral-800">Acknowledging records the time, your location and officer number on this plate’s hot-list entry log, and raises a <strong>soft Code 1</strong> with dispatch and the compliance coordinator. Expect a radio call.</p>
-        ${officer
-          ? html`<button type="button" class="btn-primary mt-3 w-full py-4 text-md" data-testid="hot-acknowledge" ?disabled=${phase === 'saving'} @click=${() => void acknowledgeHot()}>${icon('check')} Acknowledge</button>`
-          : html`<div class="mt-3">${banner('alert', 'Officer number required', html`Set it in <a class="link" href="#/settings">Settings → Officer</a> to acknowledge hot-list alerts.`, 'hot-ack-officer-required')}</div>`}
-      </section>`;
-    }
+    if (!acks?.length)
+      return html`<section class="card border-2 border-alert" data-testid="hot-ack-waiting"><p class="text-sm text-neutral-800">Answer the officer-safety alert: <strong>CODE 1</strong> or <strong>${SAFE_CLEAR_LABEL}</strong>.</p></section>`;
     const a = acks[0]!;
-    const sent = acks.every((e) => e.notification?.status === 'sent');
     const where = a.location ? html`<span class="font-plate">${a.location.lat.toFixed(5)}, ${a.location.lng.toFixed(5)} ±${Math.round(a.location.accuracyM)} m</span>` : 'no GPS fix';
-    return html`<section class="rounded-md border-2 ${sent ? 'border-active bg-active-bg' : 'border-pending bg-pending-bg'} p-4" data-testid=${sent ? 'hot-acked' : 'hot-ack-queued'}>
-      ${sent ? statusPill('permit_valid', 'Acknowledged') : statusPill('timing', 'Queued')}
-      <p class="mt-2 font-bold text-neutral-900">${sent ? 'Soft Code 1 raised' : 'Acknowledged · alert not sent yet'}</p>
+    const code1 = a.response === 'code1';
+    return html`<section class="rounded-md border-2 ${code1 ? 'border-emergency bg-emergency-bg' : 'border-active bg-active-bg'} p-4" data-testid="hot-acked" data-response=${a.response ?? ''}>
+      ${code1 ? html`<span class="chip border-2 border-emergency bg-surface text-xs font-bold text-emergency-text">CODE 1</span>` : statusPill('permit_valid', SAFE_CLEAR_LABEL)}
       <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
-        <dt class="text-neutral-600">When</dt><dd class="font-plate">${formatStamp(a.at)}</dd>
+        <dt class="text-neutral-600">When</dt><dd class="font-plate">${formatStamp(a.at)}${a.late ? ' (after the soft Code 1)' : ''}</dd>
         <dt class="text-neutral-600">Where</dt><dd>${where}</dd>
-        <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber}</dd>
-        <dt class="text-neutral-600">Alerted</dt><dd>${sent ? 'Dispatch · compliance coordinator' : html`Dispatch · compliance coordinator — <span class="text-pending-strong">queued, attempt ${a.notification?.attempts ?? 0}</span>`}</dd>
-        ${a.notification?.acknowledgedBy?.length
-          ? html`<dt class="text-neutral-600">Acknowledged</dt><dd data-testid="hot-acked-by">${a.notification.acknowledgedBy.map((k) => html`<span class="block">${k.recipient === 'dispatch' ? 'Dispatch' : 'Compliance coordinator'} · ${k.by} · <span class="font-plate">${formatClock(k.at)}</span></span>`)}</dd>`
-          : nothing}
+        <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber || '—'}</dd>
+        ${a.note ? html`<dt class="text-neutral-600">Note</dt><dd>${a.note}</dd>` : nothing}
       </dl>
-      ${sent
-        ? nothing
-        : html`<p class="mt-2 text-xs text-neutral-700">${canSendAlerts() ? 'Saved on this device; it will be sent when the connection returns.' : 'Development build: alerts reach CommandMAPS only inside EnforcementMAPS. The acknowledgement is saved on this device.'}</p>
-            <button type="button" class="btn-secondary mt-3 w-full" data-testid="hot-retry" @click=${() => void retryHotAlerts()}>${icon('refresh')} Retry now</button>`}
-      <div class="mt-3">${banner('alert', sent ? 'Respond by radio' : 'Tell dispatch by radio', sent ? 'Dispatch will call you on the radio. Answer them; with no answer the soft Code 1 can be escalated to a Code 1.' : 'Until the alert is sent, dispatch and the compliance coordinator do not know about this sighting.', 'hot-radio')}</div>
+      <p class="mt-2 text-xs text-neutral-700">Logged on this plate’s hot-list history${backendConfigured() ? ' and sent to CommandMAPS' : ''}.</p>
       ${logLinks}
     </section>`;
   };
@@ -1799,48 +1799,6 @@ export function scanView(params: Record<string, string>, app: App): View {
 
   /** A hot-list match not yet acknowledged (WF-S29 29a.5). */
   const mustAcknowledge = (r: ResultState): boolean => r.hotHits.some((h) => h.strength === 'exact') && !r.hotAcks?.length;
-
-  /** 29a.4: acknowledge every hot-list hit on this scan; saved on the device, alert queued. */
-  const acknowledgeHot = async () => {
-    if (!result || !pending || phase === 'saving') return;
-    const officer = officerNumber(settings().officerNumber);
-    if (!officer) return;
-    phase = 'saving';
-    app.update();
-    try {
-      const at = Date.now();
-      const location = ackLocation(geo.bestRecent(at), pending.meta.location, at);
-      const r = result;
-      const events: HotListEvent[] = [];
-      for (const h of r.hotHits.filter((x) => x.strength === 'exact')) {
-        let e = acknowledgementEvent({ id: uid(), list: h.list, entry: h.entry, scanId: r.hotScanIds?.[h.entry.id] ?? null, at, officerNumber: officer, location, device: navigator.userAgent });
-        await putHotEvent(e); // saved first: never depends on the network
-        e = await trySendAlert(e);
-        await putHotEvent(e);
-        events.push(e);
-      }
-      result = { ...r, hotAcks: events };
-      feedback('ok', settings());
-    } catch (e) {
-      app.toast(`Acknowledge failed: ${(e as Error).message}`, 'error');
-    }
-    phase = 'result';
-    app.update();
-  };
-
-  /** 29c.2: retry a queued alert now. */
-  const retryHotAlerts = async () => {
-    if (!result?.hotAcks) return;
-    const next: HotListEvent[] = [];
-    for (const e of result.hotAcks) {
-      const sent = await trySendAlert(e);
-      await putHotEvent(sent);
-      next.push(sent);
-    }
-    result = { ...result, hotAcks: next };
-    if (!canSendAlerts()) app.toast('No CommandMAPS connection in this build. Tell dispatch by radio.', 'warn');
-    app.update();
-  };
 
   /** "Edit plate" from a look-alike decision: back to the confirm screen with the plate field focused. */
   const editFromResult = () => {

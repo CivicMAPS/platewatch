@@ -4,6 +4,8 @@ import { registerSW } from 'virtual:pwa-register';
 import { purgeScansOlderThan, setOutboxHook } from './lib/db';
 import { installBackend, requestSync, setInfringementWizard, startSyncLoop } from './lib/backend';
 import { openInfringementWizard } from './ui/infringementWizard';
+import { startSafety } from './lib/safety';
+import { mountSafetyOverlay } from './ui/safetyOverlay';
 import { warmUpOcr } from './lib/ocr';
 import { App } from './ui/app';
 import { homeView, newListTypeView } from './ui/views/home';
@@ -43,6 +45,9 @@ setOutboxHook(() => requestSync());
 
 await app.start();
 startSyncLoop();
+// Officer safety (owner 25/11/2026): hot-list pop-up, Code 1, branch alarms — above every screen.
+await startSafety(() => app.settings);
+mountSafetyOverlay(app);
 
 // Ask the browser not to evict evidence under storage pressure.
 void navigator.storage?.persist?.().catch(() => false);

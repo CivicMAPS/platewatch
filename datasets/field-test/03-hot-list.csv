@@ -1,4 +1,4 @@
-list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes
-FT Officer safety,PWH801,extreme,Aggressive;Previous assault,VIC,private,sedan,Holden,Black,FIELD TEST entry. Look-alike read: PWHB01 (B and 8).
-FT Officer safety,PWH902,high,Threats / intimidation,VIC,commercial,ute,Ford,White,FIELD TEST entry. Approach with a second officer.
-FT Officer safety,PWH003,caution,Verbal abuse,VIC,private,sedan,Toyota,Silver,FIELD TEST entry.
+list_name,plate,risk_level,risks,registration_state,registration_type,type,make,colour,notes,alert_message,owner_description
+FT Officer safety,PWH801,extreme,Aggressive;Previous assault,VIC,private,sedan,Holden,Black,FIELD TEST entry. Look-alike read: PWHB01 (B and 8).,Do not approach — prior assault on an officer by the male driver,"FIELD TEST: male, 30s, shaved head"
+FT Officer safety,PWH902,high,Threats / intimidation,VIC,commercial,ute,Ford,White,FIELD TEST entry. Approach with a second officer.,Approach only with a second officer — threats made at last interaction,FIELD TEST: company vehicle
+FT Officer safety,PWH003,caution,Verbal abuse,VIC,private,sedan,Toyota,Silver,FIELD TEST entry.,Caution — verbal abuse at previous interaction,

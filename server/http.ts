@@ -19,13 +19,16 @@ export interface Ctx {
   params: Record<string, string>;
   /** Set by the auth guard. */
   device?: { keyId: string | null };
-  staff?: { role: StaffRole; user: string };
+  staff?: { id: string; name: string; role: StaffRole; team: string | null; branch: string };
   body<T = unknown>(): Promise<T>;
   raw(limit: number): Promise<Buffer>;
 }
 
-export type StaffRole = 'dispatch' | 'compliance_coordinator' | 'supervisor';
-export const STAFF_ROLES: readonly StaffRole[] = ['dispatch', 'compliance_coordinator', 'supervisor'];
+/** Roster roles (owner 25/11/2026). Officers use handsets; the other roles use the console. */
+export type StaffRole = 'officer' | 'dispatch' | 'team_supervisor' | 'compliance_lead';
+export const STAFF_ROLES: readonly StaffRole[] = ['officer', 'dispatch', 'team_supervisor', 'compliance_lead'];
+export const CONSOLE_ROLES: readonly StaffRole[] = ['dispatch', 'team_supervisor', 'compliance_lead'];
+export const MANAGER_ROLES: readonly StaffRole[] = ['team_supervisor', 'compliance_lead'];
 
 type Handler = (c: Ctx) => Promise<unknown>;
 interface Route {

@@ -239,7 +239,7 @@ const VIEWS = {
             : h('p', { class: 'muted' }, 'No alerts.')),
         h('section', { class: 'card' }, h('h2', {}, 'Hot-list hits'),
           hits.length ? table(['When', 'Plate', 'Officer', 'Answer', 'Note', 'Where'], hits.map((x) => [stamp(x.at), plate(x.plate), h('span', { class: 'mono' }, x.officerNumber),
-            x.response === 'code1' ? h('span', { class: 'pill code1' }, 'Code 1') : x.response === 'safe_clear' ? pill('active', 'SAFE & CLEAR') : pill('alert', 'No answer yet'), x.note || '—', h('span', { class: 'small' }, x.entry?.listName || '', ' ', mapLink(x.location))]))
+            [x.response === 'code1' ? h('span', { class: 'pill code1' }, 'Code 1') : x.response === 'safe_clear' ? pill('active', 'SAFE & CLEAR') : pill('alert', 'No answer yet'), x.respondedBy && x.respondedBy !== x.officerNumber ? h('span', { class: 'small' }, ` by ${x.respondedBy}`) : null], x.note || '—', h('span', { class: 'small' }, x.entry?.listName || '', ' ', mapLink(x.location))]))
             : h('p', { class: 'muted' }, 'No hits yet.'))),
       h('section', { class: 'card' }, S.selected?.kind === 'alert' ? detailBox : h('p', { class: 'muted' }, 'Select an alert to see the officer’s location, the vehicle profile and the life cycle.')));
   },
@@ -375,7 +375,7 @@ async function loadDetail() {
         h('ul', { class: 'timeline' }, d.events.map((x) => h('li', {}, h('strong', {}, x.action.replace(/_/g, ' ')), ` · ${stamp(x.at)} · ${x.actor} (${x.role})${x.note ? ` — ${x.note}` : ''}`))),
         p ? [
           h('h2', { style: 'margin-top:14px' }, `Hot-list match history (${p.history.length})`),
-          h('ul', { class: 'timeline small' }, p.history.slice(0, 15).map((x) => h('li', {}, h('span', { class: 'mono' }, stamp(x.at)), ` · officer ${x.officerNumber}${x.where ? ` · ${x.where}` : ''} · ${x.response === 'code1' ? 'CODE 1' : x.response === 'safe_clear' ? 'SAFE & CLEAR' : 'no answer'}${x.note ? ` — ${x.note}` : ''}`))),
+          h('ul', { class: 'timeline small' }, p.history.slice(0, 15).map((x) => h('li', {}, h('span', { class: 'mono' }, stamp(x.at)), ` · officer ${x.officerNumber}${x.where ? ` · ${x.where}` : ''} · ${x.response === 'code1' ? 'CODE 1' : x.response === 'safe_clear' ? 'SAFE & CLEAR' : 'no answer'}${x.respondedBy && x.respondedBy !== x.officerNumber ? ` by ${x.respondedBy}` : ''}${x.note ? ` — ${x.note}` : ''}`))),
           h('h2', { style: 'margin-top:14px' }, 'Known locations'),
           h('ul', { class: 'timeline small' }, p.knownLocations.map((x) => h('li', {}, `${x.label} · ${x.count}× · last ${stamp(x.lastAt)}`))),
         ] : null);

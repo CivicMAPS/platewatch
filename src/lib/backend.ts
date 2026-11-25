@@ -10,12 +10,12 @@
  *   `window.EnforcementMAPS` so hot-list alerts reach the console and Issue infringement works
  *   end to end (the wizard runs on the device; the I-N is allocated and signed here, offline-safe).
  */
-import { countOutbox, getHotEvent, getOutbox, getScan, markOutboxFailed, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation } from './db';
+import { countOutbox, type OutboxItem, getHotEvent, getOutbox, getScan, markOutboxFailed, removeOutbox, saveScan, enqueue, getKv, putKv, getObservation } from './db';
 import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
-import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors, setSigningScope } from './signer';
+import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors, setSigningScope, type StoredBundle } from './signer';
 import { toLocalIso } from './time';
 import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
@@ -183,52 +183,99 @@ async function pushOutbox(): Promise<void> {
     }
   }
 
-  // Infringements, void requests and evidence after the records they refer to.
+  // Infringements (in chain order), then void requests and evidence, after the records they refer to.
+  await pushInfringements(items.filter((it) => it.kind === 'infringement'));
   for (const it of items) {
-    if (it.kind === 'scan' || it.kind === 'observation' || it.kind === 'hotEvent') continue;
+    if (it.kind !== 'voidRequest' && it.kind !== 'evidence') continue;
     try {
-      let done = true;
-      if (it.kind === 'infringement') done = await pushInfringement(it.id);
-      else if (it.kind === 'voidRequest') await pushVoidRequest(it.id);
-      else if (it.kind === 'evidence') await pushEvidence(it.id);
-      if (done) await removeOutbox(it.key, it.queuedAt);
+      if (it.kind === 'voidRequest') await pushVoidRequest(it.id);
+      else await pushEvidence(it.id);
+      await removeOutbox(it.key, it.queuedAt);
     } catch (e) {
-      const err = e as BackendError;
-      // A statement the server refuses outright (signature, chain, key) is not in its chain, so every
-      // later statement chained onto it would be refused too: keep it queued and stop here, visibly,
-      // instead of dropping it and the numbers after it (a supervisor must re-key the device).
-      if (err instanceof BackendError && !err.retryable && it.kind === 'infringement') {
-        await markInfringementRejected(it.id, err.message);
-        await markOutboxFailed(it.key, it.queuedAt, err.message);
-        throw new BackendError(err.status, err.code, `Infringement sync stopped at ${it.id}: ${err.message} Later numbers are kept on the handset.`);
-      }
-      await markOutboxFailed(it.key, it.queuedAt, err.message);
-      // Keep chain order: never send a later statement past a failed one.
-      if (it.kind === 'infringement') throw e;
+      await markOutboxFailed(it.key, it.queuedAt, (e as Error).message);
     }
   }
 }
 
+interface ChainStep {
+  item: OutboxItem;
+  b: StoredBundle;
+  closing: boolean;
+  hash: string;
+  prev: string;
+}
+
 /**
- * Send one number's statements. Returns false while the number is still open (keep it queued).
- * A number left open when the app closed mid-wizard is consumed with a signed cancel — signed now,
- * so it chains after anything allocated since, and re-queued so it is sent in that order.
+ * The queued statements in the order they were signed. The outbox holds one row per number, but the
+ * chain interleaves numbers (a recovery cancel for A can be signed while B is open: A alloc → B
+ * alloc → A cancel → B issue), so the order is rebuilt from the statements' prevHash links.
  */
-async function pushInfringement(number: string): Promise<boolean> {
-  const b = await getBundle(number);
-  if (!b) return true;
-  // Signed for another backend (Settings were switched): it stays queued for that backend.
-  if (b.keyId !== (await deviceKey()).keyId) return false;
-  const out = await request<{ status: string; rejection?: { code: string; message: string } }>('POST', '/api/infringements/statements', { json: { keyId: b.keyId, scanId: b.scanId, allocation: b.allocation, closing: b.closing, record: b.record } });
+export function chainOrder(steps: ChainStep[]): ChainStep[] {
+  const byPrev = new Map(steps.map((st) => [st.prev, st]));
+  const hashes = new Set(steps.map((st) => st.hash));
+  const out: ChainStep[] = [];
+  const seen = new Set<string>();
+  for (const start of steps.filter((st) => !hashes.has(st.prev))) {
+    for (let st: ChainStep | undefined = start; st && !seen.has(st.hash); st = byPrev.get(st.hash)) {
+      seen.add(st.hash);
+      out.push(st);
+    }
+  }
+  return [...out, ...steps.filter((st) => !seen.has(st.hash))];
+}
+
+/**
+ * Send the queued infringement statements one at a time in chain order. An allocation goes with its
+ * closing when that is the next statement, otherwise on its own (the server accepts a re-send).
+ */
+async function pushInfringements(items: OutboxItem[]): Promise<void> {
+  if (!items.length) return;
+  const key = (await deviceKey()).keyId;
+  const steps: ChainStep[] = [];
+  for (const item of items) {
+    const b = await getBundle(item.id);
+    if (!b) {
+      await removeOutbox(item.key, item.queuedAt);
+      continue;
+    }
+    // Signed for another backend (Settings were switched): it stays queued for that backend.
+    if (b.keyId !== key) continue;
+    steps.push({ item, b, closing: false, hash: b.allocation.hash, prev: String(b.allocation.statement.prevHash) });
+    if (b.closing) steps.push({ item, b, closing: true, hash: b.closing.hash, prev: String(b.closing.statement.prevHash) });
+  }
+  const ordered = chainOrder(steps);
+  for (const [i, st] of ordered.entries()) {
+    if (!st.closing && ordered[i + 1]?.closing && ordered[i + 1]?.b.number === st.b.number) continue; // sent with its closing
+    try {
+      await pushStatement(st.b, st.closing);
+    } catch (e) {
+      const err = e as BackendError;
+      await markOutboxFailed(st.item.key, st.item.queuedAt, err.message);
+      // A statement the server refuses outright (signature, chain, key) is not in its chain, so every
+      // later statement chained onto it would be refused too: keep it queued and stop here, visibly,
+      // instead of dropping it and the numbers after it (a supervisor must re-key the device).
+      if (err instanceof BackendError && !err.retryable) {
+        await markInfringementRejected(st.b.number, err.message);
+        throw new BackendError(err.status, err.code, `Infringement sync stopped at ${st.b.number}: ${err.message} Later numbers are kept on the handset.`);
+      }
+      throw e; // never send a later statement past a failed one
+    }
+    if (st.closing) await removeOutbox(st.item.key, st.item.queuedAt);
+    // A number left open when the app closed mid-wizard is consumed with a signed cancel: signed now,
+    // so it chains after everything allocated since, and sent in that order on the next sync.
+    else if (!st.b.closing && !isWizardOpen(st.b.number) && Date.now() - st.b.createdAt > 60_000) await closeNumber(st.b.number, null);
+  }
+}
+
+/** Send one statement: the allocation alone, or the allocation with its closing (and record). */
+async function pushStatement(b: StoredBundle, withClosing: boolean): Promise<void> {
+  const out = await request<{ status: string; rejection?: { code: string; message: string } }>('POST', '/api/infringements/statements', {
+    json: { keyId: b.keyId, scanId: b.scanId, allocation: b.allocation, ...(withClosing ? { closing: b.closing, record: b.record } : {}) },
+  });
   // Refused on a business rule (e.g. reissued offline after the original was paid): the server kept
   // the statements in this key's chain, so later numbers still follow; this one is not valid.
-  if (out?.status === 'rejected') await markInfringementRejected(number, out.rejection?.message ?? 'Refused by the backend.');
-  if (b.closing) {
-    if (out?.status !== 'rejected') await updateScanInfringement(b.scanId, number, (r) => ({ ...r, sync: 'synced' }));
-    return true;
-  }
-  if (!isWizardOpen(number) && Date.now() - b.createdAt > 60_000) await closeNumber(number, null);
-  return false;
+  if (out?.status === 'rejected') await markInfringementRejected(b.number, out.rejection?.message ?? 'Refused by the backend.');
+  else if (withClosing) await updateScanInfringement(b.scanId, b.number, (r) => ({ ...r, sync: 'synced' }));
 }
 
 async function pushVoidRequest(number: string): Promise<void> {

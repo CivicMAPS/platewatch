@@ -111,9 +111,18 @@ function entryOf(e: unknown, where: unknown): Record<string, unknown> {
   };
 }
 
-export async function recordResponse(q: Q, hitId: string, r: { response: string; note?: string; at: number }): Promise<void> {
+export async function recordResponse(q: Q, hitId: string, r: { response: string; note?: string; at: number; officer?: string }): Promise<void> {
   if (r.response !== 'safe_clear' && r.response !== 'code1') throw new HttpError(422, 'invalid', 'response must be safe_clear or code1.');
-  await q.query('update hot_hits set response = coalesce(response, $2), responded_at = coalesce(responded_at, $3), note = coalesce($4, note) where id = $1', [hitId, r.response, new Date(r.at), r.note?.trim() ? r.note.trim().slice(0, 1000) : null]);
+  // The answering officer is kept (the pop-up requires a number); a hit reported as "unknown"
+  // before the number was entered takes it too, so history and the console name the officer.
+  const officer = r.officer?.trim() && r.officer.trim() !== 'unknown' ? r.officer.trim().slice(0, 12) : null;
+  await q.query(
+    `update hot_hits set response = coalesce(response, $2), responded_at = coalesce(responded_at, $3), note = coalesce($4, note),
+       responded_by = coalesce(responded_by, $5),
+       officer_number = case when $5::text is not null and officer_number in ('unknown', '') then $5 else officer_number end
+     where id = $1`,
+    [hitId, r.response, new Date(r.at), r.note?.trim() ? r.note.trim().slice(0, 1000) : null, officer],
+  );
   // A late acknowledgement is shown on any open soft Code 1 for this hit (dispatch still confirms by radio).
   const open = (await q.query<{ id: string }>("select id from alerts where hit_id = $1 and kind = 'soft_code1' and status in ('active', 'radio_requested')", [hitId])).rows[0];
   if (open) {
@@ -237,11 +246,12 @@ export function registerSafety(
 
   r.on('POST', '/api/hot-hits/:id/response', async (c) => {
     h.needDevice(c);
-    const b = await c.body<{ response?: string; note?: string; at?: number; hit?: Record<string, unknown> }>();
+    const b = await c.body<{ response?: string; note?: string; at?: number; officerNumber?: string; hit?: Record<string, unknown> }>();
+    const officer = str(b.officerNumber, 12).trim() || str(b.hit?.officerNumber, 12).trim() || (await h.deviceOfficer(c));
     await tx(db, async (q) => {
       if (b.hit) await upsertHit(q, c.device?.keyId ?? null, b.hit, cfg);
       if (!(await q.query('select 1 from hot_hits where id = $1', [c.params.id])).rowCount) throw new HttpError(404, 'not_found', 'Unknown hit: send the hit first.');
-      await recordResponse(q, c.params.id!, { response: str(b.response, 20), note: str(b.note, 1000), at: num(b.at) ?? h.now() });
+      await recordResponse(q, c.params.id!, { response: str(b.response, 20), note: str(b.note, 1000), at: num(b.at) ?? h.now(), officer });
     });
     return { ok: true };
   });
@@ -270,7 +280,7 @@ export function registerSafety(
     const officer = hitOfficer || (await h.deviceOfficer(c));
     return tx(db, async (q) => {
       const hitId = b.hit ? await upsertHit(q, keyId, b.hit, cfg) : null;
-      if (hitId) await recordResponse(q, hitId, { response: 'code1', at: num(b.at) ?? now });
+      if (hitId) await recordResponse(q, hitId, { response: 'code1', at: num(b.at) ?? now, officer });
       const out = await raiseAlert(q, cfg, { id: need(str(b.id, 64), 'id'), kind: 'code1', hitId, cause: hitId ? 'hot_list_code1' : str(b.cause, 40) || 'officer_duress', raisedBy: 'officer', officerNumber: officer, keyId, at: num(b.at) ?? now, location: loc(b.location), now });
       return { id: out.id, status: 'raised' };
     });
@@ -437,8 +447,8 @@ export function registerSafety(
 
   r.on('GET', '/api/console/hits', async (c) => {
     await h.staffAuth(c, CONSOLE);
-    const rows = await db.query('select id, plate, officer_number, at, lat, lng, accuracy_m, response, responded_at, note, entry from hot_hits order by at desc limit 200');
-    return { hits: rows.rows.map((x) => ({ id: x.id, plate: x.plate, officerNumber: x.officer_number, at: ms(x.at), location: x.lat === null ? null : { lat: x.lat, lng: x.lng, accuracyM: x.accuracy_m }, response: x.response, respondedAt: ms(x.responded_at), note: x.note, entry: x.entry })) };
+    const rows = await db.query('select id, plate, officer_number, at, lat, lng, accuracy_m, response, responded_at, responded_by, note, entry from hot_hits order by at desc limit 200');
+    return { hits: rows.rows.map((x) => ({ id: x.id, plate: x.plate, officerNumber: x.officer_number, at: ms(x.at), location: x.lat === null ? null : { lat: x.lat, lng: x.lng, accuracyM: x.accuracy_m }, response: x.response, respondedAt: ms(x.responded_at), respondedBy: x.responded_by, note: x.note, entry: x.entry })) };
   });
 
   r.on('GET', '/api/console/hot-profile', async (c) => {
@@ -451,8 +461,8 @@ export function registerSafety(
 export async function profile(db: Q, plate: string, entryId: string | null) {
   const key = plateKey(plate);
   if (!key && !entryId) throw new HttpError(422, 'invalid', 'plate or entryId is required.');
-  const hits = await db.query<{ id: string; plate: string; officer_number: string; at: Date; lat: number | null; lng: number | null; accuracy_m: number | null; response: string | null; responded_at: Date | null; note: string | null; entry: Record<string, string> }>(
-    'select id, plate, officer_number, at, lat, lng, accuracy_m, response, responded_at, note, entry from hot_hits where plate_key = $1 or hot_list_entry_id = $2 order by at desc limit 100',
+  const hits = await db.query<{ id: string; plate: string; officer_number: string; at: Date; lat: number | null; lng: number | null; accuracy_m: number | null; response: string | null; responded_at: Date | null; responded_by: string | null; note: string | null; entry: Record<string, string> }>(
+    'select id, plate, officer_number, at, lat, lng, accuracy_m, response, responded_at, responded_by, note, entry from hot_hits where plate_key = $1 or hot_list_entry_id = $2 order by at desc limit 100',
     [key, entryId ?? ''],
   );
   const alerts = await db.query<{ hit_id: string; kind: string; status: string; outcome: string | null }>('select hit_id, kind, status, outcome from alerts where hit_id = any($1)', [hits.rows.map((x) => x.id)]);
@@ -471,10 +481,10 @@ export async function profile(db: Q, plate: string, entryId: string | null) {
     entry: latest,
     history: hits.rows.map((x) => ({
       at: ms(x.at), officerNumber: x.officer_number, location: x.lat === null ? null : { lat: x.lat, lng: x.lng, accuracyM: x.accuracy_m },
-      where: x.entry.listName || null, response: x.response, respondedAt: ms(x.responded_at), note: x.note,
+      where: x.entry.listName || null, response: x.response, respondedAt: ms(x.responded_at), respondedBy: x.responded_by, note: x.note,
       alerts: alerts.rows.filter((a) => a.hit_id === x.id).map((a) => ({ kind: a.kind, status: a.status, outcome: a.outcome })),
     })),
-    interactions: hits.rows.filter((x) => x.note).map((x) => ({ at: ms(x.at), officerNumber: x.officer_number, note: x.note })),
+    interactions: hits.rows.filter((x) => x.note).map((x) => ({ at: ms(x.at), officerNumber: x.responded_by ?? x.officer_number, note: x.note })),
     knownLocations: [...places.values()].sort((a, b) => b.count - a.count || b.lastAt - a.lastAt),
   };
 }

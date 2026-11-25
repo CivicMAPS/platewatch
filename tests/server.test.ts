@@ -346,11 +346,24 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     await call('POST', '/api/console/alerts/sc1-h4/radio-ok', { staff: 'D1' });
   });
 
-  it('CODE 1 is accepted from a handset with no officer number (hit and Code 1 logged as unknown)', async () => {
+  it('CODE 1 is accepted from a handset with no officer number (hit and Code 1 take the officer the device is registered to)', async () => {
     const res = await call('POST', '/api/code1', { body: { id: 'c1-anon', hit: hit('h6', t(9, 1), '', { plate: 'DA8899' }), at: t(9, 1, 5), location: null } });
     expect(res.json).toEqual({ id: 'c1-anon', status: 'raised' });
-    expect((await call('GET', '/api/console/hits', { staff: 'D1' })).json.hits.find((x: { id: string }) => x.id === 'h6')).toMatchObject({ officerNumber: 'unknown', response: 'code1' });
+    expect((await call('GET', '/api/console/hits', { staff: 'D1' })).json.hits.find((x: { id: string }) => x.id === 'h6')).toMatchObject({ officerNumber: '4471', respondedBy: '4471', response: 'code1' });
+    expect((await call('GET', '/api/console/alerts/c1-anon', { staff: 'D1' })).json.alert.officerNumber).toBe('4471');
     await call('POST', '/api/console/alerts/c1-anon/cancel', { staff: 'D1', body: { reason: 'test' } });
+  });
+
+  it('a hit reported before the officer number was known takes the number of the officer who answers it', async () => {
+    const h8 = hit('h8', t(9, 3), '', { plate: 'RSP808', hotListEntryId: 'e8' });
+    await call('POST', '/api/hot-hits', { body: { hit: h8 } });
+    const listed = async () => (await call('GET', '/api/console/hits', { staff: 'D1' })).json.hits.find((x: { id: string }) => x.id === 'h8');
+    expect(await listed()).toMatchObject({ officerNumber: 'unknown', response: null });
+    await call('POST', '/api/hot-hits/h8/response', { body: { response: 'safe_clear', note: 'Vehicle unattended', at: t(9, 3, 30), officerNumber: '4471', hit: { ...h8, officerNumber: '4471' } } });
+    expect(await listed()).toMatchObject({ officerNumber: '4471', respondedBy: '4471', response: 'safe_clear' });
+    const p = (await call('GET', '/api/hot-profile?plate=RSP808')).json;
+    expect(p.history[0]).toMatchObject({ officerNumber: '4471', respondedBy: '4471', response: 'safe_clear' });
+    expect(p.interactions[0]).toMatchObject({ officerNumber: '4471', note: 'Vehicle unattended' });
   });
 
   it('CODE 1 without an officer header (number typed on the pop-up) is raised for the hit\'s officer and routed to their branch', async () => {
@@ -448,12 +461,38 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect(backend.backendState().pending).toBe(0);
   });
 
+  it('interleaved numbers (A recovered while B was open) are sent statement by statement in chain order', async () => {
+    const { closeDb } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' } as never;
+    backend.installBackend(() => settings);
+    const dev = await backend.registerDevice();
+    await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    await backend.syncNow();
+    // Signed offline, nothing sent in between: A alloc → B alloc → A cancel → B issue.
+    const a = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sA2' });
+    const b = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sB' });
+    await signer.closeNumber(a.number, null);
+    const record = buildIssuedRecord({ number: b.number, handoff: handoff(), values: { offenceCode: '702', timeTo: t(8, 25), notes: 'n', vehicle: { make: 'Holden', type: 'Hatchback', colour: 'White', registrationType: 'Standard' }, evidenceOverride: 'x' }, issuedAt: toLocalIso(t(8, 26)), toIso: toLocalIso });
+    await signer.closeNumber(b.number, record);
+    await backend.syncNow();
+    expect(backend.backendState().lastError).toBeUndefined();
+    const status = async (n: string) => (await (await fetch(`${base}/api/console/infringements/${n}`, { headers: staff })).json()).infringement.status;
+    expect(await status(a.number)).toBe('cancelled');
+    expect(await status(b.number)).toBe('issued');
+    expect(backend.backendState().pending).toBe(0);
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');
     const signer = await import('../src/lib/signer');
     const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
-    // Officer 5123 already used sequences 1–2 today on the first handset (previous test).
+    // Officer 5123 already used sequences 1–4 today on the first handset (previous tests).
     await closeDb();
     await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
     const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' } as never;
@@ -462,7 +501,7 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
     await backend.syncNow();
     const b = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sC' });
-    expect((b.allocation.statement as { sequence: number }).sequence).toBe(3);
+    expect((b.allocation.statement as { sequence: number }).sequence).toBe(5);
     // Chain head, bundle and outbox row were written together.
     expect(await getKv(`inBundle:${b.number}`)).toBeTruthy();
     await backend.syncNow();

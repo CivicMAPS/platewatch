@@ -42,7 +42,7 @@ export interface LiveAlert {
 export interface HotProfile {
   plate: string;
   entry: Record<string, unknown>;
-  history: { at: number; officerNumber: string; location: { lat: number; lng: number } | null; where: string | null; response: string | null; note: string | null; alerts: { kind: string; status: string; outcome: string | null }[] }[];
+  history: { at: number; officerNumber: string; location: { lat: number; lng: number } | null; where: string | null; response: string | null; respondedBy?: string | null; note: string | null; alerts: { kind: string; status: string; outcome: string | null }[] }[];
   interactions: { at: number; officerNumber: string; note: string }[];
   knownLocations: { label: string; lat: number | null; lng: number | null; count: number; lastAt: number }[];
 }

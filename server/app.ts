@@ -187,7 +187,7 @@ export function createApp(db: Db, cfg: Config) {
     // Officer-safety flow (25/11/2026): a hit opens the pop-up; an acknowledgement answers it.
     if (e.kind === 'hit' && e.hit) await upsertHit(q as never, keyId, e.hit as Record<string, unknown>, cfg.safety);
     if (e.kind === 'acknowledged' && e.hitId && e.response && (await q.query('select 1 from hot_hits where id = $1', [str(e.hitId, 64)])).rowCount)
-      await recordResponse(q as never, str(e.hitId, 64), { response: str(e.response, 20), note: str(e.note, 1000), at });
+      await recordResponse(q as never, str(e.hitId, 64), { response: str(e.response, 20), note: str(e.note, 1000), at, officer: str(e.officerNumber, 12) });
     const loc = e.location as { lat?: number; lng?: number; accuracyM?: number } | null;
     await q.query(
       `insert into hot_events (id, device_key_id, kind, plate, plate_key, hot_list_entry_id, scan_id, at, officer_number, lat, lng, accuracy_m, data)

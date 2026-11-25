@@ -31,7 +31,10 @@ export function hitPayload(args: {
   list: HotList;
   entry: HotEntry;
   scanId: string | null;
+  /** When the vehicle was captured (evidence). */
   at: number;
+  /** When the pop-up opened: the acknowledgement window starts here (defaults to `at`). */
+  openedAt?: number;
   ackSeconds: number;
   officerNumber: string;
   location: HotHitPayload['location'];
@@ -44,7 +47,7 @@ export function hitPayload(args: {
     hotListEntryId: e.id,
     scanId: args.scanId,
     at: args.at,
-    ackDeadline: args.at + args.ackSeconds * 1000,
+    ackDeadline: (args.openedAt ?? args.at) + args.ackSeconds * 1000,
     officerNumber: args.officerNumber,
     location: args.location,
     entry: { make: e.make, type: e.bodyType ? vehicleTypeLabel(e.bodyType) : '', colour: e.colour, riskLevel: e.riskLevel, risks: [...e.risks], ...(e.alertMessage ? { alertMessage: e.alertMessage } : {}), ...(e.ownerDescription ? { ownerDescription: e.ownerDescription } : {}) },

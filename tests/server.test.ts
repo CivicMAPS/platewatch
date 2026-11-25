@@ -374,6 +374,17 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     await call('POST', '/api/console/alerts/c1-anon/cancel', { staff: 'D1', body: { reason: 'test' } });
   });
 
+  it('an open Code 1 stays in the handsets\' live feed however old; it leaves when closed', async () => {
+    const old = t(9) - 13 * 3600_000;
+    expect((await call('POST', '/api/code1', { body: { id: 'c1-old', cause: 'officer_duress', at: old, location: null }, ...asOfficer('4471') })).json).toMatchObject({ id: 'c1-old' });
+    const ids = (r: { json: Record<string, { id: string }[]> }, k: string) => r.json[k]!.map((a) => a.id);
+    expect(ids(await call('GET', '/api/alerts/live', asOfficer('5123')), 'branch_code1')).toContain('c1-old');
+    expect(ids(await call('GET', '/api/alerts/live', asOfficer('4471')), 'own')).toContain('c1-old');
+    await call('POST', '/api/console/alerts/c1-old/cancel', { staff: 'D1', body: { reason: 'test' } });
+    // Closed just now: still shown (recent history) as cancelled, so handsets stop the alarm.
+    expect((await call('GET', '/api/alerts/live', asOfficer('5123'))).json.branch_code1.find((a: { id: string }) => a.id === 'c1-old')).toMatchObject({ status: 'cancelled' });
+  });
+
   it('a hit reported before the officer number was known takes the number of the officer who answers it', async () => {
     const h8 = hit('h8', t(9, 3), '', { plate: 'RSP808', hotListEntryId: 'e8' });
     await call('POST', '/api/hot-hits', { body: { hit: h8 } });

@@ -58,7 +58,7 @@ describe('hot-list officer safety: handset state machine', () => {
 
   it('blocks until answered; SAFE & CLEAR logs the hit and the answer with the note', async () => {
     setWindow();
-    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: { lat: -37.81, lng: 144.96, accuracyM: 4 } });
+    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: { lat: -37.81, lng: 144.96, accuracyM: 4 } });
     await new Promise((r) => setTimeout(r, 0));
     expect(safetyState().pending).toMatchObject({ deadline: 61_000, hits: [{ hit: { plate: 'ZAF402' } }] });
     expect(await getKv('safety')).toMatchObject({ pending: { deadline: 61_000 } }); // survives a reload
@@ -69,10 +69,20 @@ describe('hot-list officer safety: handset state machine', () => {
     expect((await getAllHotEvents()).map((e) => e.kind).sort()).toEqual(['acknowledged', 'hit']);
   });
 
+  it('the answer window starts when the pop-up opens, not at capture (slow plate checks never shorten it)', async () => {
+    setWindow();
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 500_000, location: null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(safetyState().pending).toMatchObject({ openedAt: 500_000, deadline: 560_000, hits: [{ hit: { at: 1000, ackDeadline: 560_000 } }] });
+    await checkDeadline(61_000); // where a capture-based deadline would already have passed
+    expect(safetyState().pending?.softCode1).toBeUndefined();
+    await respond('safe_clear', '');
+  });
+
   it('no answer by the deadline: the handset raises the soft Code 1 (once), the pop-up stays', async () => {
     const calls: unknown[] = [];
     setWindow({ raiseSoftCode1: async (a: unknown) => (calls.push(a), { id: 'sc1-x' }) });
-    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     await new Promise((r) => setTimeout(r, 0));
     await checkDeadline(60_999);
     expect(calls).toHaveLength(0);
@@ -86,7 +96,7 @@ describe('hot-list officer safety: handset state machine', () => {
 
   it('without a host: the soft Code 1 cannot be sent and the officer is told to use the radio', async () => {
     setWindow();
-    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     await new Promise((r) => setTimeout(r, 0));
     await checkDeadline(61_000);
     expect(safetyState().pending?.softCode1?.status).toBe('unavailable');
@@ -96,7 +106,7 @@ describe('hot-list officer safety: handset state machine', () => {
     let fail = true;
     const raised: { cause: string; hit?: { plate: string } }[] = [];
     setWindow({ raiseCode1: async (a: { cause: string; hit?: { plate: string } }) => { if (fail) throw new Error('offline'); raised.push(a); return { id: 'c1' }; } });
-    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     await new Promise((r) => setTimeout(r, 0));
     await respond('code1', '');
     expect(safetyState().code1).toMatchObject({ status: 'failed', cause: 'hot_list_code1' });
@@ -110,7 +120,7 @@ describe('hot-list officer safety: handset state machine', () => {
     resetSafety();
     await startSafety(() => ({ officerNumber: '', vibrate: false, sound: false }));
     setWindow({ officerNumber: '9001' });
-    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     expect(safetyState().pending?.hits[0]?.hit.officerNumber).toBe('9001');
     const [ev] = await (respond('safe_clear', ''), done);
     expect(ev).toMatchObject({ officerNumber: '9001', response: 'safe_clear' });
@@ -125,7 +135,7 @@ describe('hot-list officer safety: handset state machine', () => {
       raiseCode1: async (a: { officerNumber?: string; hit?: { officerNumber: string } }) => (raised.push(a), { id: 'c1' }),
       cancelCode1: async (_id: string, _reason: string, officer?: string) => void cancels.push(officer),
     });
-    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     await new Promise((r) => setTimeout(r, 0));
     await respond('code1', '', '4471');
     expect(raised[0]).toMatchObject({ officerNumber: '4471', hit: { officerNumber: '4471' } });
@@ -202,7 +212,7 @@ describe('hot-list officer safety: handset state machine', () => {
       reportHotHit: async (h: { id: string }) => { sent.push(`hit:${h.id}`); },
       reportHotHitResponse: async (h: { id: string }, a: { response: string; note?: string }) => { if (fail) throw new Error('offline'); sent.push(`answer:${h.id}:${a.response}:${a.note}`); },
     });
-    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     const hitId = safetyState().pending!.hits[0]!.hit.id;
     await respond('safe_clear', 'left the segment');
     await done;
@@ -231,7 +241,7 @@ describe('hot-list officer safety: handset state machine', () => {
   it('CODE 1 is raised even when the local log cannot be written (storage full)', async () => {
     const raised: string[] = [];
     setWindow({ raiseCode1: async (a: { cause: string }) => (raised.push(a.cause), { id: 'c1' }) });
-    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, openedAt: 1000, location: null });
     await new Promise((r) => setTimeout(r, 0));
     await closeDb();
     const real = globalThis.indexedDB;

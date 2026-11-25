@@ -320,10 +320,11 @@ export function registerSafety(
     const me = await officerOf(db, officer);
     const branch = me?.branch ?? cfg.defaultBranch;
     const since = new Date(h.now() - 12 * 3600_000);
-    const own = await db.query(`select ${ALERT_COLS} from alerts a where a.officer_number = $1 and a.raised_at > $2 order by a.raised_at desc limit 20`, [officer, since]);
+    // Open alerts stay until their life cycle closes, however old; the 12 h window is for closed ones.
+    const own = await db.query(`select ${ALERT_COLS} from alerts a where a.officer_number = $1 and (${OPEN} or a.raised_at > $2) order by a.raised_at desc limit 20`, [officer, since]);
     const branchC1 = await db.query(
       `select ${ALERT_COLS}, exists (select 1 from alert_receipts r where r.alert_id = a.id and r.officer_number = $3) as received
-       from alerts a where a.kind = 'code1' and a.branch = $1 and a.officer_number <> $3 and (${OPEN} or a.closed_at > $2) and a.raised_at > $2 order by a.raised_at desc limit 20`,
+       from alerts a where a.kind = 'code1' and a.branch = $1 and a.officer_number <> $3 and (${OPEN} or a.closed_at > $2) order by a.raised_at desc limit 20`,
       [branch, since, officer],
     );
     return { officerNumber: officer, branch, own: own.rows.map(alertJson), branch_code1: branchC1.rows.map((a) => ({ ...alertJson(a), received: a.received })) };

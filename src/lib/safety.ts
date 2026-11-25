@@ -108,18 +108,22 @@ export async function startSafety(getSettings: typeof settingsRef): Promise<void
  */
 export async function openHotAlert(args: {
   hits: { list: HotList; entry: HotEntry; scanId: string | null }[];
+  /** Capture time of the sighting (kept as evidence on the hit). */
   at: number;
+  /** When the pop-up opens (default now): the officer's answer window starts here, not at capture. */
+  openedAt?: number;
   location: HotHitPayload['location'];
   where?: HotHitPayload['where'];
 }): Promise<HotListEvent[]> {
   const officer = currentOfficer();
+  const openedAt = args.openedAt ?? Date.now();
   const pending: PendingHit[] = args.hits.map((h) => ({
-    hit: hitPayload({ id: uid(), list: h.list, entry: h.entry, scanId: h.scanId, at: args.at, ackSeconds, officerNumber: officer, location: args.location, where: args.where }),
+    hit: hitPayload({ id: uid(), list: h.list, entry: h.entry, scanId: h.scanId, at: args.at, openedAt, ackSeconds, officerNumber: officer, location: args.location, where: args.where }),
     hotListId: h.list.id, key: h.entry.key, listName: h.list.name, notes: h.entry.notes,
   }));
   // The pop-up first (synchronously), then the log and the report.
   const answered = new Promise<HotListEvent[]>((resolve) => (resolveAck = resolve));
-  set({ pending: { hits: pending, openedAt: args.at, deadline: args.at + ackSeconds * 1000 } });
+  set({ pending: { hits: pending, openedAt, deadline: openedAt + ackSeconds * 1000 } });
   args.hits.forEach((h, i) => {
     const hit = pending[i]!.hit;
     void putHotEvent(hitEvent({ id: uid(), list: h.list, entry: h.entry, hit, device: navigator.userAgent })).catch(() => undefined);

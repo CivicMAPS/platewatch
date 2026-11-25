@@ -1,6 +1,7 @@
 /**
  * PlateWatch backend entry point. Configuration by environment (docs/BACKEND.md):
- *   DATABASE_URL                 postgres://… (required)
+ *   DATABASE_URL                 postgres://… (or PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE)
+ *   PLATEWATCH_DB_CA_FILE        CA bundle to verify the database's TLS certificate (Amazon RDS)
  *   PLATEWATCH_DEVICE_TOKEN      bearer token handsets present (required, ≥ 24 chars)
  *   PLATEWATCH_CONSOLE_TOKEN     bearer token for the CommandMAPS console (required, ≥ 24 chars)
  *   PLATEWATCH_COUNCIL           council code the I-N statements must name (default "com")
@@ -13,7 +14,7 @@
  *   PLATEWATCH_RADIO_ESCALATE_SECONDS  auto-escalate to Code 1 with no radio response (default 0 = manual)
  *   PORT                         default 8787
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +35,11 @@ function required(name: string, minLength = 1): string {
   return v;
 }
 
-const databaseUrl = required('DATABASE_URL');
+// DATABASE_URL, or PGHOST + PGUSER + PGPASSWORD + PGDATABASE (AWS: from the RDS secret).
+const databaseUrl = env.DATABASE_URL?.trim() || undefined;
+if (!databaseUrl && !(env.PGHOST && env.PGUSER && env.PGDATABASE)) required('DATABASE_URL');
+// PLATEWATCH_DB_CA_FILE: verify the database's TLS certificate against this CA bundle (RDS).
+const dbCa = env.PLATEWATCH_DB_CA_FILE ? readFileSync(env.PLATEWATCH_DB_CA_FILE, 'utf8') : undefined;
 const deviceToken = required('PLATEWATCH_DEVICE_TOKEN', 24);
 const consoleToken = required('PLATEWATCH_CONSOLE_TOKEN', 24);
 if (deviceToken === consoleToken) {
@@ -45,7 +50,7 @@ const appDirCandidate = resolve(env.PLATEWATCH_APP_DIR ?? resolve(here, '../dist
 const consoleDir = [resolve(here, 'console'), resolve(here, '../server/console')].find((d) => existsSync(d))!;
 const tokensDir = [resolve(here, 'civicmaps'), resolve(here, '../src/styles/civicmaps')].find((d) => existsSync(d));
 
-const db = createPool(databaseUrl);
+const db = createPool(databaseUrl, { ca: dbCa });
 const applied = await migrate(db);
 if (applied.length) console.log(`[platewatch-server] migrations applied: ${applied.join(', ')}`);
 

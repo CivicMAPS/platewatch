@@ -58,6 +58,13 @@ cp .env.example .env                    # set the two tokens
 docker compose up --build               # PostgreSQL 16 + the server on :8787
 ```
 
+### AWS (field testing): `platewatch.civicmaps.com.au`
+
+`deploy/aws` is a CDK app: a Route 53 zone for the delegated subdomain, RDS PostgreSQL, the server
+on ECS Fargate behind an HTTPS load balancer, tokens in Secrets Manager. Runbook and costs:
+[deploy/aws/README.md](../deploy/aws/README.md). The image is `server/Dockerfile` (verified to build
+and serve here); the server verifies the RDS TLS certificate (`PLATEWATCH_DB_CA_FILE`).
+
 ### Field testing on phones
 
 Handsets need to reach the server over **HTTPS** (camera and GPS need a secure context for the
@@ -70,7 +77,8 @@ PostgreSQL. For a LAN `http://` address, build the app with
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `DATABASE_URL` | yes | — | `postgres://user:pass@host:5432/db` |
+| `DATABASE_URL` | yes (or `PG*`) | — | `postgres://user:pass@host:5432/db`, or `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` |
+| `PLATEWATCH_DB_CA_FILE` | no | — | Verify the database's TLS certificate against this CA bundle (`/app/rds-ca.pem` in the image) |
 | `PLATEWATCH_DEVICE_TOKEN` | yes (≥ 24 chars) | — | Bearer token handsets present |
 | `PLATEWATCH_CONSOLE_TOKEN` | yes (≥ 24 chars, ≠ device token) | — | Bearer token for the console |
 | `PLATEWATCH_COUNCIL` | no | `com` | Council code the I-N statements must name |

@@ -1,0 +1,11 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "context": {
+    "region": "ap-southeast-2",
+    "zoneName": "platewatch.civicmaps.com.au",
+    "council": "com",
+    "timeZone": "Australia/Melbourne",
+    "hotAckSeconds": 60,
+    "radioEscalateSeconds": 0
+  }
+}

@@ -11,9 +11,13 @@ const MIGRATIONS: { id: string; sql: string }[] = [
   { id: '002_safety', sql: migration002 },
 ];
 
-// timestamptz → epoch-ms numbers are produced in SQL where needed; keep Date objects otherwise.
-export function createPool(url: string): Db {
-  return new pg.Pool({ connectionString: url, max: 10 });
+/**
+ * DATABASE_URL, or the standard PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE variables (how
+ * the AWS deployment injects the RDS secret). With `caFile` the connection uses TLS and verifies
+ * the server against that CA bundle (Amazon RDS: rds-ca.pem in the image).
+ */
+export function createPool(url: string | undefined, opts: { ca?: string } = {}): Db {
+  return new pg.Pool({ ...(url ? { connectionString: url } : {}), max: 10, ...(opts.ca ? { ssl: { ca: opts.ca, rejectUnauthorized: true } } : {}) });
 }
 
 export async function migrate(db: Db): Promise<string[]> {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeDb, getAllHotEvents, getKv } from '../src/lib/db';
 import { ackLocation, hitPayload, hotLogRows, responseEvent } from '../src/lib/hotlist';
-import { checkDeadline, openHotAlert, raiseCode1, resetSafety, respond, safetyState, setAckSeconds, startSafety } from '../src/lib/safety';
+import { cancelCode1, checkDeadline, openHotAlert, raiseCode1, resetSafety, respond, safetyState, setAckSeconds, startSafety } from '../src/lib/safety';
 import type { GeoFix, HotEntry } from '../src/lib/types';
 import { hot } from './fixtures';
 
@@ -104,5 +104,51 @@ describe('hot-list officer safety: handset state machine', () => {
     await raiseCode1({ cause: 'officer_duress' });
     expect(safetyState().code1).toMatchObject({ status: 'sent' });
     expect(raised.at(-1)).toMatchObject({ cause: 'officer_duress' });
+  });
+
+  it('uses the EnforcementMAPS sign-in officer number when Settings has none', async () => {
+    resetSafety();
+    await startSafety(() => ({ officerNumber: '', vibrate: false, sound: false }));
+    setWindow({ officerNumber: '9001' });
+    const done = openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    expect(safetyState().pending?.hits[0]?.hit.officerNumber).toBe('9001');
+    const [ev] = await (respond('safe_clear', ''), done);
+    expect(ev).toMatchObject({ officerNumber: '9001', response: 'safe_clear' });
+  });
+
+  it('cancelling while the raise is in flight cancels at the host once the raise lands', async () => {
+    let land!: () => void;
+    const calls: string[] = [];
+    setWindow({
+      raiseCode1: (a: { id: string }) => new Promise((r) => { land = () => { calls.push(`raise:${a.id}`); r({ id: a.id }); }; }),
+      cancelCode1: async (id: string) => { calls.push(`cancel:${id}`); },
+    });
+    const raising = raiseCode1({ cause: 'officer_duress' });
+    const id = safetyState().code1!.id;
+    await cancelCode1('pressed in error');
+    expect(safetyState().code1).toMatchObject({ cancelRequested: 'pressed in error' }); // not dropped yet
+    expect(calls).toEqual([]);
+    land();
+    await raising;
+    expect(calls).toEqual([`raise:${id}`, `cancel:${id}`]);
+    expect(safetyState().code1).toBeNull();
+  });
+
+  it('cancelling after a failed (timed-out) raise asks the host; "not found" means it never arrived', async () => {
+    const notFound = Object.assign(new Error('No such Code 1.'), { status: 404 });
+    let cancelResult: 'ok' | '404' | 'offline' = 'offline';
+    const cancels: string[] = [];
+    setWindow({
+      raiseCode1: async () => { throw new Error('timeout'); },
+      cancelCode1: async (id: string) => { cancels.push(id); if (cancelResult === '404') throw notFound; if (cancelResult === 'offline') throw new Error('offline'); },
+    });
+    await raiseCode1({ cause: 'officer_duress' });
+    expect(safetyState().code1?.status).toBe('failed');
+    await cancelCode1('mistake');
+    expect(safetyState().code1).toMatchObject({ cancelRequested: 'mistake' }); // offline: kept for a retry
+    cancelResult = '404';
+    await cancelCode1('mistake');
+    expect(safetyState().code1).toBeNull();
+    expect(cancels).toHaveLength(2);
   });
 });

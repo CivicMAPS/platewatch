@@ -10,7 +10,7 @@ import { html, nothing, render, type TemplateResult } from 'lit-html';
 import { getHotEventsForEntry } from '../lib/db';
 import { SAFE_CLEAR_HELP, SAFE_CLEAR_LABEL } from '../lib/hotlist';
 import type { HotProfile, LiveAlert } from '../lib/host';
-import { cancelCode1, escalatedCode1, hotProfile, onSafetyChange, receiveCode1, respond, safetyState, type PendingHit } from '../lib/safety';
+import { cancelCode1, currentOfficer, escalatedCode1, hotProfile, onSafetyChange, receiveCode1, respond, safetyState, type PendingHit } from '../lib/safety';
 import { formatStamp } from '../lib/time';
 import { RISK_LEVEL_LABELS, RISK_TAG_LABELS, type HotListEvent, type RiskLevel, type RiskTag } from '../lib/types';
 import type { App } from './app';
@@ -51,13 +51,13 @@ export function mountSafetyOverlay(app: App): void {
 
   const answer = async (response: 'safe_clear' | 'code1') => {
     if (busy) return;
-    const officer = app.settings.officerNumber || officerDraft.trim();
+    const officer = currentOfficer() || officerDraft.trim();
     // CODE 1 is never blocked; SAFE & CLEAR needs the officer number for the log.
     if (!officer && response !== 'code1') return;
     busy = true;
     draw();
     try {
-      if (!app.settings.officerNumber && officerDraft.trim()) await app.updateSettings({ officerNumber: officerDraft.trim() });
+      if (!currentOfficer() && officerDraft.trim()) await app.updateSettings({ officerNumber: officerDraft.trim() });
       await respond(response, note, officer);
       note = '';
       moreOpen = false;
@@ -93,7 +93,8 @@ export function mountSafetyOverlay(app: App): void {
     if (!p) return nothing;
     const now = Date.now();
     const sc = p.softCode1;
-    const officerSet = !!app.settings.officerNumber;
+    // The EnforcementMAPS sign-in identity counts; only the development build asks for a number.
+    const officerSet = !!currentOfficer();
     const escalated = escalatedCode1()[0];
     const status = escalated
       ? html`<strong>CODE 1 raised for you</strong> (no radio response): your branch is alerted and help is coming.`
@@ -161,7 +162,7 @@ export function mountSafetyOverlay(app: App): void {
       ${own
         ? html`<div class="rounded-b-md bg-emergency px-3 py-2 text-sm text-white shadow-lg" role="alert" data-testid="code1-own" data-status=${own.status}>
             <p class="font-extrabold tracking-[0.06em] text-white uppercase">${icon('alert', 'h-4 w-4 inline', 2.5)} Code 1 active</p>
-            <p class="text-white">${own.status === 'sent' ? (ownLive?.acknowledgedBy ? `Acknowledged by ${ownLive.acknowledgedBy}. Help is coming; your location is shared every 10 s.` : 'Sent to dispatch and your branch. Your location is shared every 10 s.') : own.status === 'unavailable' ? 'No connection to dispatch on this device: use the radio duress button now.' : 'Sending… use the radio duress button as well.'}</p>
+            <p class="text-white">${own.cancelRequested ? 'Cancelling — waiting for dispatch to confirm.' : own.status === 'sent' ? (ownLive?.acknowledgedBy ? `Acknowledged by ${ownLive.acknowledgedBy}. Help is coming; your location is shared every 10 s.` : 'Sent to dispatch and your branch. Your location is shared every 10 s.') : own.status === 'unavailable' ? 'No connection to dispatch on this device: use the radio duress button now.' : 'Sending… use the radio duress button as well.'}</p>
             <button type="button" class="mt-1 text-white underline" data-testid="code1-cancel" @click=${() => { const r = window.prompt('Cancel this Code 1 — raised in error? Reason:'); if (r !== null) void cancelCode1(r || 'raised in error'); }}>Cancel — raised in error</button>
           </div>`
         : nothing}

@@ -13,7 +13,7 @@ import { getKv, putHotEvent, putKv, uid } from './db';
 import { feedback } from './feedback';
 import { geo } from './geo';
 import { hitEvent, hitPayload, responseEvent } from './hotlist';
-import { host, type HotProfile, type LiveAlert } from './host';
+import { host, officerNumber, type HotProfile, type LiveAlert } from './host';
 import type { GeoFix, HotEntry, HotHitPayload, HotHitResponse, HotList, HotListEvent, Settings } from './types';
 
 export interface PendingHit {
@@ -28,7 +28,8 @@ type SendState = { status: 'sending' | 'sent' | 'failed' | 'unavailable'; at: nu
 
 export interface SafetyState {
   pending: { hits: PendingHit[]; openedAt: number; deadline: number; softCode1?: SendState } | null;
-  code1: ({ id: string; cause: string; hit?: HotHitPayload; raisedAt: number } & SendState) | null;
+  /** `cancelRequested`: the officer cancelled before the raise was confirmed; reconciled with the host. */
+  code1: ({ id: string; cause: string; hit?: HotHitPayload; raisedAt: number; cancelRequested?: string } & SendState) | null;
   own: LiveAlert[];
   branch: LiveAlert[];
   lastLiveAt?: number;
@@ -56,6 +57,11 @@ function set(patch: Partial<SafetyState>, persist = true): void {
   state = { ...state, ...patch };
   if (persist) void putKv(KV, { pending: state.pending, code1: state.code1 }).catch(() => undefined);
   for (const fn of listeners) fn();
+}
+
+/** The officer: the EnforcementMAPS sign-in first, else the development build's Settings number. */
+export function currentOfficer(): string {
+  return officerNumber(settingsRef().officerNumber ?? '');
 }
 
 export function setAckSeconds(s: number): void {
@@ -92,7 +98,7 @@ export async function openHotAlert(args: {
   location: HotHitPayload['location'];
   where?: HotHitPayload['where'];
 }): Promise<HotListEvent[]> {
-  const officer = settingsRef().officerNumber;
+  const officer = currentOfficer();
   const pending: PendingHit[] = args.hits.map((h) => ({
     hit: hitPayload({ id: uid(), list: h.list, entry: h.entry, scanId: h.scanId, at: args.at, ackSeconds, officerNumber: officer, location: args.location, where: args.where }),
     hotListId: h.list.id, key: h.entry.key, listName: h.list.name, notes: h.entry.notes,
@@ -113,7 +119,7 @@ export async function respond(response: HotHitResponse, note: string, officerOve
   const p = state.pending;
   if (!p) return [];
   const at = Date.now();
-  const officer = officerOverride?.trim() || settingsRef().officerNumber || 'unknown';
+  const officer = officerOverride?.trim() || currentOfficer() || 'unknown';
   const location = freshLocation(p.hits[0]?.hit.location ?? null);
   const events: HotListEvent[] = [];
   for (const h of p.hits) {
@@ -161,24 +167,53 @@ export async function raiseCode1(args: { cause: string; hit?: HotHitPayload }): 
   await sendCode1();
 }
 
+/** Raise requests still waiting for the host's answer (never two at once for one Code 1). */
+const inFlight = new Set<string>();
+
 async function sendCode1(): Promise<void> {
   const c = state.code1;
-  if (!c || c.status === 'sent') return;
+  if (!c || c.status === 'sent' || inFlight.has(c.id)) return;
+  if (c.cancelRequested) return reconcileCancel();
   const raise = host()?.raiseCode1;
   if (!raise) return set({ code1: { ...c, status: 'unavailable', at: Date.now() } });
+  inFlight.add(c.id);
   try {
     await raise({ id: c.id, ...(c.hit ? { hit: c.hit } : {}), cause: c.cause, at: c.raisedAt, location: freshLocation(c.hit?.location ?? null) });
     if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'sent', at: Date.now() } });
   } catch (e) {
     if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'failed', at: Date.now(), error: (e as Error).message } });
+  } finally {
+    inFlight.delete(c.id);
   }
+  // Cancelled while the raise was in flight: the host may now hold it, so cancel it there.
+  if (state.code1?.id === c.id && state.code1.cancelRequested) await reconcileCancel();
 }
 
+/**
+ * The officer cancelled a Code 1 raised in error. When the raise was confirmed, cancel at the host.
+ * When it was not (sending, or failed after a timeout the host may still have accepted), keep the
+ * Code 1 with `cancelRequested`, stop raising it, and cancel at the host once no raise is in flight;
+ * "not found" there means it never arrived. Without a host there is nothing to cancel remotely.
+ */
 export async function cancelCode1(reason: string): Promise<void> {
   const c = state.code1;
   if (!c) return;
-  if (c.status === 'sent') await host()?.cancelCode1?.(c.id, reason);
-  set({ code1: null });
+  if (c.status === 'unavailable' || !host()?.cancelCode1) return set({ code1: null });
+  set({ code1: { ...c, cancelRequested: reason || 'raised in error' } });
+  await reconcileCancel();
+}
+
+async function reconcileCancel(): Promise<void> {
+  const c = state.code1;
+  if (!c?.cancelRequested || inFlight.has(c.id)) return;
+  const cancel = host()?.cancelCode1;
+  if (!cancel) return set({ code1: null });
+  try {
+    await cancel(c.id, c.cancelRequested);
+  } catch (e) {
+    if ((e as { status?: number }).status !== 404) return; // keep it and retry with the 10 s loop
+  }
+  if (state.code1?.id === c.id) set({ code1: null });
 }
 
 /** Open Code 1s about this officer that the handset did not raise (dispatch escalated a soft Code 1). */
@@ -188,8 +223,9 @@ export function escalatedCode1(): LiveAlert[] {
 
 async function shareCode1Location(): Promise<void> {
   const c = state.code1;
-  if (c && (c.status === 'failed' || c.status === 'sending')) void sendCode1();
-  const ids = [...(c?.status === 'sent' ? [c.id] : []), ...escalatedCode1().map((a) => a.id)];
+  if (c?.cancelRequested) void reconcileCancel();
+  else if (c && (c.status === 'failed' || c.status === 'sending')) void sendCode1();
+  const ids = [...(c?.status === 'sent' && !c.cancelRequested ? [c.id] : []), ...escalatedCode1().map((a) => a.id)];
   if (!ids.length) return;
   geo.start();
   const loc = fixToLoc(geo.bestRecent(Date.now()));

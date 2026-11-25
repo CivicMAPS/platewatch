@@ -700,6 +700,28 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect((await getOutbox()).map((x) => x.id)).toEqual(['https://other-backend.example|sOther']);
   });
 
+  it("an infringement issued for one backend can be neither reissued nor voided while Settings point at another", async () => {
+    const { closeDb, getOutbox, getScan, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' };
+    backend.installBackend(() => settings as never);
+    const n = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sI' });
+    const record = buildIssuedRecord({ number: n.number, handoff: handoff(), values: { offenceCode: '702', timeTo: t(8, 25), notes: 'n', vehicle: { make: 'Holden', type: 'Hatchback', colour: 'White', registrationType: 'Standard' }, evidenceOverride: 'x' }, issuedAt: toLocalIso(t(8, 26)), toIso: toLocalIso });
+    await signer.closeNumber(n.number, record);
+    const issued = { ...scan('sI', t(8, 20, 5)), observationId: null, infringement: { status: 'issued' as const, sync: 'pending' as const, pinSource: 'device' as const, handoffId: 'h', number: n.number, offenceCode: '702' as const, offenceOverridden: false, timeFrom: 0, timeTo: 0, officerNumber: '5123' } };
+    await saveScan(issued);
+    settings.backendUrl = base.replace('127.0.0.1', 'localhost'); // now another backend
+    await expect(backend.reissue(issued, 'officer_error')).rejects.toThrow(/another backend/);
+    await expect(backend.requestVoid(issued, 'officer_error', '')).rejects.toThrow(/another backend/);
+    expect((await getScan('sI'))?.infringement).toMatchObject({ number: n.number, status: 'issued' });
+    expect((await getOutbox()).some((x) => x.kind === 'voidRequest')).toBe(false);
+    settings.backendUrl = base; // back on the original backend: the void request is allowed
+    expect((await backend.requestVoid(issued, 'officer_error', '')).infringement?.status).toBe('void_requested');
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');

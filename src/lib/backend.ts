@@ -503,6 +503,9 @@ async function runWizard(args: { handoff: InfringementHandoff; scanId: string; i
   }
 }
 
+/** Reissue and void requests go to the backend that holds the original. */
+const OTHER_BACKEND = 'This infringement was issued for another backend. Switch Settings back to that backend to reissue or void it.';
+
 /**
  * Reissue (void + reissue, no approval — owner 23/11/2026): a new number for the same sighting,
  * pre-filled from the original; the original is voided when the backend accepts the reissue.
@@ -513,6 +516,8 @@ export async function reissue(scan: ScanRecord, reason: VoidReason): Promise<Sca
   if (!cur || cur.status !== 'issued') throw new Error('Only an issued infringement can be reissued.');
   const orig = await getBundle(cur.number);
   if (!orig?.record) throw new Error('The original issue record is not on this device.');
+  // The replacement is signed with the configured backend's key: only the original's backend accepts it.
+  if (orig.keyId !== (await deviceKey()).keyId) throw new Error(OTHER_BACKEND);
   const handoff = { ...(orig.record.handoff as InfringementHandoff), handoffId: crypto.randomUUID() };
   const { result } = await runWizard({
     handoff,
@@ -541,6 +546,8 @@ export async function reissue(scan: ScanRecord, reason: VoidReason): Promise<Sca
 export async function requestVoid(scan: ScanRecord, reason: VoidReason, note: string): Promise<ScanRecord> {
   const cur = scan.infringement;
   if (!cur || cur.status !== 'issued') throw new Error('Only an issued infringement can be voided.');
+  const b = await getBundle(cur.number);
+  if (b && b.keyId !== (await deviceKey()).keyId) throw new Error(OTHER_BACKEND);
   const next: ScanRecord = { ...scan, infringement: { ...cur, status: 'void_requested', voidRequest: { reason, ...(note.trim() ? { note: note.trim() } : {}), requestedAt: Date.now() } } };
   // The local status and the request to the supervisor are saved together: never one without the other.
   await saveScan(next, undefined, [{ kind: 'voidRequest', id: cur.number }]);

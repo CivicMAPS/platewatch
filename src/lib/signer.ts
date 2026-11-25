@@ -3,7 +3,7 @@
  * kept in IndexedDB, a hash chain over every statement it signs, and the per-officer daily pools.
  * Allocation works offline; the backend verifies when the statements arrive (`docs/BACKEND.md`).
  */
-import { enqueue, getKv, putKv } from './db';
+import { getKv, putKv, putKvsAndQueue } from './db';
 import { allocate, generateSigningKey, GENESIS_HASH, type AllocationStatement, type IssueStatement, signStatement, sha256Hex, canonical } from './inNumber';
 import { toLocalIso } from './time';
 import type { IssueBundle, IssuedRecord } from './types';
@@ -59,9 +59,32 @@ export async function getBundle(number: string): Promise<StoredBundle | undefine
   return getKv<StoredBundle>(bundleKey(number));
 }
 
-async function saveBundle(b: StoredBundle): Promise<void> {
-  await putKv(bundleKey(b.number), b);
-  await enqueue('infringement', b.number);
+/** The new chain head, the signed bundle and its outbox row: one transaction (never a chain gap). */
+async function commit(chainState: ChainState, b: StoredBundle): Promise<void> {
+  await putKvsAndQueue([[CHAIN, chainState], [bundleKey(b.number), b]], { kind: 'infringement', id: b.number });
+}
+
+const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|${day}`;
+
+/**
+ * Raise the daily pools to what the backend has already accepted for this officer (a replacement
+ * or second handset the same day must continue the officer's sequence, not restart at 001).
+ */
+export function raisePoolFloors(officer: string, pools: readonly { day: string; lastSequence: number }[]): Promise<void> {
+  return exclusive(async () => {
+    const k = await deviceKey();
+    const c = await chain(k.keyId);
+    let changed = false;
+    const next = { ...c.pools };
+    for (const p of pools) {
+      const key = poolKey(officer, p.day);
+      if ((next[key] ?? 0) < p.lastSequence) {
+        next[key] = p.lastSequence;
+        changed = true;
+      }
+    }
+    if (changed) await putKv(CHAIN, { ...c, pools: next } satisfies ChainState);
+  });
 }
 
 /** Allocate the next number for `officer` today. Queued for the backend at once (no chain gaps). */
@@ -72,12 +95,11 @@ export function allocateNumber(args: { officer: string; council: string; scanId:
     const now = args.now ?? Date.now();
     const d = new Date(now);
     const day = `${String(d.getFullYear() % 100).padStart(2, '0')}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    const pool = `${args.officer.padStart(5, '0')}|${day}`;
+    const pool = poolKey(args.officer, day);
     const sequence = (c.pools[pool] ?? 0) + 1;
     const { number, allocation } = await allocate({ privateKey: k.privateKey, keyId: k.keyId, council: args.council, officer: args.officer, sequence, prevHash: c.prevHash, now, timestamp: toLocalIso(now) });
-    await putKv(CHAIN, { ...c, prevHash: allocation.hash, pools: { ...c.pools, [pool]: sequence } } satisfies ChainState);
     const b: StoredBundle = { number, scanId: args.scanId, keyId: k.keyId, allocation: allocation as unknown as IssueBundle['allocation'], createdAt: now };
-    await saveBundle(b);
+    await commit({ ...c, prevHash: allocation.hash, pools: { ...c.pools, [pool]: sequence } }, b);
     return b;
   });
 }
@@ -101,9 +123,8 @@ export function closeNumber(number: string, record: IssuedRecord | null, now = D
       prevHash: c.prevHash,
     };
     const closing = await signStatement(k.privateKey, statement);
-    await putKv(CHAIN, { ...c, prevHash: closing.hash } satisfies ChainState);
     const next: StoredBundle = { ...b, closing: closing as unknown as IssueBundle['closing'], ...(record ? { record } : {}) };
-    await saveBundle(next);
+    await commit({ ...c, prevHash: closing.hash }, next);
     return next;
   });
 }

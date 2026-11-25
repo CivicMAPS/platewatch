@@ -15,7 +15,7 @@ import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
 import type { InfringementHandoff, InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
-import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen } from './signer';
+import { allocateNumber, closeNumber, deviceKey, getBundle, isWizardOpen, markWizardOpen, raisePoolFloors } from './signer';
 import { toLocalIso } from './time';
 import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
@@ -278,6 +278,12 @@ export function syncNow(): Promise<void> {
     try {
       const dev = (await getKv<BackendState['device']>(DEVICE)) ?? undefined;
       if (!dev || dev.status !== 'approved') await registerDevice();
+      // Continue the officer's daily I-N sequence from what the backend already accepted (another handset).
+      const officer = settingsRef().officerNumber?.trim();
+      if (officer) {
+        const me = await request<{ pools?: { day: string; lastSequence: number }[] }>('GET', '/api/devices/me').catch(() => null);
+        if (me?.pools?.length) await raisePoolFloors(officer, me.pools);
+      }
       await pushOutbox();
       await pullUpdates();
       const lastSyncAt = Date.now();

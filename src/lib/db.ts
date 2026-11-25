@@ -453,6 +453,18 @@ export async function enqueueAll(): Promise<number> {
   return scans.length + obs.length + events.length;
 }
 
+/**
+ * Several kv entries and one outbox row in a single transaction: all or nothing. The I-N signer
+ * uses it so the chain head never advances past a statement that is not saved and queued.
+ */
+export async function putKvsAndQueue(entries: readonly [string, unknown][], queueItem?: { kind: OutboxKind; id: string }): Promise<void> {
+  const tx = (await db()).transaction(['kv', 'outbox'], 'readwrite');
+  for (const [key, value] of entries) await tx.objectStore('kv').put(value, key);
+  if (queueItem) await queue(tx.objectStore('outbox'), queueItem.kind, queueItem.id);
+  await tx.done;
+  if (queueItem) queued();
+}
+
 export async function getKv<T>(key: string): Promise<T | undefined> {
   return (await (await db()).get('kv', key)) as T | undefined;
 }

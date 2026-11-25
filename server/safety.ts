@@ -94,7 +94,8 @@ export async function upsertHit(q: Q, keyId: string | null, h: Record<string, un
   await q.query(
     `insert into hot_hits (id, plate, plate_key, hot_list_entry_id, scan_id, officer_number, device_key_id, lat, lng, accuracy_m, at, ack_deadline, entry)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict (id) do nothing`,
-    [id, plate, plateKey(plate), need(str(h.hotListEntryId, 64), 'hit.hotListEntryId'), str(h.scanId, 64) || null, need(str(h.officerNumber, 12), 'hit.officerNumber'), keyId,
+    // Never refuse a hit for want of an officer number (a CODE 1 carries it): logged as "unknown".
+    [id, plate, plateKey(plate), need(str(h.hotListEntryId, 64), 'hit.hotListEntryId'), str(h.scanId, 64) || null, str(h.officerNumber, 12).trim() || 'unknown', keyId,
       l?.lat ?? null, l?.lng ?? null, l?.accuracyM ?? null, new Date(at), new Date(deadline), JSON.stringify(entryOf(h.entry, h.where))],
   );
   return id;

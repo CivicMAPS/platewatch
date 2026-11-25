@@ -1750,7 +1750,8 @@ export function scanView(params: Record<string, string>, app: App): View {
       paidFrom = timeOnDay(scanAt, f.paidFrom || hhmm(scanAt)) ?? undefined;
       paidTo = timeOnDay(scanAt, f.paidTo) ?? undefined;
       if (paidTo === undefined) return void ((payForm = { ...f, error: 'Enter paid to (HH:MM).' }), app.update());
-      if (paidFrom !== undefined && paidTo < paidFrom) return void ((payForm = { ...f, error: 'Paid to is before paid from.' }), app.update());
+      // A session that crosses midnight: paid to earlier than paid from ends the next day.
+      if (paidFrom !== undefined && paidTo <= paidFrom) paidTo += 86_400_000;
     }
     const check: PaymentCheck = {
       status: f.status,
@@ -1782,8 +1783,10 @@ export function scanView(params: Record<string, string>, app: App): View {
     const obs = result?.comparison?.observation;
     if (!result || !obs || !pending || obs.payment?.status !== 'paid') return;
     const scanAt = pending.meta.capturedAt;
-    const paidTo = timeOnDay(scanAt, topUp.paidTo);
+    let paidTo = timeOnDay(scanAt, topUp.paidTo);
     if (paidTo === null) return void ((topUp = { ...topUp, error: 'Enter paid to (HH:MM).' }), app.update());
+    // Extended past midnight: earlier than the current paid to means the next day.
+    if (obs.payment.paidTo !== undefined && paidTo <= obs.payment.paidTo) paidTo += 86_400_000;
     const first = await getScan(obs.firstScanId);
     const now = Date.now();
     const by = officerNumber(settings().officerNumber);

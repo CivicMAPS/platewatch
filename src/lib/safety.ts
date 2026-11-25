@@ -122,7 +122,8 @@ export async function respond(response: HotHitResponse, note: string, officerOve
     events.push(e);
   }
   set({ pending: null });
-  if (response === 'code1') await raiseCode1({ cause: 'hot_list_code1', hit: p.hits[0]?.hit });
+  const first = p.hits[0]?.hit;
+  if (response === 'code1') await raiseCode1({ cause: 'hot_list_code1', ...(first ? { hit: { ...first, officerNumber: officer } } : {}) });
   resolveAck?.(events);
   resolveAck = null;
   return events;

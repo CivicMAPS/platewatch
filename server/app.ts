@@ -12,6 +12,7 @@ import { tx, type Db } from './db';
 import { bearer, CONSOLE_ROLES, HttpError, MANAGER_ROLES, need, num, readBody, Router, secretMatches, send, STAFF_ROLES, str, type Ctx, type StaffRole } from './http';
 import { councilDay, recordResponse, registerSafety, upsertHit, type SafetyConfig } from './safety';
 import { acceptBundle, recordInfringementEvent, VOID_REASONS, type BundleIn } from './verify';
+import { officerDigits } from '../src/lib/inNumber';
 
 export interface Config {
   council: string;
@@ -103,12 +104,24 @@ export function createApp(db: Db, cfg: Config) {
     return { keyId, status: row.status, council: cfg.council, hotAckSeconds: cfg.safety.hotAckSeconds };
   });
 
+  /** Daily I-N pools the backend has accepted for an officer (recent days), for a handset to continue. */
+  const poolsFor = async (officer: string) => {
+    let digits: string;
+    try {
+      digits = officerDigits(officer);
+    } catch {
+      return [];
+    }
+    const rows = await db.query<{ day: string; last_sequence: number }>('select day, last_sequence from pools where officer = $1 order by day desc limit 3', [digits]);
+    return rows.rows.map((p) => ({ day: p.day, lastSequence: p.last_sequence }));
+  };
+
   r.on('GET', '/api/devices/me', async (c) => {
     const keyId = needDevice(c);
     const row = (await db.query<{ status: string }>('select status from devices where key_id = $1', [keyId])).rows[0];
     if (!row) throw new HttpError(404, 'unknown_device', 'Register this device first.');
     await touchDevice(keyId);
-    return { keyId, status: row.status, council: cfg.council, hotAckSeconds: cfg.safety.hotAckSeconds };
+    return { keyId, status: row.status, council: cfg.council, hotAckSeconds: cfg.safety.hotAckSeconds, pools: await poolsFor(await deviceOfficer(c)) };
   });
 
   r.on('POST', '/api/sync', async (c) => {

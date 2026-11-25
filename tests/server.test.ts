@@ -289,6 +289,13 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     await call('POST', '/api/console/alerts/sc1-h4/radio-ok', { staff: 'D1' });
   });
 
+  it('CODE 1 is accepted from a handset with no officer number (hit and Code 1 logged as unknown)', async () => {
+    const res = await call('POST', '/api/code1', { body: { id: 'c1-anon', hit: hit('h6', t(9, 1), '', { plate: 'DA8899' }), at: t(9, 1, 5), location: null } });
+    expect(res.json).toEqual({ id: 'c1-anon', status: 'raised' });
+    expect((await call('GET', '/api/console/hits', { staff: 'D1' })).json.hits.find((x: { id: string }) => x.id === 'h6')).toMatchObject({ officerNumber: 'unknown', response: 'code1' });
+    await call('POST', '/api/console/alerts/c1-anon/cancel', { staff: 'D1', body: { reason: 'test' } });
+  });
+
   it('CODE 1 from the pop-up: hit answered code1, Code 1 raised; the officer can cancel it as raised in error', async () => {
     const r = await call('POST', '/api/code1', { body: { id: 'c1-pop', hit: hit('h5', t(9, 0)), at: t(9, 0, 5), location: { lat: -37.81, lng: 144.96 } }, ...asOfficer('4471') });
     expect(r.json).toEqual({ id: 'c1-pop', status: 'raised' });
@@ -374,6 +381,28 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect(backend.backendState().lastError).toBeUndefined();
     expect((await detail(a.number)).status).toBe('cancelled');
     expect(backend.backendState().pending).toBe(0);
+  });
+
+  it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
+    const { closeDb, getKv } = await import('../src/lib/db');
+    const backend = await import('../src/lib/backend');
+    const signer = await import('../src/lib/signer');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
+    // Officer 5123 already used sequences 1–2 today on the first handset (previous test).
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' } as never;
+    backend.installBackend(() => settings);
+    const dev = await backend.registerDevice();
+    await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    await backend.syncNow();
+    const b = await signer.allocateNumber({ officer: '5123', council: 'com', scanId: 'sC' });
+    expect((b.allocation.statement as { sequence: number }).sequence).toBe(3);
+    // Chain head, bundle and outbox row were written together.
+    expect(await getKv(`inBundle:${b.number}`)).toBeTruthy();
+    await backend.syncNow();
+    expect(backend.backendState().lastError).toBeUndefined();
+    expect((await (await fetch(`${base}/api/console/infringements/${b.number}`, { headers: staff })).json()).infringement.status).toBe('allocated');
   });
 });
 

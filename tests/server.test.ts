@@ -302,6 +302,14 @@ describe.runIf(!!URL_)('PlateWatch backend (PostgreSQL)', () => {
     await call('POST', '/api/console/alerts/c1-anon/cancel', { staff: 'D1', body: { reason: 'test' } });
   });
 
+  it('CODE 1 without an officer header (number typed on the pop-up) is raised for the hit\'s officer and routed to their branch', async () => {
+    const r = await call('POST', '/api/code1', { body: { id: 'c1-typed', hit: hit('h7', t(9, 2), '4471', { plate: 'TYP701', hotListEntryId: 'e7' }), at: t(9, 2, 5), location: null } });
+    expect(r.json).toEqual({ id: 'c1-typed', status: 'raised' });
+    const d = await call('GET', '/api/console/alerts/c1-typed', { staff: 'D1' });
+    expect(d.json.alert).toMatchObject({ officerNumber: '4471', team: 'A', branch: 'parking' });
+    expect((await call('POST', '/api/code1/c1-typed/cancel', { body: { reason: 'test' }, ...asOfficer('4471') })).json).toEqual({ status: 'cancelled' });
+  });
+
   it('CODE 1 from the pop-up: hit answered code1, Code 1 raised; the officer can cancel it as raised in error', async () => {
     const r = await call('POST', '/api/code1', { body: { id: 'c1-pop', hit: hit('h5', t(9, 0)), at: t(9, 0, 5), location: { lat: -37.81, lng: 144.96 } }, ...asOfficer('4471') });
     expect(r.json).toEqual({ id: 'c1-pop', status: 'raised' });
@@ -409,6 +417,29 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     await backend.syncNow();
     expect(backend.backendState().lastError).toBeUndefined();
     expect((await (await fetch(`${base}/api/console/infringements/${b.number}`, { headers: staff })).json()).infringement.status).toBe('allocated');
+  });
+
+  it('pointing the handset at another backend registers afresh and pulls that server\'s updates from the start', async () => {
+    const { getKv } = await import('../src/lib/db');
+    const backend = await import('../src/lib/backend');
+    const settings = { backendUrl: base, backendToken: DEVICE, officerNumber: '5123' };
+    backend.installBackend(() => settings as never);
+    backend.backendSettingsChanged();
+    await backend.syncNow();
+    expect(await getKv<number>(`backendCursor:${base}`)).toBeGreaterThan(0);
+    // The same server under another name stands in for a second backend.
+    const other = base.replace('127.0.0.1', 'localhost');
+    settings.backendUrl = other;
+    backend.backendSettingsChanged();
+    expect(backend.backendState().device).toBeUndefined();
+    expect(await getKv(`backendCursor:${other}`)).toBeUndefined();
+    expect(await getKv(`backendDevice:${other}`)).toBeUndefined();
+    await backend.syncNow(); // registers with the "new" server (approval already given to this key there)
+    await backend.syncNow(); // a sync already running when the URL changed coalesces into one more run
+    expect(backend.backendState().lastError).toBeUndefined();
+    expect(await getKv(`backendDevice:${other}`)).toMatchObject({ status: 'approved' });
+    // Back to the first server: its cursor was kept.
+    expect(await getKv<number>(`backendCursor:${base}`)).toBeGreaterThan(0);
   });
 });
 

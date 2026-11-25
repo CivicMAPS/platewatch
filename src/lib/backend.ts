@@ -28,9 +28,15 @@ export interface BackendState {
   syncing: boolean;
 }
 
-const DEVICE = 'backendDevice';
-const CURSOR = 'backendCursor';
-const LAST = 'backendLast';
+/**
+ * Registration, update cursor and last-sync time belong to one server: keyed by the backend URL, so
+ * pointing the handset at another server registers afresh and pulls that server's updates from 0
+ * (and switching back resumes where it left off).
+ */
+const serverKey = (name: string) => () => `${name}:${(settingsRef().backendUrl ?? '').trim().replace(/\/+$/, '').toLowerCase()}`;
+const DEVICE_KEY = serverKey('backendDevice');
+const CURSOR_KEY = serverKey('backendCursor');
+const LAST_KEY = serverKey('backendLast');
 
 let settingsRef: () => Settings = () => ({}) as Settings;
 let state: BackendState = { configured: false, pending: 0, syncing: false };
@@ -69,7 +75,7 @@ export class BackendError extends Error {
 async function request<T>(method: string, path: string, opts: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<T> {
   const s = settingsRef();
   const base = s.backendUrl.trim().replace(/\/+$/, '');
-  const keyId = (await getKv<{ keyId: string }>(DEVICE))?.keyId;
+  const keyId = (await getKv<{ keyId: string }>(DEVICE_KEY()))?.keyId;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${s.backendToken.trim()}`,
     ...(keyId ? { 'X-Device-Key': keyId } : {}),
@@ -101,16 +107,22 @@ async function request<T>(method: string, path: string, opts: { json?: unknown; 
   return data as T;
 }
 
+/** The officer a Code 1 call is about, when known (overrides the Settings number in `request`). */
+const officerHeader = (officer?: string): Record<string, string> => (officer?.trim() ? { 'X-Officer-Number': officer.trim() } : {});
+
 /** Register this device's signing key (idempotent). */
 export async function registerDevice(): Promise<NonNullable<BackendState['device']>> {
   const k = await deviceKey();
+  const key = DEVICE_KEY(); // the server this registration is with, even if Settings change meanwhile
   const out = await request<{ keyId: string; status: 'pending' | 'approved' | 'revoked'; council: string; hotAckSeconds?: number }>('POST', '/api/devices/register', {
     json: { publicJwk: k.publicJwk, label: typeof navigator === 'undefined' ? 'device' : navigator.userAgent.slice(0, 120), officerNumber: settingsRef().officerNumber },
     headers: { 'X-Device-Key': k.keyId },
   });
   const device = { keyId: out.keyId, status: out.status, council: out.council, hotAckSeconds: out.hotAckSeconds };
   if (out.hotAckSeconds) setAckSeconds(out.hotAckSeconds);
-  await putKv(DEVICE, device);
+  // Stored only if the backend did not change while registering (the next sync registers again).
+  if (DEVICE_KEY() !== key) return device;
+  await putKv(key, device);
   setState({ device });
   return device;
 }
@@ -243,11 +255,14 @@ async function markInfringementRejected(number: string, message: string): Promis
 
 /** Apply the server's changes since our cursor. */
 async function pullUpdates(): Promise<void> {
-  const since = (await getKv<number>(CURSOR)) ?? 0;
+  const key = CURSOR_KEY();
+  const since = (await getKv<number>(key)) ?? 0;
   const u = await request<{
     cursor: number;
     infringements: { number: string; scanId: string; status: InfringementRecord['status'] | 'paid' | 'allocated'; voidRequest: InfringementRecord['voidRequest'] & { decision?: 'approved' | 'rejected'; decidedBy?: string; decidedAt?: number }; paidAt: number | null }[];
   }>('GET', `/api/updates?since=${since}`);
+  // The backend changed while this was in flight: these updates and this cursor are not for it.
+  if (CURSOR_KEY() !== key) return;
   for (const x of u.infringements) {
     if (x.status === 'allocated') continue;
     await updateScanInfringement(x.scanId, x.number, (r) => ({
@@ -260,7 +275,7 @@ async function pullUpdates(): Promise<void> {
         : {}),
     }));
   }
-  await putKv(CURSOR, u.cursor);
+  await putKv(key, u.cursor);
 }
 
 let running: Promise<void> | null = null;
@@ -276,7 +291,7 @@ export function syncNow(): Promise<void> {
   running = (async () => {
     setState({ syncing: true });
     try {
-      const dev = (await getKv<BackendState['device']>(DEVICE)) ?? undefined;
+      const dev = (await getKv<BackendState['device']>(DEVICE_KEY())) ?? undefined;
       if (!dev || dev.status !== 'approved') await registerDevice();
       // Continue the officer's daily I-N sequence from what the backend already accepted (another handset).
       const officer = settingsRef().officerNumber?.trim();
@@ -287,7 +302,7 @@ export function syncNow(): Promise<void> {
       await pushOutbox();
       await pullUpdates();
       const lastSyncAt = Date.now();
-      await putKv(LAST, lastSyncAt);
+      await putKv(LAST_KEY(), lastSyncAt);
       setState({ lastSyncAt, lastError: undefined });
     } catch (e) {
       setState({ lastError: (e as Error).message });
@@ -326,7 +341,7 @@ let installed = false;
 
 /** Council the device's numbers are for (from the backend registration). */
 async function council(): Promise<string> {
-  return (await getKv<{ council?: string }>(DEVICE))?.council ?? 'com';
+  return (await getKv<{ council?: string }>(DEVICE_KEY()))?.council ?? 'com';
 }
 
 async function runWizard(args: { handoff: InfringementHandoff; scanId: string; initial?: Partial<WizardValues>; reissueOf?: string; reissueReason?: VoidReason }): Promise<{ result: InfringementResult; record?: ReturnType<typeof buildIssuedRecord> }> {
@@ -411,8 +426,8 @@ export function installBackend(getSettings: () => Settings): void {
   if (typeof window === 'undefined') return;
   const configured = isConfigured();
   setState({ configured });
-  void getKv<number>(LAST).then((lastSyncAt) => lastSyncAt && setState({ lastSyncAt }));
-  void getKv<BackendState['device']>(DEVICE).then((device) => {
+  void getKv<number>(LAST_KEY()).then((lastSyncAt) => lastSyncAt && setState({ lastSyncAt }));
+  void getKv<BackendState['device']>(DEVICE_KEY()).then((device) => {
     if (!device) return;
     setState({ device });
     if (device.hotAckSeconds) setAckSeconds(device.hotAckSeconds);
@@ -439,13 +454,13 @@ export function installBackend(getSettings: () => Settings): void {
     },
     async raiseCode1(args) {
       if (!isConfigured()) throw new Error('No backend configured.');
-      return request<{ id: string }>('POST', '/api/code1', { json: args, timeoutMs: 10_000 });
+      return request<{ id: string }>('POST', '/api/code1', { json: args, headers: officerHeader(args.officerNumber), timeoutMs: 10_000 });
     },
-    async code1Location(id, location) {
-      await request('POST', `/api/code1/${encodeURIComponent(id)}/location`, { json: location, timeoutMs: 8000 });
+    async code1Location(id, location, officer) {
+      await request('POST', `/api/code1/${encodeURIComponent(id)}/location`, { json: location, headers: officerHeader(officer), timeoutMs: 8000 });
     },
-    async cancelCode1(id, reason) {
-      await request('POST', `/api/code1/${encodeURIComponent(id)}/cancel`, { json: { reason }, timeoutMs: 8000 });
+    async cancelCode1(id, reason, officer) {
+      await request('POST', `/api/code1/${encodeURIComponent(id)}/cancel`, { json: { reason }, headers: officerHeader(officer), timeoutMs: 8000 });
     },
     async liveAlerts() {
       return request<{ own: LiveAlert[]; branch_code1: LiveAlert[] }>('GET', '/api/alerts/live', { timeoutMs: 6000 });
@@ -472,7 +487,10 @@ export function installBackend(getSettings: () => Settings): void {
 }
 
 export function backendSettingsChanged(): void {
-  setState({ configured: isConfigured() });
+  setState({ configured: isConfigured(), device: undefined, lastSyncAt: undefined, lastError: undefined });
+  // Show this server's registration (none yet for a new server: the next sync registers).
+  void getKv<BackendState['device']>(DEVICE_KEY()).then((device) => device && setState({ device }));
+  void getKv<number>(LAST_KEY()).then((lastSyncAt) => lastSyncAt && setState({ lastSyncAt }));
   if (isConfigured()) void syncNow();
 }
 

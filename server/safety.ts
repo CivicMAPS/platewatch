@@ -265,7 +265,9 @@ export function registerSafety(
     const keyId = h.needDevice(c);
     const b = await c.body<{ id?: string; hit?: Record<string, unknown>; cause?: string; at?: number; location?: unknown }>();
     const now = h.now();
-    const officer = await h.deviceOfficer(c);
+    // No officer header (older handset, number typed on the pop-up): the hit's officer, then the device's.
+    const hitOfficer = c.req.headers['x-officer-number'] ? '' : str(b.hit?.officerNumber, 12).trim();
+    const officer = hitOfficer || (await h.deviceOfficer(c));
     return tx(db, async (q) => {
       const hitId = b.hit ? await upsertHit(q, keyId, b.hit, cfg) : null;
       if (hitId) await recordResponse(q, hitId, { response: 'code1', at: num(b.at) ?? now });

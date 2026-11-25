@@ -40,7 +40,7 @@ export interface SafetyState {
   deliveries: Delivery[];
   pending: { hits: PendingHit[]; openedAt: number; deadline: number; softCode1?: SendState } | null;
   /** `cancelRequested`: the officer cancelled before the raise was confirmed; reconciled with the host. */
-  code1: ({ id: string; cause: string; hit?: HotHitPayload; raisedAt: number; cancelRequested?: string } & SendState) | null;
+  code1: ({ id: string; cause: string; hit?: HotHitPayload; officerNumber?: string; raisedAt: number; cancelRequested?: string } & SendState) | null;
   own: LiveAlert[];
   branch: LiveAlert[];
   lastLiveAt?: number;
@@ -137,7 +137,7 @@ export async function respond(response: HotHitResponse, note: string, officerOve
   const location = freshLocation(p.hits[0]?.hit.location ?? null);
   // CODE 1 first: duress must never wait on, or fail with, the local log (e.g. storage full).
   const first = p.hits[0]?.hit;
-  const raising = response === 'code1' ? raiseCode1({ cause: 'hot_list_code1', ...(first ? { hit: { ...first, officerNumber: officer } } : {}) }) : Promise.resolve();
+  const raising = response === 'code1' ? raiseCode1({ cause: 'hot_list_code1', officerNumber: officer, ...(first ? { hit: { ...first, officerNumber: officer } } : {}) }) : Promise.resolve();
   set({ pending: null });
   queueDeliveries(p.hits.map((h) => ({
     key: `response:${h.hit.id}`, kind: 'response' as const, hit: { ...h.hit, officerNumber: officer },
@@ -203,9 +203,12 @@ async function pushSoftCode1(): Promise<void> {
 }
 
 /** Code 1 (duress). Kept and retried until the host accepts it. */
-export async function raiseCode1(args: { cause: string; hit?: HotHitPayload }): Promise<void> {
+export async function raiseCode1(args: { cause: string; hit?: HotHitPayload; officerNumber?: string }): Promise<void> {
   const raisedAt = Date.now();
-  set({ code1: { id: uid(), cause: args.cause, ...(args.hit ? { hit: args.hit } : {}), raisedAt, status: 'sending', at: raisedAt } });
+  // The officer as known at the moment of the Code 1 (typed on the pop-up if Settings had none),
+  // carried on every call about it so the host never falls back to "unknown".
+  const officer = args.officerNumber?.trim() || args.hit?.officerNumber?.trim() || currentOfficer();
+  set({ code1: { id: uid(), cause: args.cause, ...(args.hit ? { hit: args.hit } : {}), ...(officer ? { officerNumber: officer } : {}), raisedAt, status: 'sending', at: raisedAt } });
   geo.start();
   await sendCode1();
 }
@@ -221,7 +224,7 @@ async function sendCode1(): Promise<void> {
   if (!raise) return set({ code1: { ...c, status: 'unavailable', at: Date.now() } });
   inFlight.add(c.id);
   try {
-    await raise({ id: c.id, ...(c.hit ? { hit: c.hit } : {}), cause: c.cause, at: c.raisedAt, location: freshLocation(c.hit?.location ?? null) });
+    await raise({ id: c.id, ...(c.hit ? { hit: c.hit } : {}), cause: c.cause, at: c.raisedAt, location: freshLocation(c.hit?.location ?? null), ...(c.officerNumber ? { officerNumber: c.officerNumber } : {}) });
     if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'sent', at: Date.now() } });
   } catch (e) {
     if (state.code1?.id === c.id) set({ code1: { ...state.code1, status: 'failed', at: Date.now(), error: (e as Error).message } });
@@ -252,7 +255,7 @@ async function reconcileCancel(): Promise<void> {
   const cancel = host()?.cancelCode1;
   if (!cancel) return set({ code1: null });
   try {
-    await cancel(c.id, c.cancelRequested);
+    await cancel(c.id, c.cancelRequested, c.officerNumber);
   } catch (e) {
     if ((e as { status?: number }).status !== 404) return; // keep it and retry with the 10 s loop
   }
@@ -273,7 +276,7 @@ async function shareCode1Location(): Promise<void> {
   geo.start();
   const loc = fixToLoc(geo.bestRecent(Date.now()));
   if (!loc) return;
-  for (const id of ids) await host()?.code1Location?.(id, { ...loc, at: Date.now() }).catch(() => undefined);
+  for (const id of ids) await host()?.code1Location?.(id, { ...loc, at: Date.now() }, id === c?.id ? c.officerNumber : undefined).catch(() => undefined);
 }
 
 const OPEN = new Set(['active', 'radio_requested', 'acknowledged']);

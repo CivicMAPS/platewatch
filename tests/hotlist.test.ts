@@ -116,6 +116,24 @@ describe('hot-list officer safety: handset state machine', () => {
     expect(ev).toMatchObject({ officerNumber: '9001', response: 'safe_clear' });
   });
 
+  it('CODE 1 with a number typed on the pop-up (none in Settings) carries that officer to the raise and the cancel', async () => {
+    resetSafety();
+    await startSafety(() => ({ officerNumber: '', vibrate: false, sound: false }));
+    const raised: { officerNumber?: string; hit?: { officerNumber: string } }[] = [];
+    const cancels: (string | undefined)[] = [];
+    setWindow({
+      raiseCode1: async (a: { officerNumber?: string; hit?: { officerNumber: string } }) => (raised.push(a), { id: 'c1' }),
+      cancelCode1: async (_id: string, _reason: string, officer?: string) => void cancels.push(officer),
+    });
+    void openHotAlert({ hits: [{ list, entry, scanId: 's1' }], at: 1000, location: null });
+    await new Promise((r) => setTimeout(r, 0));
+    await respond('code1', '', '4471');
+    expect(raised[0]).toMatchObject({ officerNumber: '4471', hit: { officerNumber: '4471' } });
+    expect(safetyState().code1).toMatchObject({ status: 'sent', officerNumber: '4471' });
+    await cancelCode1('raised in error');
+    expect(cancels).toEqual(['4471']);
+  });
+
   it('cancelling while the raise is in flight cancels at the host once the raise lands', async () => {
     let land!: () => void;
     const calls: string[] = [];

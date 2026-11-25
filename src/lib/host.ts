@@ -57,9 +57,10 @@ export interface EnforcementMapsHost {
   /** The pop-up was not acknowledged in time: soft Code 1 to dispatch and the team supervisor. */
   raiseSoftCode1?(args: { hit: HotHitPayload; at: number; location: HotHitPayload['location'] }): Promise<{ id: string | null }>;
   /** Code 1 (duress), from the pop-up or elsewhere. */
-  raiseCode1?(args: { id: string; hit?: HotHitPayload; cause: string; at: number; location: HotHitPayload['location'] }): Promise<{ id: string }>;
-  code1Location?(id: string, location: NonNullable<HotHitPayload['location']> & { at: number }): Promise<void>;
-  cancelCode1?(id: string, reason: string): Promise<void>;
+  raiseCode1?(args: { id: string; hit?: HotHitPayload; cause: string; at: number; location: HotHitPayload['location']; officerNumber?: string }): Promise<{ id: string }>;
+  /** `officerNumber`: the officer who raised it (may have been typed on the pop-up and not yet saved). */
+  code1Location?(id: string, location: NonNullable<HotHitPayload['location']> & { at: number }, officerNumber?: string): Promise<void>;
+  cancelCode1?(id: string, reason: string, officerNumber?: string): Promise<void>;
   /** This officer's open alerts and the branch's Code 1s. */
   liveAlerts?(): Promise<{ own: LiveAlert[]; branch_code1: LiveAlert[] }>;
   /** The officer silenced a branch Code 1 alarm. */

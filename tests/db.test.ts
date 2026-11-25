@@ -157,6 +157,20 @@ it('rechecks a corrected first sighting and preserves capture time, original ima
   expect(await getActiveObservations(list.id)).toHaveLength(0);
 });
 
+describe('void request with its local status (one transaction)', () => {
+  it('saveScan queues extra jobs with the scan, and requestVoid leaves both the status and the request queued', async () => {
+    const list = timed();
+    const issued = { ...scan('sV', list.id, at(2026, 11, 25, 9)), infringement: { status: 'issued' as const, sync: 'synced' as const, pinSource: 'device' as const, handoffId: 'h', number: '04471261125001000000', offenceCode: '702' as const, offenceOverridden: false, timeFrom: 0, timeTo: 0, officerNumber: '4471' } };
+    await saveScan(issued, undefined, [{ kind: 'evidence', id: 'sV' }]);
+    expect((await getOutbox()).map((x) => x.key)).toEqual(expect.arrayContaining(['scan:sV', 'evidence:sV']));
+    const { requestVoid } = await import('../src/lib/backend');
+    const next = await requestVoid(issued, 'officer_error', 'wrong plate');
+    expect(next.infringement).toMatchObject({ status: 'void_requested', voidRequest: { reason: 'officer_error' } });
+    expect((await getScan('sV'))?.infringement?.status).toBe('void_requested');
+    expect((await getOutbox()).map((x) => x.key)).toContain('voidRequest:04471261125001000000');
+  });
+});
+
 describe('dismissed patrol captures (global list)', () => {
   const dismissed = (id: string, createdAt: number, intendedListId = 'L1'): DismissedCapture => ({
     id,

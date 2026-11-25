@@ -507,8 +507,8 @@ export async function requestVoid(scan: ScanRecord, reason: VoidReason, note: st
   const cur = scan.infringement;
   if (!cur || cur.status !== 'issued') throw new Error('Only an issued infringement can be voided.');
   const next: ScanRecord = { ...scan, infringement: { ...cur, status: 'void_requested', voidRequest: { reason, ...(note.trim() ? { note: note.trim() } : {}), requestedAt: Date.now() } } };
-  await saveScan(next);
-  await enqueue('voidRequest', cur.number);
+  // The local status and the request to the supervisor are saved together: never one without the other.
+  await saveScan(next, undefined, [{ kind: 'voidRequest', id: cur.number }]);
   requestSync(100);
   return next;
 }

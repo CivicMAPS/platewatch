@@ -243,7 +243,8 @@ export async function expireObservations(ids: readonly string[], at: number): Pr
 /* ────────────────────────────── Scans ────────────────────────────── */
 
 /** Atomically persist a scan and (optionally) the observation it creates/updates. */
-export async function saveScan(scan: ScanRecord, observation?: Observation): Promise<void> {
+/** Save a scan (and its timing), plus any extra outbox jobs that must not exist without it, atomically. */
+export async function saveScan(scan: ScanRecord, observation?: Observation, alsoQueue: readonly { kind: OutboxKind; id: string }[] = []): Promise<void> {
   const d = await db();
   const tx = d.transaction(['scans', 'observations', 'outbox'], 'readwrite');
   await tx.objectStore('scans').put(scan);
@@ -252,6 +253,7 @@ export async function saveScan(scan: ScanRecord, observation?: Observation): Pro
     await tx.objectStore('observations').put(observation);
     await queue(tx.objectStore('outbox'), 'observation', observation.id);
   }
+  for (const it of alsoQueue) await queue(tx.objectStore('outbox'), it.kind, it.id);
   await tx.done;
   queued();
 }

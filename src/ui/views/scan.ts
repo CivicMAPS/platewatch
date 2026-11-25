@@ -23,7 +23,6 @@ import {
   putObservation,
   saveDismissed,
   saveScan,
-  enqueue,
   uid,
 } from '../../lib/db';
 import { disabilityDoubles, evaluate, isStatutoryRestriction, newObservation, resighting, timingDecision, type Decision, type HotHit, type PermitHit } from '../../lib/engine';
@@ -47,7 +46,7 @@ import { host, officerNumber } from '../../lib/host';
 import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
 import { vehicleFields } from '../vehicleFields';
 import { applyInfringementResult, buildHandoff, canIssueInfringement, formatInfringementNumber } from '../../lib/infringement';
-import { isConfigured as backendConfigured, paymentLookup } from '../../lib/backend';
+import { isConfigured as backendConfigured, paymentLookup, queueEvidence } from '../../lib/backend';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
   RISK_LEVEL_LABELS,
@@ -682,7 +681,7 @@ export function scanView(params: Record<string, string>, app: App): View {
           const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null, { id });
           await saveScan(rec);
           // The hit was reported before this photo existed: queue its upload now it is saved.
-          if (backendConfigured()) void enqueue('evidence', id).catch(() => undefined);
+          if (backendConfigured()) void queueEvidence(id).catch(() => undefined);
           if (hit.list.id === l.id) saved = rec;
         } catch (e) {
           // The pop-up is already up and the hit reported; only the photo record is missing.

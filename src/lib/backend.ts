@@ -15,7 +15,7 @@ import type { EnforcementMapsHost, HotProfile, LiveAlert } from './host';
 import { setAckSeconds } from './safety';
 import { applyInfringementResult, type InfringementHandoff, type InfringementResult } from './infringement';
 import { buildIssuedRecord, type WizardValues } from './issuance';
-import { allocateNumber, closeNumber, deviceKey, getBundle, holdWizard, ifAbandoned, raisePoolFloors, setSigningScope, type StoredBundle } from './signer';
+import { allocateNumber, closeNumber, deviceKey, getBundle, holdWizard, ifAbandoned, raisePoolFloors, setSigningScope, evidenceJob, parseEvidenceJob, type StoredBundle } from './signer';
 import { toLocalIso } from './time';
 import type { HotHitPayload, InfringementRecord, ScanRecord, Settings, VoidReason } from './types';
 
@@ -310,7 +310,7 @@ export async function reconcileIssued(): Promise<number> {
         };
     await saveScan(next, obs ? out.observation : undefined);
     // Issues signed before evidence was queued with them: make sure their photos still go up.
-    for (const e of (handoff.evidence as { scanId?: string }[] | undefined) ?? []) if (e.scanId) await enqueue('evidence', e.scanId);
+    for (const e of (handoff.evidence as { scanId?: string }[] | undefined) ?? []) if (e.scanId) await enqueue('evidence', evidenceJob(b.scope ?? serverScope(), e.scanId));
     fixed++;
   }
   return fixed;
@@ -338,8 +338,18 @@ async function pushVoidRequest(number: string): Promise<void> {
 /** How long an evidence job waits for its scan to be saved (the hit is reported before the photo). */
 const EVIDENCE_WAIT_MS = 60 * 60_000;
 
-/** Upload a scan's photo. False while the scan is not saved yet (kept queued, up to an hour). */
-async function pushEvidence(scanId: string, queuedAt: number): Promise<boolean> {
+/** Queue a scan's photo for the backend configured now. */
+export function queueEvidence(scanId: string): Promise<void> {
+  return enqueue('evidence', evidenceJob(serverScope(), scanId));
+}
+
+/**
+ * Upload a scan's photo. False (kept queued) while the job is for another backend than the one
+ * configured, or while the scan is not saved yet (up to an hour).
+ */
+async function pushEvidence(jobId: string, queuedAt: number): Promise<boolean> {
+  const { scope: forScope, scanId } = parseEvidenceJob(jobId);
+  if (forScope !== undefined && forScope !== serverScope()) return false;
   const s = await getScan(scanId);
   if (!s) return Date.now() - queuedAt > EVIDENCE_WAIT_MS;
   await request('PUT', `/api/evidence/${encodeURIComponent(scanId)}`, { body: s.image, headers: { 'Content-Type': s.image.type || 'image/jpeg', 'X-Content-SHA256': s.sha256 }, timeoutMs: 60_000 });
@@ -567,7 +577,7 @@ export function installBackend(getSettings: () => Settings): void {
     async reportHotHit(hit: HotHitPayload) {
       if (!isConfigured()) throw new Error('No backend configured.');
       await request('POST', '/api/hot-hits', { json: { hit }, timeoutMs: 8000 });
-      if (hit.scanId) await enqueue('evidence', hit.scanId);
+      if (hit.scanId) await queueEvidence(hit.scanId);
     },
     async reportHotHitResponse(hit, answer) {
       if (!isConfigured()) throw new Error('No backend configured.');

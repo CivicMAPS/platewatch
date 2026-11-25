@@ -675,6 +675,31 @@ describe.runIf(!!URL_)('device sync against the backend (PostgreSQL)', () => {
     expect((await getScan('sD'))?.infringement).toMatchObject({ number: '05123000000000000002', status: 'issued' });
   });
 
+  it('evidence queued for another backend stays queued; evidence for this backend uploads', async () => {
+    const { closeDb, enqueue, getOutbox, saveScan } = await import('../src/lib/db');
+    await closeDb();
+    await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('platewatch'); r.onsuccess = () => res(); r.onerror = () => res(); });
+    const backend = await import('../src/lib/backend');
+    const { evidenceJob } = await import('../src/lib/signer');
+    const staff = { Authorization: `Bearer ${CONSOLE}`, 'X-Staff-Id': 'S1', 'Content-Type': 'application/json' };
+    backend.installBackend(() => ({ backendUrl: base, backendToken: DEVICE, officerNumber: '5123' }) as never);
+    const dev = await backend.registerDevice();
+    await fetch(`${base}/api/console/devices/${dev.keyId}/decision`, { method: 'POST', headers: staff, body: JSON.stringify({ approve: true }) });
+    const photo = async (id: string) => {
+      const bytes = new TextEncoder().encode(`photo ${id}`);
+      await saveScan(scan(id, t(9, 45), { outcome: 'hot_sighting', plate: 'ZAF402', key: 'ZAF402', image: new Blob([bytes], { type: 'image/jpeg' }), sha256: createHash('sha256').update(bytes).digest('hex') }));
+    };
+    await photo('sOther');
+    await photo('sHere');
+    await enqueue('evidence', evidenceJob('https://other-backend.example', 'sOther')); // signed for backend A, Settings now on this one
+    await backend.queueEvidence('sHere');
+    await backend.syncNow();
+    expect(backend.backendState().lastError).toBeUndefined();
+    expect((await fetch(`${base}/api/console/evidence/sOther`, { headers: staff })).status).toBe(404);
+    expect((await fetch(`${base}/api/console/evidence/sHere`, { headers: staff })).status).toBe(200);
+    expect((await getOutbox()).map((x) => x.id)).toEqual(['https://other-backend.example|sOther']);
+  });
+
   it("a replacement handset continues the officer's daily sequence from the backend (no restart at 001)", async () => {
     const { closeDb, getKv } = await import('../src/lib/db');
     const backend = await import('../src/lib/backend');

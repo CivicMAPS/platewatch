@@ -101,4 +101,14 @@ describe('I-N signer across tabs sharing one device key', () => {
     expect(await getKv<{ prevHash: string }>('inChain:https://a.example')).toMatchObject({ prevHash: n.allocation.hash });
     expect(await getKv('inChain:https://b.example')).toBeUndefined();
   });
+
+  it('an issue signed for a backend tags its evidence jobs (and the bundle) with that backend', async () => {
+    const [a] = await twoTabs();
+    const { getOutbox } = await import('../src/lib/db');
+    a.setSigningScope(() => 'https://a.example');
+    const n = await a.allocateNumber({ officer: '4471', council: 'com', scanId: 's1' });
+    expect(n.scope).toBe('https://a.example');
+    await a.closeNumber(n.number, { number: n.number, handoff: { evidence: [{ scanId: 's1' }] } } as never);
+    expect((await getOutbox()).map((x) => x.key)).toContain('evidence:https://a.example|s1');
+  });
 });

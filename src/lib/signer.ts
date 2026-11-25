@@ -27,6 +27,19 @@ export interface StoredBundle extends IssueBundle {
   number: string;
   scanId: string;
   createdAt: number;
+  /** The backend this number was signed for (its evidence goes there too). */
+  scope?: string;
+}
+
+/**
+ * Evidence jobs name the backend they are for, so a photo is uploaded to the backend that receives
+ * its infringement or hit, and never consumed by another one Settings point at meanwhile. A job
+ * without a backend (queued before this) goes to whichever backend is configured.
+ */
+export const evidenceJob = (sc: string, scanId: string): string => (sc ? `${sc}|${scanId}` : scanId);
+export function parseEvidenceJob(id: string): { scope?: string; scanId: string } {
+  const i = id.lastIndexOf('|');
+  return i < 0 ? { scanId: id } : { scope: id.slice(0, i), scanId: id.slice(i + 1) };
 }
 
 /**
@@ -100,7 +113,7 @@ export async function getBundle(number: string): Promise<StoredBundle | undefine
 
 /** The new chain head, the signed bundle and its outbox row: one transaction (never a chain gap). */
 async function commit(sc: string, chainState: ChainState, b: StoredBundle, evidence: readonly string[] = []): Promise<void> {
-  await putKvsAndQueue([[CHAIN(sc), chainState], [bundleKey(b.number), b]], [{ kind: 'infringement', id: b.number }, ...evidence.map((id) => ({ kind: 'evidence' as const, id }))]);
+  await putKvsAndQueue([[CHAIN(sc), chainState], [bundleKey(b.number), b]], [{ kind: 'infringement', id: b.number }, ...evidence.map((id) => ({ kind: 'evidence' as const, id: evidenceJob(sc, id) }))]);
 }
 
 const poolKey = (officer: string, day: string) => `${officer.padStart(5, '0')}|${day}`;
@@ -142,7 +155,7 @@ export function allocateNumber(args: { officer: string; council: string; scanId:
     const pool = poolKey(args.officer, day);
     const sequence = (c.pools[pool] ?? 0) + 1;
     const { number, allocation } = await allocate({ privateKey: k.privateKey, keyId: k.keyId, council: args.council, officer: args.officer, sequence, prevHash: c.prevHash, now, timestamp: toLocalIso(now) });
-    const b: StoredBundle = { number, scanId: args.scanId, keyId: k.keyId, allocation: allocation as unknown as IssueBundle['allocation'], createdAt: now };
+    const b: StoredBundle = { number, scanId: args.scanId, keyId: k.keyId, allocation: allocation as unknown as IssueBundle['allocation'], createdAt: now, ...(sc ? { scope: sc } : {}) };
     await commit(sc, { ...c, prevHash: allocation.hash, pools: { ...c.pools, [pool]: sequence } }, b);
     return b;
   });

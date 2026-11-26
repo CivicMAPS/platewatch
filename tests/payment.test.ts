@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { manualPaidWindow, normalisePayment, topUpPaidTo, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { manualPaidWindow, normalisePayment, shiftDays, topUpPaidTo, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
 import type { PaymentAreas } from '../src/lib/types';
 
 // Gladstone St, Boundary St – Montague St (north), as entered in the field: one PayStay zone per
@@ -134,5 +134,19 @@ describe('hand-entered paid times (never roll into tomorrow unasked)', () => {
     expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: false })).toHaveProperty('error');
     expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: true })).toEqual({ paidTo: at(9, 30, 1) });
     expect(topUpPaidTo({ scanAt, paidTo: '12:00', currentPaidTo: at(10), endsTomorrow: false })).toEqual({ paidTo: at(12) });
+  });
+});
+
+describe('overnight payment across a daylight-saving change (Melbourne)', () => {
+  const tz = process.env.TZ;
+  beforeAll(() => { process.env.TZ = 'Australia/Melbourne'; });
+  afterAll(() => { process.env.TZ = tz; });
+
+  it('"Ends tomorrow" keeps the entered clock time when the clocks go back (5 Apr 2026) or forward (4 Oct 2026)', () => {
+    const april = new Date(2026, 3, 4, 22, 0).getTime();
+    expect(manualPaidWindow({ scanAt: april, paidFrom: '21:00', paidTo: '09:00', endsTomorrow: true, fromIsDefault: false })).toMatchObject({ paidTo: new Date(2026, 3, 5, 9, 0).getTime() });
+    const october = new Date(2026, 9, 3, 22, 0).getTime();
+    expect(topUpPaidTo({ scanAt: october, paidTo: '09:00', currentPaidTo: october, endsTomorrow: true })).toEqual({ paidTo: new Date(2026, 9, 4, 9, 0).getTime() });
+    expect(new Date(shiftDays(new Date(2026, 3, 5, 9, 0).getTime(), -1)).getHours()).toBe(9);
   });
 });

@@ -1,4 +1,5 @@
 import type { Meter, PaidBy, PaymentAreas, TimedRestriction } from './types';
+import { timeOnDay } from './offence';
 
 const uniq = (xs: readonly string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
 
@@ -98,4 +99,50 @@ export function restrictionPaymentLabel(payment: PaymentAreas | undefined, r: Pi
     ...r.paidBy.easyPark.map((a) => withMeters(`EasyPark ${a}`, meters.filter((m) => m.easyPark.includes(a)))),
     ...r.paidBy.payStay.map((z) => withMeters(`PayStay ${z}`, meters.filter((m) => m.payStay.includes(z)))),
   ].join(', ');
+}
+
+/**
+ * A paid session from the provider lookup, or null when it ended before the scan's local day (an
+ * earlier day's session says nothing about today; HH:MM on the form would move it onto the scan day).
+ */
+export function paidSessionForScan<T extends { paidFrom: number; paidTo: number }>(found: T | null, scanAt: number): T | null {
+  if (!found) return null;
+  const dayStart = new Date(scanAt).setHours(0, 0, 0, 0);
+  return found.paidTo >= dayStart ? found : null;
+}
+
+/** The same local clock time `days` calendar days later (not ±24 h: a day can be 23 or 25 h long). */
+export function shiftDays(ms: number, days: number): number {
+  const d = new Date(ms);
+  d.setDate(d.getDate() + days);
+  return d.getTime();
+}
+
+/**
+ * Paid from / paid to as entered by hand (HH:MM on the scan day). Clock times alone cannot tell an
+ * expired session from one that runs past midnight, so paid to moves to the next day only when the
+ * officer says so (`endsTomorrow`); otherwise it stays on the scan day and never grants extra time.
+ * A paid from later than paid to then started the day before; the untouched default (the scan
+ * time) is dropped instead of being read as an entered start.
+ */
+export function manualPaidWindow(args: { scanAt: number; paidFrom: string; paidTo: string; endsTomorrow: boolean; fromIsDefault: boolean }): { paidFrom?: number; paidTo: number } | { error: string } {
+  const to = timeOnDay(args.scanAt, args.paidTo);
+  if (to === null) return { error: 'Enter paid to (HH:MM).' };
+  const paidTo = args.endsTomorrow ? shiftDays(to, 1) : to;
+  if (!args.paidFrom.trim()) return { paidTo };
+  const from = timeOnDay(args.scanAt, args.paidFrom);
+  if (from === null) return { error: 'Paid from is not a time (HH:MM).' };
+  if (from < paidTo) return { paidFrom: from, paidTo };
+  if (args.fromIsDefault) return { paidTo };
+  if (args.endsTomorrow) return { error: 'Paid from is after paid to.' };
+  return { paidFrom: shiftDays(from, -1), paidTo };
+}
+
+/** A top-up's new paid to: later than the current one, on the next day only when the officer says so. */
+export function topUpPaidTo(args: { scanAt: number; paidTo: string; currentPaidTo?: number; endsTomorrow: boolean }): { paidTo: number } | { error: string } {
+  const to = timeOnDay(args.scanAt, args.paidTo);
+  if (to === null) return { error: 'Enter paid to (HH:MM).' };
+  const paidTo = args.endsTomorrow ? shiftDays(to, 1) : to;
+  if (args.currentPaidTo !== undefined && paidTo <= args.currentPaidTo) return { error: 'The new paid to must be later than the current one. Tick "Ends tomorrow" if it runs past midnight.' };
+  return { paidTo };
 }

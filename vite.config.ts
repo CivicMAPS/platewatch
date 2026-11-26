@@ -21,7 +21,10 @@ export const CSP_DIRECTIVES: Record<string, string> = {
   'default-src': "'self'",
   'script-src': "'self' 'wasm-unsafe-eval'",
   'worker-src': "'self' blob:",
-  'connect-src': "'self' blob: data:",
+  // The PlateWatch backend (docs/BACKEND.md) is configured at run time, so any HTTPS origin is
+  // allowed, plus plain HTTP to this machine and the Android emulator's host alias for local
+  // testing. Add origins with VITE_PLATEWATCH_CONNECT_SRC (space-separated) at build time.
+  'connect-src': ["'self' blob: data: https: http://localhost:* http://127.0.0.1:* http://10.0.2.2:*", process.env.VITE_PLATEWATCH_CONNECT_SRC ?? ''].join(' ').trim(),
   'img-src': "'self' blob: data:",
   'media-src': "'self' blob: mediastream:",
   'style-src': "'self'",
@@ -112,6 +115,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2,ttf}'],
         globIgnores: ['ocr/**'],
         navigateFallback: 'index.html',
+        // When the backend serves this app, its API and the CommandMAPS console share the origin.
+        navigateFallbackDenylist: [/\/api\//, /\/console(\/|$)/],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

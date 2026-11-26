@@ -1,0 +1,84 @@
+import pg from 'pg';
+import migration001 from './migrations/001_init.sql?raw';
+import migration002 from './migrations/002_safety.sql?raw';
+import migration003 from './migrations/003_rejected.sql?raw';
+import migration004 from './migrations/004_hit_responder.sql?raw';
+
+export type Db = pg.Pool;
+export type Tx = pg.PoolClient;
+
+/** Migrations bundled into the server (in order). */
+const MIGRATIONS: { id: string; sql: string }[] = [
+  { id: '001_init', sql: migration001 },
+  { id: '002_safety', sql: migration002 },
+  { id: '003_rejected', sql: migration003 },
+  { id: '004_hit_responder', sql: migration004 },
+];
+
+/**
+ * DATABASE_URL, or the standard PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE variables (how
+ * the AWS deployment injects the RDS secret). With `caFile` the connection uses TLS and verifies
+ * the server against that CA bundle (Amazon RDS: rds-ca.pem in the image).
+ */
+export function createPool(url: string | undefined, opts: { ca?: string } = {}): Db {
+  return new pg.Pool({ ...(url ? { connectionString: url } : {}), max: 10, ...(opts.ca ? { ssl: { ca: opts.ca, rejectUnauthorized: true } } : {}) });
+}
+
+export async function migrate(db: Db): Promise<string[]> {
+  const c = await db.connect();
+  try {
+    await c.query('select pg_advisory_lock(727101)');
+    await c.query('create table if not exists schema_migrations (id text primary key, applied_at timestamptz not null default now())');
+    const done = new Set((await c.query<{ id: string }>('select id from schema_migrations')).rows.map((r) => r.id));
+    const applied: string[] = [];
+    for (const m of MIGRATIONS) {
+      if (done.has(m.id)) continue;
+      await c.query('begin');
+      try {
+        await c.query(m.sql);
+        await c.query('insert into schema_migrations (id) values ($1)', [m.id]);
+        await c.query('commit');
+        applied.push(m.id);
+      } catch (e) {
+        await c.query('rollback');
+        throw e;
+      }
+    }
+    return applied;
+  } finally {
+    await c.query('select pg_advisory_unlock(727101)').catch(() => undefined);
+    c.release();
+  }
+}
+
+/** Advisory lock held by every transaction that changes infringements (see `txChanges`). */
+const CHANGE_LOCK = 7_101_702;
+
+/**
+ * A transaction that changes infringements. `change_no` comes from a sequence, which hands out
+ * numbers in call order, not commit order: a change numbered 100 could commit after one numbered
+ * 101, and a handset polling `/api/updates` in between would move its cursor past 100 for good.
+ * Taking this lock first, before any row lock, makes such transactions run one at a time, so
+ * change numbers commit in order. (Volumes are small: issues, voids and payments.)
+ */
+export async function txChanges<T>(db: Db, fn: (c: Tx) => Promise<T>): Promise<T> {
+  return tx(db, async (c) => {
+    await c.query('select pg_advisory_xact_lock($1)', [CHANGE_LOCK]);
+    return fn(c);
+  });
+}
+
+export async function tx<T>(db: Db, fn: (c: Tx) => Promise<T>): Promise<T> {
+  const c = await db.connect();
+  try {
+    await c.query('begin');
+    const out = await fn(c);
+    await c.query('commit');
+    return out;
+  } catch (e) {
+    await c.query('rollback').catch(() => undefined);
+    throw e;
+  } finally {
+    c.release();
+  }
+}

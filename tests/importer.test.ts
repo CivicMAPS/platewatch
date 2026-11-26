@@ -232,6 +232,11 @@ describe('allow and hot list CSV templates', () => {
     expect(e).toMatchObject({ plate: 'ABC123', riskLevel: 'high', risks: ['aggressive', 'weapon_sighted'], registrationType: 'private', registrationState: 'VIC', make: 'Toyota', bodyType: 'ute', colour: 'White', notes: 'Seen near market' });
   });
 
+  it('reads the pop-up alert message and registered owner description (owner 25/11/2026)', () => {
+    const r = parseImportFile(templateCsvText(), 'hot.csv');
+    expect((r.drafts[0] as HotDraft).list.entries[0]).toMatchObject({ alertMessage: 'Do not approach — prior aggressive male driver interaction', ownerDescription: 'Male, 40s, heavy build' });
+  });
+
   it('reads older hot-list and permit columns into the vehicle-details structure (model → notes)', () => {
     const hot = parseImportFile(['list_name,plate,risk_level,risks,make,model,body_type,colour,notes', 'Officer safety,ABC123,high,Aggressive,Toyota,Hilux,Ute,White,Seen near market'].join('\n'), 'hot.csv');
     expect((hot.drafts[0] as HotDraft).list.entries[0]).toMatchObject({ make: 'Toyota', bodyType: 'ute', colour: 'White', registrationType: '', notes: 'Seen near market · Model: Hilux' });
@@ -412,3 +417,7 @@ describe('kerbside releases and area datasets through the importer', () => {
     expect(second.updated).toHaveLength(55);
   });
 });
+
+function templateCsvText(): string {
+  return [CSV_TEMPLATES.hot.header, CSV_TEMPLATES.hot.example].join('\n');
+}

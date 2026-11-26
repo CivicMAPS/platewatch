@@ -278,6 +278,13 @@ export interface HotEntry {
   /** Not part of the vehicle-details structure: kept only on entries saved before it; shown in notes. */
   model?: string;
   notes: string;
+  /**
+   * Brief instruction with its cause, shown first on the hot-list pop-up (owner 25/11/2026), e.g.
+   * "Do not approach — prior aggressive male driver interaction".
+   */
+  alertMessage?: string;
+  /** Registered owner description where known (personal information). */
+  ownerDescription?: string;
   addedAt: number;
 }
 
@@ -370,6 +377,55 @@ export interface InfringementRecord {
   timeTo: number;
   issuedAt?: number;
   officerNumber: string;
+  /** Derived internal 702 classification (702 / 702e, owner 25/11/2026); never shown as a code. */
+  internalVariant?: 'no_payment' | 'expired_session' | 'unknown';
+  /** This number replaced an earlier one on the same sighting (void + reissue, no approval). */
+  reissueOf?: string;
+  /** Void requested without a reissue: waits for supervisor approval in CommandMAPS (23/11/2026). */
+  voidRequest?: { reason: VoidReason; note?: string; requestedAt: number; decidedAt?: number; decision?: 'approved' | 'rejected'; decidedBy?: string };
+  /** Customer payment recorded by the infringement system (development backend: simulated). */
+  paidAt?: number;
+  /** Why the server refused the signed statements, when `sync` is 'rejected'. */
+  syncError?: string;
+}
+
+/** Owner examples (23/11/2026). Incorrect details go through a reissue instead. */
+export type VoidReason = 'officer_error' | 'permit_displayed' | 'incorrect_offence' | 'incorrect_vehicle_details' | 'non_conforming_signage' | 'other';
+
+export interface SignedStatementJson {
+  statement: Record<string, unknown>;
+  signature: string;
+  hash: string;
+}
+
+/** What the development host uploads for one infringement number. */
+export interface IssueBundle {
+  keyId: string;
+  allocation: SignedStatementJson;
+  /** Issue (or cancel) statement over the record. */
+  closing?: SignedStatementJson;
+  /** The issued record (absent for a cancelled number). */
+  record?: IssuedRecord;
+}
+
+/** The infringement as issued in the wizard; its canonical SHA-256 is signed by the issue statement. */
+export interface IssuedRecord {
+  number: string;
+  handoffId: string;
+  handoff: Record<string, unknown>;
+  offenceCode: '701' | '702';
+  offenceOverridden: boolean;
+  internalVariant?: 'no_payment' | 'expired_session' | 'unknown';
+  /** ISO 8601 with offset. */
+  timeFrom: string;
+  timeTo: string;
+  issuedAt: string;
+  notes: string;
+  evidenceOverride?: { reason: string };
+  vehicle: Record<string, unknown>;
+  officerNumber: string;
+  reissueOf?: string;
+  reissueReason?: VoidReason;
 }
 
 /** Where the officer checked payment (WF-S30). */
@@ -397,6 +453,8 @@ export interface ScanRecord {
   payment?: PaymentCheck;
   /** Infringement issued (or started and cancelled) from this scan, stored back from EnforcementMAPS (WF-S31). */
   infringement?: InfringementRecord;
+  /** Earlier infringements on this sighting, newest last (voided by a reissue, or cancelled reissues). */
+  infringementHistory?: InfringementRecord[];
   /** Look-alike candidates shown before this scan was recorded, with the officer's choices (WF-S28). */
   lookalikes?: LookalikeLink[];
   /** Overstay alert dismissed by the officer after checking the vehicle. */
@@ -541,6 +599,12 @@ export interface Settings {
    * build only: EnforcementMAPS supplies it from the operating context. Empty until set.
    */
   officerNumber: string;
+  /**
+   * PlateWatch backend (development and field testing, `docs/BACKEND.md`): base URL and device
+   * token. Empty = standalone. Inside EnforcementMAPS the host connection is used instead.
+   */
+  backendUrl: string;
+  backendToken: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -555,30 +619,53 @@ export const DEFAULT_SETTINGS: Settings = {
   listZoneFilter: null,
   theme: 'light',
   officerNumber: '',
+  backendUrl: '',
+  backendToken: '',
 };
 
 /* ─────────────────────────── Hot-list entry log (WF-S29) ─────────────────────────── */
 
-/** Who a soft Code 1 (hot-list sighting) alert goes to in CommandMAPS (OQ29-6). */
+/**
+ * The officer's safety acknowledgement on the hot-list pop-up (owner 25/11/2026):
+ * - `safe_clear` — SAFE & CLEAR: the officer is safe and has left the road segment where the vehicle is.
+ * - `code1` — CODE 1: duress; the whole branch is alerted.
+ */
+export type HotHitResponse = 'safe_clear' | 'code1';
+
+/** Kept for events saved before 25/11/2026. */
 export type HotAlertRecipient = 'dispatch' | 'compliance_coordinator';
+
+/** A hot-list hit as reported to the backend (opens the officer-safety pop-up). */
+export interface HotHitPayload {
+  id: string;
+  plate: string;
+  hotListEntryId: string;
+  scanId: string | null;
+  at: number;
+  /** When a soft Code 1 is raised if the officer has not acknowledged. */
+  ackDeadline: number;
+  officerNumber: string;
+  location: { lat: number; lng: number; accuracyM: number } | null;
+  entry: { make: string; type: string; colour: string; riskLevel: string; risks: string[]; alertMessage?: string; ownerDescription?: string };
+  where?: { listId: string; listName: string; displayId?: string };
+}
 
 /**
  * One event on a hot-list entry's log, saved on the device (sightings are the `hot_sighting`
  * scan records themselves):
- * - `acknowledged`: the officer acknowledged a hot-list alert (date, time, location, officer
- *   number) — raises a soft Code 1 with dispatch and the compliance coordinator (queued; sent only
- *   by the EnforcementMAPS build).
+ * - `hit`: the pop-up opened for this plate (time, location, officer); `hit` holds what the backend logs.
+ * - `acknowledged`: the officer answered the pop-up — SAFE & CLEAR or CODE 1 — with an optional note.
  * - `lookalike_not_matched`: the officer decided a look-alike was not the hot-list vehicle (WF-S28 28e.5).
  */
 export interface HotListEvent {
   id: string;
-  kind: 'acknowledged' | 'lookalike_not_matched';
+  kind: 'hit' | 'acknowledged' | 'lookalike_not_matched';
   /** Hot-list entry plate. */
   plate: string;
   key: string;
   hotListId: string;
   hotListEntryId: string;
-  /** The scan this event belongs to (the hot_sighting record for an acknowledgement). */
+  /** The scan this event belongs to (the hot_sighting record). */
   scanId: string | null;
   /** Epoch ms (device clock). */
   at: number;
@@ -589,14 +676,14 @@ export interface HotListEvent {
   device: string;
   /** Plate as read, for a look-alike decision. */
   readAs?: string;
-  /** Soft Code 1 notification for an acknowledgement (OQ29-2). */
-  notification?: {
-    severity: 'soft_code1';
-    recipients: HotAlertRecipient[];
-    /** `queued` until EnforcementMAPS accepts it; the development build has no connection. */
-    status: 'queued' | 'sent';
-    attempts: number;
-    lastAttemptAt?: number;
-    sentAt?: number;
-  };
+  /** The hit this event belongs to (acknowledged). */
+  hitId?: string;
+  hit?: HotHitPayload;
+  response?: HotHitResponse;
+  /** Optional free text from the officer, kept on the plate's history. */
+  note?: string;
+  /** The deadline passed before the officer answered (a soft Code 1 was raised). */
+  late?: boolean;
+  /** Events saved before 25/11/2026. */
+  notification?: { severity: 'soft_code1'; recipients: HotAlertRecipient[]; status: 'queued' | 'sent'; attempts: number; lastAttemptAt?: number; sentAt?: number };
 }

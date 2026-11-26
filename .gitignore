@@ -13,3 +13,5 @@ keystore.properties
 *.jks
 *.keystore
 smoke-screenshots/
+dist-server/
+.env

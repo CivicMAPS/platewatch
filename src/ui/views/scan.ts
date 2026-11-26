@@ -1,7 +1,7 @@
 import { patrol, hasPatrol, frameUrlFor, type Sighting } from '../../lib/patrol';
 import { deviceTimeZone, localDateString, toLocalIso } from '../../lib/time';
 import type { PluginListenerHandle } from '@capacitor/core';
-import { isPaidBy, paymentFor, paymentLines } from '../../lib/payment';
+import { isPaidBy, manualPaidWindow, paymentFor, paymentLines, paidSessionForScan, topUpPaidTo } from '../../lib/payment';
 import { html, nothing, type TemplateResult } from 'lit-html';
 import { createRef, ref } from 'lit-html/directives/ref.js';
 import { CameraController, CameraError, fileToCanvas, type CameraCapabilities } from '../../lib/camera';
@@ -39,12 +39,14 @@ import { clampZoom, formatZoom, LONG_PRESS_MS, nextPreset, sliderRange, ZOOM_PRE
 import { hasNativeOcr, recognisePlateNative } from '../../lib/nativeOcr';
 import { diagnosticsEnabled, logDiag } from '../../lib/diagnostics';
 import type { AllowList, DismissReason, GeoFix, HotList, HotListEvent, LookalikeLink, PaymentCheck, PaymentSource, TimedRestriction, VehicleDetails } from '../../lib/types';
-import { effectivePayment, OFFENCE_LABEL, offenceFor, PAID_TO_GRACE_MINUTES, timeOnDay, type OffenceOffer } from '../../lib/offence';
-import { ackLocation, acknowledgementEvent, canSendAlerts, trySendAlert } from '../../lib/hotlist';
+import { effectivePayment, offenceChipText, offenceFor, PAID_TO_GRACE_MINUTES, type OffenceOffer } from '../../lib/offence';
+import { SAFE_CLEAR_LABEL } from '../../lib/hotlist';
+import { openHotAlert } from '../../lib/safety';
 import { host, officerNumber } from '../../lib/host';
 import { describeVehicle, EMPTY_VEHICLE, hasVehicle, plateReentry, vehicleComplete, vehicleOf } from '../../lib/vehicle';
 import { vehicleFields } from '../vehicleFields';
 import { applyInfringementResult, buildHandoff, canIssueInfringement, formatInfringementNumber } from '../../lib/infringement';
+import { isConfigured as backendConfigured, paymentLookup, queueEvidence } from '../../lib/backend';
 import { firstLookalike, hotLookalikes, logChoice, permitLookalikes, sameVehicleLink, type HotLookalike, type PermitLookalike } from '../../lib/lookalike';
 import {
   RISK_LEVEL_LABELS,
@@ -106,7 +108,11 @@ interface ResultState {
 
 
 const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', error: '' }) as { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string };
+const emptyPayForm = () => ({ status: null, source: null, paidFrom: '', paidTo: '', endsTomorrow: false, error: '' }) as {
+  status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; endsTomorrow: boolean; error: string;
+  /** Exact times from the test provider, used when the officer saves them unchanged (HH:MM loses the date). */
+  lookedUp?: { paidFrom: number; paidTo: number };
+};
 const SOURCE_LABEL: Record<PaymentSource, string> = { easypark: 'EasyPark', paystay: 'PayStay', meter: 'Meter', ticket: 'Ticket', other: 'Other' };
 
 /** A capture's GPS fix as stored on hot-list events and payment checks. */
@@ -149,8 +155,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** "Dismiss offence alert" reasons sheet open. */
   let dismissOpen = false;
   /** Payment check form (WF-S30 30a) and top-up form (30e.4). */
-  let payForm: { status: 'paid' | 'not_found' | null; source: { kind: PaymentSource; ref?: string } | null; paidFrom: string; paidTo: string; error: string } = emptyPayForm();
-  let topUp: { open: boolean; paidTo: string; error: string } = { open: false, paidTo: '', error: '' };
+  let payForm: ReturnType<typeof emptyPayForm> = emptyPayForm();
+  let topUp: { open: boolean; paidTo: string; endsTomorrow: boolean; error: string } = { open: false, paidTo: '', endsTomorrow: false, error: '' };
   /** Issue infringement hand-off sheet (WF-S31 31a), with the vehicle details and second plate entry. */
   let handoffOffer: OffenceOffer | null = null;
   let handoffVehicle: VehicleDetails = { ...EMPTY_VEHICLE };
@@ -234,6 +240,8 @@ export function scanView(params: Record<string, string>, app: App): View {
   /** Hot-list entries the officer confirmed as this vehicle / decided are not. */
   const hotConfirmed = new Set<string>();
   const hotDeclined = new Set<string>();
+  /** Safety pop-ups already opened for this capture: entry id → the answer and the evidence scan id. */
+  const hotAlerted = new Map<string, { answered: Promise<HotListEvent[]>; scanId: string }>();
   /** Permit look-alike decided for this capture (plate confirmed or not a match). */
   let permitDecided = false;
   /** Open look-alike prompt before anything is recorded: hot list first, then permit. */
@@ -321,11 +329,12 @@ export function scanView(params: Record<string, string>, app: App): View {
     lookalikes = [];
     hotConfirmed.clear();
     hotDeclined.clear();
+    hotAlerted.clear();
     permitDecided = false;
     lookalikePrompt = null;
     hintSources = null;
     payForm = emptyPayForm();
-    topUp = { open: false, paidTo: '', error: '' };
+    topUp = { open: false, paidTo: '', endsTomorrow: false, error: '' };
     handoffOffer = null;
     handoffVehicle = { ...EMPTY_VEHICLE };
     plateSecond = '';
@@ -623,6 +632,19 @@ export function scanView(params: Record<string, string>, app: App): View {
         return;
       }
       if (l.type === 'hot' && res.decision.kind === 'hot_match' && !res.hotHits.some((h) => h.list.id === l.id)) res.decision = { kind: 'hot_none' };
+      // Officer safety (owner 25/11/2026): the blocking pop-up as soon as the match is certain, before
+      // anything is written, so a storage failure (photos filling the handset) can never hold it back.
+      const exactHot = res.hotHits.filter((h) => h.strength === 'exact');
+      const freshHot = exactHot.filter((h) => !hotAlerted.has(h.entry.id)).map((h) => ({ h, scanId: uid() }));
+      if (freshHot.length) {
+        const answered = openHotAlert({
+          hits: freshHot.map(({ h, scanId }) => ({ list: h.list, entry: h.entry, scanId })),
+          at,
+          location: fixOf(pending.meta.location),
+          where: { listId: l.id, listName: l.name, ...(l.type === 'timed' && l.displayId ? { displayId: l.displayId } : {}) },
+        });
+        for (const { h, scanId } of freshHot) hotAlerted.set(h.entry.id, { answered, scanId });
+      }
       // 2. Permit: a similar permit plate never exempts; the officer checks the displayed permit.
       const openPermit = (l.type === 'timed' || l.type === 'permit_zone') && !permitDecided ? permitLookalikes(plate, l, allowLists) : [];
       if (openPermit.length) {
@@ -652,11 +674,19 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       // Officer-safety evidence: record exact hot-list sightings.
       const hotScanIds: Record<string, string> = {};
-      for (const hit of res.hotHits.filter((h) => h.strength === 'exact')) {
-        const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null);
-        await saveScan(rec);
-        hotScanIds[hit.entry.id] = rec.id;
-        if (hit.list.id === l.id) saved = rec;
+      for (const hit of exactHot) {
+        const id = hotAlerted.get(hit.entry.id)?.scanId ?? uid();
+        hotScanIds[hit.entry.id] = id;
+        try {
+          const rec = await makeRecord(plate, hit.list.id, 'hot_sighting', null, { id });
+          await saveScan(rec);
+          // The hit was reported before this photo existed: queue its upload now it is saved.
+          if (backendConfigured()) void queueEvidence(id).catch(() => undefined);
+          if (hit.list.id === l.id) saved = rec;
+        } catch (e) {
+          // The pop-up is already up and the hit reported; only the photo record is missing.
+          app.toast(`Hot-list photo not saved: ${(e as Error).message}`, 'error');
+        }
       }
 
       const d = res.decision;
@@ -672,6 +702,15 @@ export function scanView(params: Record<string, string>, app: App): View {
 
       result = { plate, decision: d, hotHits: res.hotHits, comparison, saved, possibleFirsts, hotScanIds };
       phase = 'result';
+      // The officer's answer to the pop-up (opened above) is shown on the result.
+      const answers = [...new Set(exactHot.map((h) => hotAlerted.get(h.entry.id)?.answered).filter((a): a is Promise<HotListEvent[]> => !!a))];
+      if (answers.length) {
+        const opened = result;
+        void Promise.all(answers).then((all) => {
+          if (result === opened) result = { ...opened, hotAcks: all.flat() };
+          app.update();
+        });
+      }
       const s = settings();
       if (res.hotHits.length) feedback('alarm', s);
       else if (d.kind === 'timed_resighting') feedback(d.overstay ? 'warn' : 'info', s);
@@ -1293,32 +1332,20 @@ export function scanView(params: Record<string, string>, app: App): View {
     const logLinks = html`<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1">${entryIds.map(
       (id) => html`<a class="link text-sm" data-testid="hot-log-link" href="#/hotlog/${encodeURIComponent(id)}">View entry log${entryIds.length > 1 ? ` · ${r.hotHits.find((h) => h.entry.id === id)?.entry.plate}` : ''}</a>`,
     )}</div>`;
-    if (!acks?.length) {
-      const officer = officerNumber(settings().officerNumber);
-      return html`<section class="card border-2 border-alert" data-testid="hot-ack">
-        <p class="text-sm text-neutral-800">Acknowledging records the time, your location and officer number on this plate’s hot-list entry log, and raises a <strong>soft Code 1</strong> with dispatch and the compliance coordinator. Expect a radio call.</p>
-        ${officer
-          ? html`<button type="button" class="btn-primary mt-3 w-full py-4 text-md" data-testid="hot-acknowledge" ?disabled=${phase === 'saving'} @click=${() => void acknowledgeHot()}>${icon('check')} Acknowledge</button>`
-          : html`<div class="mt-3">${banner('alert', 'Officer number required', html`Set it in <a class="link" href="#/settings">Settings → Officer</a> to acknowledge hot-list alerts.`, 'hot-ack-officer-required')}</div>`}
-      </section>`;
-    }
+    if (!acks?.length)
+      return html`<section class="card border-2 border-alert" data-testid="hot-ack-waiting"><p class="text-sm text-neutral-800">Answer the officer-safety alert: <strong>CODE 1</strong> or <strong>${SAFE_CLEAR_LABEL}</strong>.</p></section>`;
     const a = acks[0]!;
-    const sent = acks.every((e) => e.notification?.status === 'sent');
     const where = a.location ? html`<span class="font-plate">${a.location.lat.toFixed(5)}, ${a.location.lng.toFixed(5)} ±${Math.round(a.location.accuracyM)} m</span>` : 'no GPS fix';
-    return html`<section class="rounded-md border-2 ${sent ? 'border-active bg-active-bg' : 'border-pending bg-pending-bg'} p-4" data-testid=${sent ? 'hot-acked' : 'hot-ack-queued'}>
-      ${sent ? statusPill('permit_valid', 'Acknowledged') : statusPill('timing', 'Queued')}
-      <p class="mt-2 font-bold text-neutral-900">${sent ? 'Soft Code 1 raised' : 'Acknowledged · alert not sent yet'}</p>
+    const code1 = a.response === 'code1';
+    return html`<section class="rounded-md border-2 ${code1 ? 'border-emergency bg-emergency-bg' : 'border-active bg-active-bg'} p-4" data-testid="hot-acked" data-response=${a.response ?? ''}>
+      ${code1 ? html`<span class="chip border-2 border-emergency bg-surface text-xs font-bold text-emergency-text">CODE 1</span>` : statusPill('permit_valid', SAFE_CLEAR_LABEL)}
       <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
-        <dt class="text-neutral-600">When</dt><dd class="font-plate">${formatStamp(a.at)}</dd>
+        <dt class="text-neutral-600">When</dt><dd class="font-plate">${formatStamp(a.at)}${a.late ? ' (after the soft Code 1)' : ''}</dd>
         <dt class="text-neutral-600">Where</dt><dd>${where}</dd>
-        <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber}</dd>
-        <dt class="text-neutral-600">Alerted</dt><dd>${sent ? 'Dispatch · compliance coordinator' : html`Dispatch · compliance coordinator — <span class="text-pending-strong">queued, attempt ${a.notification?.attempts ?? 0}</span>`}</dd>
+        <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${a.officerNumber || '—'}</dd>
+        ${a.note ? html`<dt class="text-neutral-600">Note</dt><dd>${a.note}</dd>` : nothing}
       </dl>
-      ${sent
-        ? nothing
-        : html`<p class="mt-2 text-xs text-neutral-700">${canSendAlerts() ? 'Saved on this device; it will be sent when the connection returns.' : 'Development build: alerts reach CommandMAPS only inside EnforcementMAPS. The acknowledgement is saved on this device.'}</p>
-            <button type="button" class="btn-secondary mt-3 w-full" data-testid="hot-retry" @click=${() => void retryHotAlerts()}>${icon('refresh')} Retry now</button>`}
-      <div class="mt-3">${banner('alert', sent ? 'Respond by radio' : 'Tell dispatch by radio', sent ? 'Dispatch will call you on the radio. Answer them; with no answer the soft Code 1 can be escalated to a Code 1.' : 'Until the alert is sent, dispatch and the compliance coordinator do not know about this sighting.', 'hot-radio')}</div>
+      <p class="mt-2 text-xs text-neutral-700">Logged on this plate’s hot-list history${backendConfigured() ? ' and sent to CommandMAPS' : ''}.</p>
       ${logLinks}
     </section>`;
   };
@@ -1476,13 +1503,18 @@ export function scanView(params: Record<string, string>, app: App): View {
     }
   };
 
-  /** 701 / 702 offer: amber, with the offence code chip and the locked time from (WF-S30). */
+  /**
+   * 701 / 702 offer: amber, with the offence code chip and the locked time from (WF-S30). Time first:
+   * past the allowance it is 701 whatever the payment state; 702 only within the allowance. The
+   * officer only ever sees 702 for a payment offence — the internal 702e split is derived (25/11/2026).
+   */
   const offerCard = (offer: OffenceOffer): TemplateResult => html`<section class="rounded-md border-2 border-alert bg-alert-bg p-4" data-testid="offence-offer" data-code=${offer.code}>
     <div class="flex flex-wrap items-center gap-2">${statusPill('overstay', `${offer.code} eligible`)}
-      <span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong" data-testid="offence-chip">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span></div>
-    <p class="mt-2 text-sm text-neutral-800">${offer.basis === 'no_payment_found' ? 'No payment found at the first scan.' : offer.basis === 'paid_to_passed' ? `Paid to passed (grace ${PAID_TO_GRACE_MINUTES} min ended).` : 'Allowance exceeded.'}
+      <span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong" data-testid="offence-chip">${offenceChipText(offer)}</span></div>
+    <p class="mt-2 text-sm text-neutral-800">${offer.basis === 'no_payment_found'
+      ? offer.internalVariant === 'expired_session' ? 'No valid payment at the first scan: the paid session had already ended.' : 'No payment found at the first scan.'
+      : offer.basis === 'paid_to_passed' ? `Paid to passed (grace ${PAID_TO_GRACE_MINUTES} min ended), within the time allowance.` : 'Time allowance exceeded. Payment does not change a 701.'}
       Offence from <span class="font-plate">${formatClock(offer.timeFrom)}</span>.</p>
-    ${offer.secondary ? html`<p class="mt-1 text-xs text-neutral-700" data-testid="offence-secondary">Also reached: <span class="font-plate">${offer.secondary.code}</span> · ${OFFENCE_LABEL[offer.secondary.code]} (from <span class="font-plate">${formatClock(offer.secondary.timeFrom)}</span>)</p>` : nothing}
     ${issueButton(offer)}
   </section>`;
 
@@ -1522,8 +1554,10 @@ export function scanView(params: Record<string, string>, app: App): View {
         ? html`<div class="mt-3 grid grid-cols-2 gap-3">
             <label><span class="field-label">Paid from</span><input type="time" class="field font-plate" data-testid="pay-from" .value=${f.paidFrom} @input=${(e: Event) => (payForm = { ...payForm, paidFrom: (e.target as HTMLInputElement).value })} /></label>
             <label><span class="field-label">Paid to</span><input type="time" class="field font-plate" data-testid="pay-to" required .value=${f.paidTo} @input=${(e: Event) => (payForm = { ...payForm, paidTo: (e.target as HTMLInputElement).value })} /></label>
-          </div>`
+          </div>
+          <label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" data-testid="pay-ends-tomorrow" .checked=${f.endsTomorrow} @change=${(e: Event) => (payForm = { ...payForm, endsTomorrow: (e.target as HTMLInputElement).checked })} /> Ends tomorrow (session runs past midnight)</label>`
         : nothing}
+      ${backendConfigured() ? html`<button type="button" class="btn-ghost mt-2 w-full" data-testid="pay-lookup" @click=${() => void lookupPayment()}>Look up paid session (test provider)</button>` : nothing}
       ${f.error ? html`<div class="mt-3">${banner('alert', f.error)}</div>` : nothing}
       <button type="button" class="btn-primary mt-3 w-full" data-testid="pay-save" ?disabled=${phase === 'saving'} @click=${() => void savePaymentCheck()}>${icon('check')} Save payment check</button>
     </section>`;
@@ -1550,8 +1584,9 @@ export function scanView(params: Record<string, string>, app: App): View {
                 ? html`<div class="mt-2 grid grid-cols-[1fr_auto] items-end gap-2">
                     <label><span class="field-label">New paid to</span><input type="time" class="field font-plate" data-testid="topup-to" .value=${topUp.paidTo} @input=${(e: Event) => (topUp = { ...topUp, paidTo: (e.target as HTMLInputElement).value })} /></label>
                     <button type="button" class="btn-primary" data-testid="topup-save" @click=${() => void saveTopUp()}>Save</button>
-                  </div>${topUp.error ? html`<div class="mt-2">${banner('alert', topUp.error)}</div>` : nothing}`
-                : html`<button type="button" class="btn-secondary mt-2 w-full" data-testid="topup-open" @click=${() => { topUp = { open: true, paidTo: '', error: '' }; app.update(); }}>Payment extended — update paid to</button>`}
+                  </div>
+                  <label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" data-testid="topup-ends-tomorrow" .checked=${topUp.endsTomorrow} @change=${(e: Event) => (topUp = { ...topUp, endsTomorrow: (e.target as HTMLInputElement).checked })} /> Ends tomorrow (runs past midnight)</label>${topUp.error ? html`<div class="mt-2">${banner('alert', topUp.error)}</div>` : nothing}`
+                : html`<button type="button" class="btn-secondary mt-2 w-full" data-testid="topup-open" @click=${() => { topUp = { open: true, paidTo: '', endsTomorrow: false, error: '' }; app.update(); }}>Payment extended — update paid to</button>`}
             </section>`
           : nothing}`;
     }
@@ -1624,7 +1659,7 @@ export function scanView(params: Record<string, string>, app: App): View {
     const check = plateReentry(first, plateSecond);
     return decisionSheet({
       testid: 'handoff-sheet',
-      pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offer.code} · ${OFFENCE_LABEL[offer.code]}</span>`,
+      pill: html`<span class="chip border-2 border-alert bg-surface font-plate text-xs font-semibold text-alert-strong">${offenceChipText(offer)}</span>`,
       title: `Start infringement for ${first}`,
       onClose: () => { handoffOffer = null; app.update(); },
       body: html`<p>Filled in from this sighting: location, evidence images with their SHA-256, offence, locked time from (<span class="font-plate">${formatClock(offer.timeFrom)}</span>) and the payment check. The infringement number is allocated on this handset when you start.</p>
@@ -1708,6 +1743,26 @@ export function scanView(params: Record<string, string>, app: App): View {
   const paymentRequired = (r: ResultState): boolean =>
     r.decision.kind === 'timed_new' && r.decision.concession !== 'disability' && !r.observation?.paymentWaived && !!r.saved && !r.saved.payment && isPaidSpace();
 
+  /**
+   * Development backend: ask the test payment provider for a paid session covering the scan. It
+   * only fills the form; the officer still checks and saves (no provider is integrated, OQ27-4).
+   */
+  const lookupPayment = async () => {
+    if (!pending || !result?.saved) return;
+    const ref = payForm.source?.ref ?? pending.meta.payment?.easyPark?.[0];
+    try {
+      // A session that ended before the scan day says nothing about today: treat it as none found.
+      const sess = paidSessionForScan(await paymentLookup(result.saved.plate, pending.meta.capturedAt, ref), pending.meta.capturedAt);
+      payForm = sess
+        ? { ...payForm, status: 'paid', source: { kind: sess.source as PaymentSource, ref: sess.sourceRef || undefined }, paidFrom: hhmm(sess.paidFrom), paidTo: hhmm(sess.paidTo), lookedUp: { paidFrom: sess.paidFrom, paidTo: sess.paidTo }, error: '' }
+        : { ...payForm, status: 'not_found', source: payForm.source ?? (ref ? { kind: 'easypark', ref } : null), lookedUp: undefined, error: '' };
+      app.toast(sess ? `Paid session found: ${hhmm(sess.paidFrom)}–${hhmm(sess.paidTo)}. Check and save.` : 'No paid session found for this plate. Check and save.', 'info');
+    } catch (e) {
+      payForm = { ...payForm, error: `Lookup failed: ${(e as Error).message}` };
+    }
+    app.update();
+  };
+
   /** 30a.5: save the payment check on the scan and carry it to the timing. */
   const savePaymentCheck = async () => {
     if (!result?.saved || !pending || phase === 'saving') return;
@@ -1718,10 +1773,15 @@ export function scanView(params: Record<string, string>, app: App): View {
     let paidFrom: number | undefined;
     let paidTo: number | undefined;
     if (f.status === 'paid') {
-      paidFrom = timeOnDay(scanAt, f.paidFrom || hhmm(scanAt)) ?? undefined;
-      paidTo = timeOnDay(scanAt, f.paidTo) ?? undefined;
-      if (paidTo === undefined) return void ((payForm = { ...f, error: 'Enter paid to (HH:MM).' }), app.update());
-      if (paidFrom !== undefined && paidTo < paidFrom) return void ((payForm = { ...f, error: 'Paid to is before paid from.' }), app.update());
+      if (f.lookedUp && f.paidFrom === hhmm(f.lookedUp.paidFrom) && f.paidTo === hhmm(f.lookedUp.paidTo)) {
+        // Unchanged lookup values: keep the provider's exact times (dates included).
+        ({ paidFrom, paidTo } = f.lookedUp);
+      } else {
+        // Typed times: paid to moves to tomorrow only when the officer ticks it (never inferred).
+        const w = manualPaidWindow({ scanAt, paidFrom: f.paidFrom || hhmm(scanAt), paidTo: f.paidTo, endsTomorrow: f.endsTomorrow, fromIsDefault: !f.paidFrom || f.paidFrom === hhmm(scanAt) });
+        if ('error' in w) return void ((payForm = { ...f, error: w.error }), app.update());
+        ({ paidFrom, paidTo } = w);
+      }
     }
     const check: PaymentCheck = {
       status: f.status,
@@ -1753,8 +1813,9 @@ export function scanView(params: Record<string, string>, app: App): View {
     const obs = result?.comparison?.observation;
     if (!result || !obs || !pending || obs.payment?.status !== 'paid') return;
     const scanAt = pending.meta.capturedAt;
-    const paidTo = timeOnDay(scanAt, topUp.paidTo);
-    if (paidTo === null) return void ((topUp = { ...topUp, error: 'Enter paid to (HH:MM).' }), app.update());
+    const t = topUpPaidTo({ scanAt, paidTo: topUp.paidTo, currentPaidTo: obs.payment.paidTo, endsTomorrow: topUp.endsTomorrow });
+    if ('error' in t) return void ((topUp = { ...topUp, error: t.error }), app.update());
+    const { paidTo } = t;
     const first = await getScan(obs.firstScanId);
     const now = Date.now();
     const by = officerNumber(settings().officerNumber);
@@ -1763,55 +1824,13 @@ export function scanView(params: Record<string, string>, app: App): View {
       const p = first.payment;
       await saveScan({ ...first, payment: { ...p, paidTo, history: [...(p.history ?? []), ...(p.paidTo !== undefined ? [{ paidTo: p.paidTo, checkedAt: p.checkedAt, checkedBy: p.checkedBy }] : [])], checkedAt: now, checkedBy: by } }, updatedObs);
     } else await putObservation(updatedObs);
-    topUp = { open: false, paidTo: '', error: '' };
+    topUp = { open: false, paidTo: '', endsTomorrow: false, error: '' };
     result = { ...result, comparison: { ...result.comparison!, observation: updatedObs } };
     app.update();
   };
 
   /** A hot-list match not yet acknowledged (WF-S29 29a.5). */
   const mustAcknowledge = (r: ResultState): boolean => r.hotHits.some((h) => h.strength === 'exact') && !r.hotAcks?.length;
-
-  /** 29a.4: acknowledge every hot-list hit on this scan; saved on the device, alert queued. */
-  const acknowledgeHot = async () => {
-    if (!result || !pending || phase === 'saving') return;
-    const officer = officerNumber(settings().officerNumber);
-    if (!officer) return;
-    phase = 'saving';
-    app.update();
-    try {
-      const at = Date.now();
-      const location = ackLocation(geo.bestRecent(at), pending.meta.location, at);
-      const r = result;
-      const events: HotListEvent[] = [];
-      for (const h of r.hotHits.filter((x) => x.strength === 'exact')) {
-        let e = acknowledgementEvent({ id: uid(), list: h.list, entry: h.entry, scanId: r.hotScanIds?.[h.entry.id] ?? null, at, officerNumber: officer, location, device: navigator.userAgent });
-        await putHotEvent(e); // saved first: never depends on the network
-        e = await trySendAlert(e);
-        await putHotEvent(e);
-        events.push(e);
-      }
-      result = { ...r, hotAcks: events };
-      feedback('ok', settings());
-    } catch (e) {
-      app.toast(`Acknowledge failed: ${(e as Error).message}`, 'error');
-    }
-    phase = 'result';
-    app.update();
-  };
-
-  /** 29c.2: retry a queued alert now. */
-  const retryHotAlerts = async () => {
-    if (!result?.hotAcks) return;
-    const next: HotListEvent[] = [];
-    for (const e of result.hotAcks) {
-      const sent = await trySendAlert(e);
-      await putHotEvent(sent);
-      next.push(sent);
-    }
-    result = { ...result, hotAcks: next };
-    if (!canSendAlerts()) app.toast('No CommandMAPS connection in this build. Tell dispatch by radio.', 'warn');
-    app.update();
-  };
 
   /** "Edit plate" from a look-alike decision: back to the confirm screen with the plate field focused. */
   const editFromResult = () => {

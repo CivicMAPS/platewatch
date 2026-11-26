@@ -4,7 +4,7 @@
  */
 import { html, nothing } from 'lit-html';
 import { getHotEventsForEntry, getHotLists, getScansForList } from '../../lib/db';
-import { hotLogRows, type HotLogRow } from '../../lib/hotlist';
+import { hotLogRows, SAFE_CLEAR_LABEL, type HotLogRow } from '../../lib/hotlist';
 import { formatStamp } from '../../lib/time';
 import { describeVehicle } from '../../lib/vehicle';
 import { RISK_LEVEL_LABELS, type HotEntry, type HotList } from '../../lib/types';
@@ -36,11 +36,14 @@ export function hotLogView(params: Record<string, string>, app: App): View {
       </li>`;
     const e = r.event;
     const where = e.location ? html` · <span class="font-plate">${e.location.lat.toFixed(5)}, ${e.location.lng.toFixed(5)} ±${Math.round(e.location.accuracyM)} m</span>` : nothing;
-    if (r.kind === 'acknowledged')
+    if (r.kind === 'acknowledged') {
+      const code1 = e.response === 'code1';
       return html`<li class="py-3" data-testid="hot-log-row" data-kind="acknowledged">
-        <div class="flex flex-wrap items-center gap-2">${statusPill('permit_valid', 'Ack')}<span class="font-plate text-sm">${formatStamp(e.at)}</span></div>
-        <p class="mt-1 text-sm text-neutral-700">Officer <span class="font-plate">${e.officerNumber || '—'}</span>${where} · soft Code 1 ${e.notification?.status === 'sent' ? 'sent' : 'queued'}</p>
+        <div class="flex flex-wrap items-center gap-2">${code1 ? html`<span class="chip border-2 border-emergency bg-surface text-xs font-bold text-emergency-text">CODE 1</span>` : statusPill('permit_valid', e.response ? SAFE_CLEAR_LABEL : 'Ack')}<span class="font-plate text-sm">${formatStamp(e.at)}</span>${e.late ? html`<span class="text-xs text-alert-strong">after the soft Code 1</span>` : nothing}</div>
+        <p class="mt-1 text-sm text-neutral-700">Officer <span class="font-plate">${e.officerNumber || '—'}</span>${where}${e.notification ? ` · soft Code 1 ${e.notification.status === 'sent' ? 'sent' : 'queued'}` : ''}</p>
+        ${e.note ? html`<p class="mt-1 text-sm text-neutral-800">${e.note}</p>` : nothing}
       </li>`;
+    }
     return html`<li class="py-3" data-testid="hot-log-row" data-kind="not_matched">
       <div class="flex flex-wrap items-center gap-2">${statusPill('not_on_list', 'Not matched')}<span class="font-plate text-sm">${formatStamp(e.at)}</span></div>
       <p class="mt-1 text-sm text-neutral-700">Look-alike <span class="font-plate">${e.readAs ?? ''}</span> — not the hot-list vehicle · officer <span class="font-plate">${e.officerNumber || '—'}</span></p>
@@ -59,6 +62,8 @@ export function hotLogView(params: Record<string, string>, app: App): View {
               : html`<section class="card" data-testid="hot-log-entry">
                   <div class="flex flex-wrap items-center gap-2">${plateBadge(entry.plate, 'md')}${riskPill(entry.riskLevel, RISK_LEVEL_LABELS[entry.riskLevel])}</div>
                   <p class="mt-2 font-semibold">${describeVehicle(entry) || 'No vehicle details'}</p>
+                  ${entry.alertMessage ? html`<p class="mt-2 rounded-md border-2 border-alert bg-alert-bg p-2 font-semibold text-alert-text">${entry.alertMessage}</p>` : nothing}
+                  ${entry.ownerDescription ? html`<p class="mt-2 text-sm"><span class="text-neutral-600">Registered owner:</span> ${entry.ownerDescription}</p>` : nothing}
                   <p class="text-sm text-neutral-600">List: ${list.name}</p>
                 </section>
                 <section class="card mt-4">

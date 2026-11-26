@@ -14,6 +14,10 @@ import { formatClock, formatDateTime, formatDuration, formatMinutes, formatStamp
 import type { LookalikeLink, Observation, PlateList, ScanRecord } from '../../lib/types';
 import { sameVehicleLink } from '../../lib/lookalike';
 import { formatInfringementNumber } from '../../lib/infringement';
+import { VOID_REASON_LABEL } from '../../lib/issuance';
+import { isConfigured, onBackendChange, reissue, requestVoid } from '../../lib/backend';
+import { getBundle } from '../../lib/signer';
+import type { VoidReason } from '../../lib/types';
 import type { App, View } from '../app';
 import { banner, header, icon, nearMatchSheet, page, plateBadge, statusPill, UrlBag } from '../components';
 import { outcomeChip } from './listDetail';
@@ -52,18 +56,33 @@ function lookalikeCard(s: ScanRecord, linked: ScanRecord[] = []): TemplateResult
   </section>`;
 }
 
-/** 31h.1: the infringement issued from this scan. */
-function infringementRecord(i: NonNullable<ScanRecord['infringement']>): TemplateResult {
-  return html`<section class="card mt-3 border-2 border-issued text-sm" data-testid="record-infringement">
+const INF_STATUS: Record<NonNullable<ScanRecord['infringement']>['status'], string> = {
+  allocated: 'Allocated', issued: 'Issued', cancelled: 'Cancelled (number consumed)', void_requested: 'Void requested — awaiting supervisor', voided: 'Voided',
+};
+
+/** 31h.1: the infringement issued from this scan, its life cycle and earlier numbers. */
+function infringementRecord(s: ScanRecord, actions: TemplateResult | typeof nothing): TemplateResult {
+  const i = s.infringement!;
+  const v = i.voidRequest;
+  return html`<section class="card mt-3 border-2 border-issued text-sm" data-testid="record-infringement" data-status=${i.status}>
     <h2 class="section-title">Infringement</h2>
     <p class="font-plate text-md font-bold">${formatInfringementNumber(i.number)}</p>
     <dl class="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-      <dt class="text-neutral-600">Status</dt><dd>${i.status}${i.sync === 'pending' ? ' · sync queued' : i.sync === 'rejected' ? ' · sync rejected' : ''}</dd>
+      <dt class="text-neutral-600">Status</dt><dd data-testid="record-infringement-status">${i.paidAt ? 'Paid' : INF_STATUS[i.status]}${i.sync === 'pending' ? ' · sync queued' : i.sync === 'rejected' ? ' · sync rejected' : i.sync === 'synced' ? ' · synced' : ''}</dd>
       <dt class="text-neutral-600">Offence</dt><dd class="font-plate">${i.offenceCode}${i.offenceOverridden ? ' (changed from the suggestion)' : ''}</dd>
       <dt class="text-neutral-600">Time</dt><dd class="font-plate">${formatClock(i.timeFrom)} → ${formatClock(i.timeTo)}</dd>
       ${i.issuedAt ? html`<dt class="text-neutral-600">Issued</dt><dd class="font-plate">${formatStamp(i.issuedAt)}</dd>` : nothing}
       <dt class="text-neutral-600">Officer</dt><dd class="font-plate">${i.officerNumber || '—'}</dd>
+      ${i.reissueOf ? html`<dt class="text-neutral-600">Reissue of</dt><dd class="font-plate">${formatInfringementNumber(i.reissueOf)}</dd>` : nothing}
+      ${i.paidAt ? html`<dt class="text-neutral-600">Paid</dt><dd class="font-plate">${formatStamp(i.paidAt)}</dd>` : nothing}
+      ${v ? html`<dt class="text-neutral-600">Void request</dt><dd>${VOID_REASON_LABEL[v.reason]}${v.note ? ` — ${v.note}` : ''} · <span class="font-plate">${formatStamp(v.requestedAt)}</span>${v.decision ? html` · <strong>${v.decision === 'approved' ? 'approved' : 'rejected'}</strong>${v.decidedBy ? ` by ${v.decidedBy}` : ''}` : nothing}</dd>` : nothing}
     </dl>
+    ${i.sync === 'rejected' ? html`<div class="mt-2">${banner('alert', 'The backend refused this infringement', i.syncError ?? 'Unknown reason', 'record-infringement-rejected')}</div>` : nothing}
+    ${s.infringementHistory?.length
+      ? html`<p class="mt-3 font-semibold text-neutral-900">Earlier numbers on this sighting</p>
+          <ul class="mt-1 grid gap-0.5">${s.infringementHistory.map((h) => html`<li><span class="font-plate">${formatInfringementNumber(h.number)}</span> · ${INF_STATUS[h.status]}</li>`)}</ul>`
+      : nothing}
+    ${actions}
   </section>`;
 }
 
@@ -110,6 +129,49 @@ export function recordView(params: Record<string, string>, app: App): View {
   const urls = new UrlBag();
 
   let near: string[] = [];
+  /** Void / reissue (development host with the backend; owner 23/11/2026). */
+  let lifecycle: { mode: 'void' | 'reissue'; reason: VoidReason | ''; note: string; error: string } | null = null;
+  let hasBundle = false;
+  let unsubBackend: (() => void) | null = null;
+
+  const runLifecycle = async () => {
+    const l = lifecycle;
+    if (!scan || !l) return;
+    if (!l.reason) return void ((lifecycle = { ...l, error: 'Choose a reason.' }), app.update());
+    try {
+      scan = l.mode === 'void' ? await requestVoid(scan, l.reason, l.note) : await reissue(scan, l.reason);
+      lifecycle = null;
+    } catch (e) {
+      lifecycle = { ...l, error: (e as Error).message };
+    }
+    app.update();
+  };
+
+  const lifecycleActions = (s: ScanRecord): TemplateResult | typeof nothing => {
+    const i = s.infringement;
+    if (!i || i.status !== 'issued' || i.paidAt || !hasBundle || !isConfigured()) return nothing;
+    if (!lifecycle)
+      return html`<div class="mt-3 grid grid-cols-2 gap-2">
+        <button type="button" class="btn-secondary" data-testid="record-reissue" @click=${() => { lifecycle = { mode: 'reissue', reason: '', note: '', error: '' }; app.update(); }}>Reissue</button>
+        <button type="button" class="btn-secondary" data-testid="record-void" @click=${() => { lifecycle = { mode: 'void', reason: '', note: '', error: '' }; app.update(); }}>Request void</button>
+      </div>`;
+    const l = lifecycle;
+    return html`<div class="mt-3 grid gap-2 rounded-md border border-neutral-200 p-3" data-testid="record-lifecycle">
+      <p class="font-semibold">${l.mode === 'void' ? 'Request a void (no reissue)' : 'Void and reissue'}</p>
+      <p class="text-xs text-neutral-700">${l.mode === 'void' ? 'A supervisor approves or rejects the void in CommandMAPS. The infringement stays in force until then.' : 'A new number is issued for this sighting; the original is voided when the backend accepts it, with no approval. Cancelling the reissue consumes the new number and keeps the original.'}</p>
+      <label class="block"><span class="field-label">Reason</span>
+        <select class="field" data-testid="record-lifecycle-reason" @change=${(e: Event) => { lifecycle = { ...l, reason: (e.target as HTMLSelectElement).value as VoidReason, error: '' }; app.update(); }}>
+          <option value="" ?selected=${!l.reason}>Choose…</option>
+          ${(Object.keys(VOID_REASON_LABEL) as VoidReason[]).map((r) => html`<option value=${r} ?selected=${l.reason === r}>${VOID_REASON_LABEL[r]}</option>`)}
+        </select></label>
+      ${l.mode === 'void' ? html`<label class="block"><span class="field-label">Note for the supervisor</span><textarea class="field" rows="2" data-testid="record-lifecycle-note" .value=${l.note} @input=${(e: Event) => (l.note = (e.target as HTMLTextAreaElement).value)}></textarea></label>` : nothing}
+      ${l.error ? banner('alert', l.error) : nothing}
+      <div class="grid grid-cols-2 gap-2">
+        <button type="button" class="btn-ghost" @click=${() => { lifecycle = null; app.update(); }}>Back</button>
+        <button type="button" class="btn-primary" data-testid="record-lifecycle-go" @click=${() => void runLifecycle()}>${l.mode === 'void' ? 'Request void' : 'Start reissue'}</button>
+      </div>
+    </div>`;
+  };
   /** Persistent error for the edit-plate form (assessment D6). */
   let draftError = '';
   const saveDraft = async (dismiss = false) => {
@@ -227,8 +289,17 @@ export function recordView(params: Record<string, string>, app: App): View {
   const row = (label: string, value: TemplateResult | string) => html`<dt class="text-neutral-600">${label}</dt><dd class="min-w-0 break-words">${value}</dd>`;
 
   return {
-    mount: load,
-    unmount: () => urls.revokeAll(),
+    async mount() {
+      await load();
+      hasBundle = !!(scan?.infringement && (await getBundle(scan.infringement.number))?.record);
+      // Server decisions (void approved, payment) arrive by sync: reload the record when they do.
+      unsubBackend = onBackendChange(() => void getScan(id).then((fresh) => { if (fresh && scan && !lifecycle) { scan = fresh; app.update(); } }));
+      app.update();
+    },
+    unmount: () => {
+      unsubBackend?.();
+      urls.revokeAll();
+    },
     render() {
       if (!scan) return html`${header({ title: 'Loading…', back: () => app.back() })}`;
       const s = scan;
@@ -246,7 +317,7 @@ export function recordView(params: Record<string, string>, app: App): View {
           <div class="mt-3 flex flex-wrap items-center gap-2">${plateBadge(s.plate, 'lg')}${outcomeChip(s.outcome, s)}${s.corrected ? html`<span class="chip border-neutral-300 bg-surface text-xs text-neutral-700">${icon('edit', 'h-3.5 w-3.5')} OCR corrected</span>` : nothing}</div>
           ${s.payment ? paymentRecord(s.payment) : nothing}
           ${lookalikeCard(s, observation?.firstScanId === s.id ? timeline.filter((t) => observation?.linkedScanIds?.includes(t.id)) : [])}
-          ${s.infringement ? infringementRecord(s.infringement) : nothing}
+          ${s.infringement ? infringementRecord(s, lifecycleActions(s)) : nothing}
           ${locked
             ? html`<p class="mt-3 text-sm text-neutral-700" data-testid="record-locked">${icon('lock', 'h-4 w-4 inline')} Evidence locked: an infringement was issued from this scan, so the plate cannot be edited or the record deleted.</p>`
             : draft === null

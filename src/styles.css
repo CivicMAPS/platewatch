@@ -31,7 +31,7 @@
  *   text-alert,   bg-alert-bg,   border-alert-border,   text-alert-strong     (amber: act now)
  *   text-inactive, bg-inactive-bg, border-inactive-border                     (grey: nothing to do)
  *   text-issued,  bg-issued-bg,  border-issued-border                         (purple: outcome recorded)
- *   text-emergency …  Code 1 only — PlateWatch has no Code 1 surface, so it is not used.
+ *   text-emergency …  Code 1 only: the CODE 1 button, an own Code 1 and a branch Code 1 alarm.
  *
  * Radius, shadow, type scale and the mono font duplicate the token values literally because
  * Tailwind owns those custom-property names; they must stay identical to the token file.
@@ -84,6 +84,12 @@
   --color-inactive: var(--status-inactive);
   --color-inactive-bg: var(--status-inactive-bg);
   --color-inactive-border: var(--status-inactive-border);
+  /* Code 1 only (owner 25/11/2026: PlateWatch now raises and receives Code 1). Red is never used for anything else. */
+  --color-emergency: var(--status-emergency);
+  --color-emergency-deep: var(--status-emergency-deep);
+  --color-emergency-bg: var(--status-emergency-bg);
+  --color-emergency-border: var(--status-emergency-border);
+  --color-emergency-text: var(--status-emergency-text);
   --color-issued: var(--status-issued);
   --color-issued-bg: var(--status-issued-bg);
   --color-issued-border: var(--status-issued-border);
@@ -270,4 +276,15 @@
 }
 .permit-status-expired {
   color: var(--status-emergency-text);
+}
+
+/* Officer-safety alarms (owner 25/11/2026). Amber for the hot-list pop-up and soft Code 1, red for
+   Code 1 only. Reduced motion: a steady thick border instead of the flash. */
+@keyframes pw-flash-amber { 0%, 49% { background-color: var(--status-alert); } 50%, 100% { background-color: var(--status-alert-bg); } }
+@keyframes pw-flash-red { 0%, 49% { background-color: var(--status-emergency); } 50%, 100% { background-color: var(--status-emergency-deep); } }
+.flash-amber { animation: pw-flash-amber 1s steps(1, end) infinite; }
+.flash-red { animation: pw-flash-red 1s steps(1, end) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .flash-amber { animation: none; background-color: var(--status-alert-bg); box-shadow: inset 0 0 0 6px var(--status-alert); }
+  .flash-red { animation: none; background-color: var(--status-emergency); box-shadow: inset 0 0 0 6px var(--status-emergency-deep); }
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { normalisePayment, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { manualPaidWindow, normalisePayment, shiftDays, topUpPaidTo, paymentFor, paymentLines, prunePaidBy, restrictionPaymentLabel } from '../src/lib/payment';
 import type { PaymentAreas } from '../src/lib/types';
 
 // Gladstone St, Boundary St – Montague St (north), as entered in the field: one PayStay zone per
@@ -92,5 +92,61 @@ describe('paymentLines (evidence data bar and "Check payment before enforcing")'
   it('adds the meter ID only when there is one, including evidence saved before meters were separate', () => {
     expect(paymentLines({ easyPark: [], payStay: [{ zone: '00042', meter: '4521' }] })).toEqual(['PayStay ParkingZone 00042 · Meter ID 4521']);
     expect(paymentLines(undefined)).toEqual([]);
+  });
+});
+
+describe('paid session from the provider lookup', () => {
+  it("ignores a session that ended before the scan's day (it would otherwise be moved onto today)", async () => {
+    const { paidSessionForScan } = await import('../src/lib/payment');
+    const scan = new Date(2026, 10, 25, 9, 0).getTime();
+    const yesterday = { paidFrom: new Date(2026, 10, 24, 8, 0).getTime(), paidTo: new Date(2026, 10, 24, 10, 0).getTime() };
+    const today = { paidFrom: new Date(2026, 10, 25, 8, 0).getTime(), paidTo: new Date(2026, 10, 25, 8, 30).getTime() };
+    const overnight = { paidFrom: new Date(2026, 10, 24, 22, 0).getTime(), paidTo: new Date(2026, 10, 25, 1, 0).getTime() };
+    expect(paidSessionForScan(yesterday, scan)).toBeNull();
+    expect(paidSessionForScan(today, scan)).toBe(today);
+    expect(paidSessionForScan(overnight, scan)).toBe(overnight);
+    expect(paidSessionForScan(null, scan)).toBeNull();
+  });
+});
+
+describe('hand-entered paid times (never roll into tomorrow unasked)', () => {
+  const scanAt = new Date(2026, 10, 25, 10, 0).getTime();
+  const at = (h: number, m = 0, dayOffset = 0) => new Date(2026, 10, 25 + dayOffset, h, m).getTime();
+
+  it('an earlier paid to with the default paid from stays on the scan day (expired, not valid tomorrow)', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '10:00', paidTo: '09:00', endsTomorrow: false, fromIsDefault: true })).toEqual({ paidTo: at(9) });
+  });
+
+  it('an entered paid from after paid to started the day before', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '22:00', paidTo: '09:00', endsTomorrow: false, fromIsDefault: false })).toEqual({ paidFrom: at(22, 0, -1), paidTo: at(9) });
+  });
+
+  it('"Ends tomorrow" moves paid to to the next day', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '21:00', paidTo: '01:00', endsTomorrow: true, fromIsDefault: false })).toEqual({ paidFrom: at(21), paidTo: at(1, 0, 1) });
+  });
+
+  it('an ordinary same-day session is kept as entered', () => {
+    expect(manualPaidWindow({ scanAt, paidFrom: '08:00', paidTo: '11:00', endsTomorrow: false, fromIsDefault: false })).toEqual({ paidFrom: at(8), paidTo: at(11) });
+    expect(manualPaidWindow({ scanAt, paidFrom: '', paidTo: 'x', endsTomorrow: false, fromIsDefault: true })).toEqual({ error: 'Enter paid to (HH:MM).' });
+  });
+
+  it('a top-up must be later than the current paid to unless it ends tomorrow', () => {
+    expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: false })).toHaveProperty('error');
+    expect(topUpPaidTo({ scanAt, paidTo: '09:30', currentPaidTo: at(10), endsTomorrow: true })).toEqual({ paidTo: at(9, 30, 1) });
+    expect(topUpPaidTo({ scanAt, paidTo: '12:00', currentPaidTo: at(10), endsTomorrow: false })).toEqual({ paidTo: at(12) });
+  });
+});
+
+describe('overnight payment across a daylight-saving change (Melbourne)', () => {
+  const tz = process.env.TZ;
+  beforeAll(() => { process.env.TZ = 'Australia/Melbourne'; });
+  afterAll(() => { process.env.TZ = tz; });
+
+  it('"Ends tomorrow" keeps the entered clock time when the clocks go back (5 Apr 2026) or forward (4 Oct 2026)', () => {
+    const april = new Date(2026, 3, 4, 22, 0).getTime();
+    expect(manualPaidWindow({ scanAt: april, paidFrom: '21:00', paidTo: '09:00', endsTomorrow: true, fromIsDefault: false })).toMatchObject({ paidTo: new Date(2026, 3, 5, 9, 0).getTime() });
+    const october = new Date(2026, 9, 3, 22, 0).getTime();
+    expect(topUpPaidTo({ scanAt: october, paidTo: '09:00', currentPaidTo: october, endsTomorrow: true })).toEqual({ paidTo: new Date(2026, 9, 4, 9, 0).getTime() });
+    expect(new Date(shiftDays(new Date(2026, 3, 5, 9, 0).getTime(), -1)).getHours()).toBe(9);
   });
 });

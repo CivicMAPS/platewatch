@@ -66,8 +66,20 @@ describe('infringement hand-off payload (WF-S31, requirements §10)', () => {
     const f = scan('s1', t(8, 20, 5), { payment: { status: 'not_found', source: 'easypark', sourceRef: '7514', checkedAt: t(8, 21), checkedBy: '4471' } });
     const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d21', list, observation: o702, scan: f, offer: offenceFor(o702, t(8, 20, 5))!, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: 'DTS512', at: t(10, 43) } });
     expect(errors(h)).toEqual([]);
-    expect(h.offence).toMatchObject({ suggestedCode: '702', basis: 'no_payment_found' });
+    expect(h.offence).toMatchObject({ suggestedCode: '702', basis: 'no_payment_found', internalVariant: 'no_payment', variantSource: 'derived' });
     expect(h.notesTemplate).toBe('No paid session found at 08:20:05 (EasyPark 7514 checked).');
+  });
+
+  it('702 paid session expired: internal expired_session (702e) derived with its basis; 701 carries no variant', () => {
+    const o: Observation = { ...obs, limitMinutes: 240, allowanceEndsAt: t(12, 20, 5), payment: { status: 'paid', paidTo: t(10, 45) } };
+    const s3 = scan('s3', t(11, 2), { outcome: 'within_allowance' });
+    const offer702 = offenceFor(o, s3.meta.capturedAt)!;
+    const h = buildHandoff({ handoffId: '6f1c2a9e-0b7d-4d43-9a51-2f4b8c1e7d23', list, observation: o, scan: s3, firstScan: first, offer: offer702, officerNumber: '4471', device: 'test', vehicle: VEH, plateSecondEntry: { plate: 'DTS512', at: t(11, 3) } });
+    expect(errors(h)).toEqual([]);
+    expect(h.offence).toMatchObject({ suggestedCode: '702', basis: 'paid_to_passed', internalVariant: 'expired_session', variantSource: 'derived', variantBasis: { shortfallMinutes: 17 } });
+    expect(h.times.timeFrom).toMatch(/T10:45:00\.000/);
+    expect(handoff.offence).not.toHaveProperty('internalVariant');
+    expect(errors({ ...handoff, offence: { ...handoff.offence, internalVariant: 'no_payment', variantSource: 'derived' } })).not.toEqual([]);
   });
 
   it('carries the look-alike the officer acted on (the wizard then asks for the plate check, OQ28-6)', () => {
